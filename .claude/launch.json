@@ -12,7 +12,7 @@
       "name": "agent",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:agent"],
-      "port": 8000
+      "port": 8001
     }
   ]
 }

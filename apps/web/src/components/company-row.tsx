@@ -24,7 +24,21 @@ export function CompanyRow({ company, checked }: { company: DirectoryCompany; ch
   return (
     <TableRow className={cn(company.hidden && "text-muted-foreground")}>
       <TableCell className="whitespace-normal">
-        <span className={cn("font-medium", company.hidden && "line-through")}>{company.name}</span>
+        {company.careers_url ? (
+          <a
+            href={company.careers_url}
+            target="_blank"
+            rel="noreferrer"
+            className={cn("font-medium hover:underline", company.hidden && "line-through")}
+          >
+            {company.name}
+          </a>
+        ) : (
+          <span className={cn("font-medium", company.hidden && "line-through")}>{company.name}</span>
+        )}
+        {company.kind && company.kind !== "employer" && (
+          <span className="ml-2 text-xs text-muted-foreground">{company.kind === "staffing" ? "Staffing agency" : "Aggregator"}</span>
+        )}
         {company.hidden && <span className="ml-2 text-xs">Hidden</span>}
         {error && <p className="mt-1 text-sm text-destructive">{error}</p>}
       </TableCell>

@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 from app.sources.base import WorkplaceType
@@ -11,13 +13,21 @@ class FitScore(BaseModel):
 
 
 class SearchRule(BaseModel):
-    """What a search looks for. Without a company it covers every company in the directory."""
+    """
+    What a search looks for. Without a company it covers every company in the
+    directory. With web_lookup, a company no board spelling matches is looked
+    up with a web search. Exclude drops jobs whose title has any of its words;
+    posted_within_days keeps jobs posted in that many days (undated ones pass).
+    """
 
     keywords: list[str] = Field(min_length=1)
     company: str | None = Field(default=None, max_length=100)
     workplace_types: list[WorkplaceType] = []
     location: str | None = Field(default=None, max_length=100)
     limit: int = Field(default=10, ge=1, le=25)
+    web_lookup: bool = False
+    exclude: list[str] = []
+    posted_within_days: Literal[1, 3, 7, 14, 30] | None = None
 
     @field_validator("keywords")
     @classmethod
@@ -26,6 +36,11 @@ class SearchRule(BaseModel):
         if not cleaned:
             raise ValueError("Enter at least one keyword.")
         return cleaned
+
+    @field_validator("exclude")
+    @classmethod
+    def drop_blank_exclusions(cls, exclude: list[str]) -> list[str]:
+        return [word.strip() for word in exclude if word.strip()]
 
     @field_validator("company", "location")
     @classmethod
@@ -50,3 +65,23 @@ class Usage(BaseModel):
         self.cache_read_input_tokens += getattr(usage, "cache_read_input_tokens", 0) or 0
         self.cache_creation_input_tokens += getattr(usage, "cache_creation_input_tokens", 0) or 0
         self.web_search_requests += getattr(getattr(usage, "server_tool_use", None), "web_search_requests", 0) or 0
+
+
+class CompanyName(BaseModel):
+    board: str = Field(description="The board value exactly as given, e.g. 'workday/cvshealth.wd1/cvs_health_careers'.")
+    name: str = Field(description="The employer's name as people write it.")
+    kind: Literal["employer", "staffing", "aggregator"] = Field(
+        description=(
+            "employer: hires people onto its own payroll to do its work, including consulting, IT services and "
+            "agency firms whose own employees serve clients. staffing: recruits people to fill jobs at other "
+            "companies (recruitment, contract staffing, talent placement). aggregator: reposts other companies' jobs."
+        )
+    )
+
+
+class CompanyNames(BaseModel):
+    companies: list[CompanyName]
+
+
+class Shortlist(BaseModel):
+    ids: list[int] = Field(description="Numbers of the best-fitting jobs, best first.")

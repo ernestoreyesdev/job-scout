@@ -1,9 +1,7 @@
 from datetime import UTC, datetime
 
-import httpx
-
-from app.sources.base import BoardNotFound, Posting, WorkplaceType, join_locations
-from app.sources.greenhouse import html_to_text
+from app.sources.base import JobSource, Posting, WorkplaceType
+from app.sources.text import country_name, html_to_text, join_locations, with_country
 
 API = "https://api.lever.co/v0/postings"
 WORKPLACE: dict[str, WorkplaceType] = {"onsite": "onsite", "hybrid": "hybrid", "remote": "remote"}
@@ -18,20 +16,15 @@ def _description(job: dict) -> str:
     return "\n\n".join(part.strip() for part in parts if part.strip())
 
 
-class LeverSource:
-    """Public Lever postings API; no credentials needed."""
+class LeverSource(JobSource):
+    """Lever postings API: one request returns every job with its description."""
 
     name = "lever"
-
-    def __init__(self, http: httpx.Client | None = None):
-        self._http = http or httpx.Client(timeout=30)
+    label = "Lever"
+    board_hosts = ("jobs.lever.co",)
 
     def fetch(self, board: str, company: str) -> list[Posting]:
-        res = self._http.get(f"{API}/{board}", params={"mode": "json"})
-        if res.status_code == 404:
-            raise BoardNotFound(f"Lever board '{board}' does not exist.")
-        res.raise_for_status()
-
+        jobs = self._get_json(board, f"{API}/{board}", {"mode": "json"})
         return [
             Posting(
                 source="lever",
@@ -40,12 +33,13 @@ class LeverSource:
                 title=job["text"],
                 company=company,
                 location=join_locations(
-                    (job.get("categories") or {}).get("location"), *(job.get("categories") or {}).get("allLocations") or []
+                    with_country((job.get("categories") or {}).get("location"), country_name(job.get("country"))),
+                    *(job.get("categories") or {}).get("allLocations") or [],
                 ),
                 url=job["hostedUrl"],
                 description=_description(job),
                 posted_at=datetime.fromtimestamp(job["createdAt"] / 1000, UTC) if job.get("createdAt") else None,
                 workplace_type=WORKPLACE.get(job.get("workplaceType") or ""),
             )
-            for job in res.json()
+            for job in jobs
         ]

@@ -1,9 +1,15 @@
 import { Suspense } from "react";
 
 import { ClearTracker } from "@/components/clear-tracker";
+import { JobListFilters } from "@/components/job-filters";
 import { JobsTable } from "@/components/jobs-table";
+import { Pager } from "@/components/pager";
+import { RecentRuns } from "@/components/recent-runs";
+import { RescoreButton } from "@/components/rescore-button";
 import { RunStatus } from "@/components/run-status";
 import { SearchForm } from "@/components/search-form";
+import { PAGE_SIZE } from "@/lib/db";
+import { parseJobQuery } from "@/lib/job-query";
 import { getSignedInSource } from "@/lib/repository";
 
 export default function TrackerPage({ searchParams }: PageProps<"/tracker">) {
@@ -26,22 +32,51 @@ export default function TrackerPage({ searchParams }: PageProps<"/tracker">) {
 }
 
 async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "searchParams">) {
-  const ascending = (await searchParams).sort === "asc";
+  const query = parseJobQuery(await searchParams);
   const { repository } = await getSignedInSource();
-  const [runs, jobs] = await Promise.all([repository.listRuns(1), repository.listTrackedJobs("tracker", ascending)]);
+  const [runs, jobs, resume, companies, trackerTotal] = await Promise.all([
+    repository.listRuns(10),
+    repository.listTrackedJobs("tracker", query.sort, query.page, query.filters),
+    repository.getPrimaryResume(),
+    repository.listTrackedCompanies("tracker"),
+    repository.countTrackerJobs(),
+  ]);
+  const stale = resume ? await repository.countStaleJobs(resume.id) : 0;
 
   return (
     <>
       {runs[0] && <RunStatus run={runs[0]} />}
+      <RecentRuns runs={runs} />
       <section className="mt-8">
-        {jobs.length === 0 ? (
+        {trackerTotal === 0 ? (
           <p className="text-sm text-muted-foreground">No jobs yet. Run a search to find some.</p>
         ) : (
           <>
-            <div className="mb-2 flex justify-end">
-              <ClearTracker count={jobs.length} />
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <JobListFilters basePath="/tracker" query={query} companies={companies} />
+              <div className="mb-3 flex flex-wrap items-center gap-3">
+                {stale > 0 && <RescoreButton count={stale} />}
+                <ClearTracker count={trackerTotal} />
+              </div>
             </div>
-            <JobsTable jobs={jobs} basePath="/tracker" ascending={ascending} showNotes={false} canRemoveFromTracker />
+            {jobs.total === 0 && <p className="text-sm text-muted-foreground">No jobs match these filters.</p>}
+            <JobsTable
+              jobs={jobs.items}
+              basePath="/tracker"
+              ascending={query.sort === "asc"}
+              params={query.params}
+              showNotes={false}
+              canRemoveFromTracker
+              offset={(jobs.page - 1) * PAGE_SIZE}
+              currentResumeId={resume?.id ?? null}
+            />
+            <Pager
+              basePath="/tracker"
+              page={jobs.page}
+              pageCount={jobs.pageCount}
+              total={jobs.total}
+              params={query.params}
+            />
           </>
         )}
       </section>

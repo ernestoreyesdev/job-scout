@@ -1,26 +1,17 @@
 import re
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, Protocol
+from typing import Any, ClassVar, Literal
+from urllib.parse import urlparse
 
+import httpx
 from pydantic import BaseModel
 
-SourceName = Literal["greenhouse", "lever", "ashby"]
+SourceName = Literal["greenhouse", "lever", "ashby", "smartrecruiters", "workable", "recruitee", "workday"]
 WorkplaceType = Literal["onsite", "hybrid", "remote"]
 
-WORKPLACE_LABELS: dict[str, str] = {"onsite": "on-site", "hybrid": "hybrid", "remote": "remote"}
-
-US_STATES = {
-    "al": "alabama", "ak": "alaska", "az": "arizona", "ar": "arkansas", "ca": "california", "co": "colorado",
-    "ct": "connecticut", "de": "delaware", "dc": "district of columbia", "fl": "florida", "ga": "georgia",
-    "hi": "hawaii", "id": "idaho", "il": "illinois", "in": "indiana", "ia": "iowa", "ks": "kansas",
-    "ky": "kentucky", "la": "louisiana", "me": "maine", "md": "maryland", "ma": "massachusetts", "mi": "michigan",
-    "mn": "minnesota", "ms": "mississippi", "mo": "missouri", "mt": "montana", "ne": "nebraska", "nv": "nevada",
-    "nh": "new hampshire", "nj": "new jersey", "nm": "new mexico", "ny": "new york", "nc": "north carolina",
-    "nd": "north dakota", "oh": "ohio", "ok": "oklahoma", "or": "oregon", "pa": "pennsylvania",
-    "ri": "rhode island", "sc": "south carolina", "sd": "south dakota", "tn": "tennessee", "tx": "texas",
-    "ut": "utah", "vt": "vermont", "va": "virginia", "wa": "washington", "wv": "west virginia",
-    "wi": "wisconsin", "wy": "wyoming",
-}
+BOARD_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
 class Posting(BaseModel):
@@ -38,6 +29,16 @@ class Posting(BaseModel):
     workplace_type: WorkplaceType | None = None
 
 
+@dataclass
+class CompanyBoard:
+    """The board a company was found on and its open postings, which can be none."""
+
+    source: SourceName
+    board: str
+    name: str
+    postings: list[Posting]
+
+
 class BoardNotFound(Exception):
     pass
 
@@ -46,85 +47,68 @@ class CompanyNotFound(Exception):
     pass
 
 
-class JobSource(Protocol):
-    name: SourceName
+class JobSource(ABC):
+    """
+    One applicant tracking system's public job board API. This class owns what
+    every system shares: the HTTP client, turning "not found" into BoardNotFound,
+    guessing board names from a company name and reading boards from job page
+    URLs. Each subclass only knows its endpoints and how to map its jobs to Posting.
+    """
 
+    name: ClassVar[SourceName]
+    label: ClassVar[str]
+    # Hosts of the system's public job pages, where the first path segment is the board.
+    board_hosts: ClassVar[tuple[str, ...]]
+    # Path segments on those hosts that are site pages rather than boards.
+    reserved_paths: ClassVar[frozenset[str]] = frozenset()
+    # Response codes meaning the board doesn't exist.
+    not_found_statuses: ClassVar[frozenset[int]] = frozenset({404})
+    # Most jobs one fetch can return; a board at this size may have more that weren't listed.
+    max_jobs: ClassVar[int | None] = None
+
+    def __init__(self, http: httpx.Client | None = None):
+        self._http = http or httpx.Client(timeout=30, headers={"User-Agent": "job-finder"})
+
+    @abstractmethod
     def fetch(self, board: str, company: str) -> list[Posting]:
-        """Open postings on `board`; `company` names them when the source doesn't."""
-        ...
+        """Open postings on `board`; `company` names them when the source doesn't. Raises BoardNotFound."""
 
+    def describe(self, posting: Posting) -> str:
+        """Full description of a posting; systems whose job lists omit it fetch it here."""
+        return posting.description
 
-def matches_keywords(posting: Posting, keywords: list[str]) -> bool:
-    """True when any keyword appears in the title or location; no keywords matches everything."""
-    if not keywords:
-        return True
-    haystack = f"{posting.title} {posting.location or ''}".lower()
-    return any(keyword.lower() in haystack for keyword in keywords)
+    def board_candidates(self, company: str) -> list[str]:
+        """Spellings companies commonly use as board names: 'Scale AI' -> scaleai, scale-ai."""
+        words = re.findall(r"[a-z0-9]+", company.lower())
+        candidates = ["".join(words), "-".join(words)]
+        return [c for i, c in enumerate(candidates) if c and c not in candidates[:i]]
 
+    def default_name(self, board: str) -> str:
+        """Company name to show for a board before its jobs say otherwise: 'scale-ai' -> 'Scale Ai'."""
+        return board.replace("-", " ").title()
 
-def join_locations(*locations: str | None) -> str | None:
-    """Distinct locations in order, joined with '; '."""
-    seen: list[str] = []
-    for location in locations:
-        if location and location.strip() and location.strip() not in seen:
-            seen.append(location.strip())
-    return "; ".join(seen) or None
+    def board_from_url(self, url: str) -> str | None:
+        """The board a public job page URL belongs to, or None when the URL isn't one of this system's boards."""
+        parsed = urlparse(url)
+        if (parsed.hostname or "") not in self.board_hosts:
+            return None
+        board = parsed.path.strip("/").split("/")[0].lower()
+        return board if BOARD_SLUG.match(board) and board not in self.reserved_paths else None
 
+    def _get_json(self, board: str, url: str, params: dict[str, Any] | None = None) -> Any:
+        """GET a board's JSON; a not-found status means the board doesn't exist on this system."""
+        return self._json(board, self._http.get(url, params=params))
 
-def workplace_from_location(location: str | None) -> WorkplaceType | None:
-    """For sources without a workplace field: 'Remote - US' is remote, 'Hybrid (NYC)' is hybrid."""
-    text = (location or "").lower()
-    if "remote" in text:
-        return "remote"
-    if "hybrid" in text:
-        return "hybrid"
-    return None
+    def _post_json(self, board: str, url: str, body: dict[str, Any]) -> Any:
+        """POST to a board's JSON endpoint; a not-found status means the board doesn't exist on this system."""
+        return self._json(board, self._http.post(url, json=body))
 
+    def _json(self, board: str, res: httpx.Response) -> Any:
+        if res.status_code in self.not_found_statuses:
+            raise BoardNotFound(f"{self.label} board '{board}' does not exist.")
+        res.raise_for_status()
+        return res.json()
 
-def matches_workplace(posting: Posting, workplace_types: list[str]) -> bool:
-    """
-    No types matches everything. A job whose type the source doesn't state
-    has an office location, so it counts as on-site or hybrid but not remote.
-    """
-    if not workplace_types:
-        return True
-    if posting.workplace_type is None:
-        return "onsite" in workplace_types or "hybrid" in workplace_types
-    return posting.workplace_type in workplace_types
-
-
-def matches_location(posting: Posting, location: str | None) -> bool:
-    """
-    City or state text against the posting's locations; 'Florida' also matches
-    'FL' and the reverse. Locations are taken as US places, so a remote job
-    matches when it's open to the US.
-    """
-    if not location:
-        return True
-    if posting.workplace_type == "remote":
-        return remote_in_us(posting.location)
-    text = (posting.location or "").lower()
-    query = " ".join(location.lower().split())
-    if query in US_STATES:
-        abbreviation, name = query, US_STATES[query]
-    else:
-        abbreviation = next((code for code, state in US_STATES.items() if state == query), None)
-        name = query
-    if name in text:
-        return True
-    return abbreviation is not None and abbreviation in re.findall(r"[a-z]+", text)
-
-
-def remote_in_us(location: str | None) -> bool:
-    """
-    True for remote locations open to the US: no country named ('Remote',
-    'Anywhere'), the US itself, or a US state ('Remote - FL'). State codes
-    count only in capitals so 'in' or 'or' in prose don't match.
-    """
-    lowered = (location or "").lower()
-    words = set(re.findall(r"[a-z]+", lowered)) - {"remote", "anywhere", "worldwide", "global", "only", "based", "from", "the"}
-    if not words or words & {"us", "usa"} or "united states" in lowered or "north america" in lowered:
-        return True
-    if any(state in lowered for state in US_STATES.values()):
-        return True
-    return any(code.lower() in US_STATES for code in re.findall(r"\b[A-Z]{2}\b", location or ""))
+    def careers_url(self, board: str) -> str:
+        """The company's public job listing page on this system."""
+        return f"https://{self.board_hosts[0]}/{board}"

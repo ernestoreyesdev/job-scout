@@ -4,7 +4,9 @@ import { createClient } from "@/lib/supabase/server";
 
 /** Turns the magic-link code into a session cookie, then lands on the tracker. */
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams, protocol, host } = new URL(request.url);
+  // request.url names the dev server's own host; the Host header is the address the browser used.
+  const origin = `${protocol}//${request.headers.get("host") ?? host}`;
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/tracker";
 

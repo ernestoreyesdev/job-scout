@@ -6,6 +6,7 @@ import { unstable_rethrow } from "next/navigation";
 import {
   APPLICATION_STATUSES,
   MAX_JOBS_PER_SEARCH,
+  POSTED_WITHIN_DAYS,
   WORKPLACE_TYPES,
   type ApplicationStatusRow,
   type SearchRuleInput,
@@ -89,12 +90,26 @@ export async function startSearch(formData: FormData): Promise<ActionResult> {
       throw new Error(`Max jobs must be a whole number from 1 to ${MAX_JOBS_PER_SEARCH}.`);
     }
 
+    const exclude = text(formData.get("exclude"))
+      .split(",")
+      .map((word) => word.trim())
+      .filter(Boolean);
+
+    const postedWithin = text(formData.get("postedWithin"));
+    const postedWithinDays = postedWithin ? Number(postedWithin) : null;
+    if (postedWithinDays !== null && !(POSTED_WITHIN_DAYS as readonly number[]).includes(postedWithinDays)) {
+      throw new Error("Unknown posted-within period.");
+    }
+
     const rule: SearchRuleInput = {
       keywords,
       company,
       workplace_types: workplaceTypes as WorkplaceTypeRow[],
       location,
       limit,
+      web_lookup: false,
+      exclude,
+      posted_within_days: postedWithinDays as SearchRuleInput["posted_within_days"],
     };
     await callAgent("/runs/search", { method: "POST", body: rule });
   });
@@ -116,8 +131,8 @@ export async function updateApplication(id: string, formData: FormData): Promise
   });
 }
 
-/** Starts a new run with the same rule as a failed one. */
-export async function rerunSearch(runId: string): Promise<ActionResult> {
+/** Starts a new run with the same rule as a failed one, optionally looking the company up on the web. */
+export async function rerunSearch(runId: string, webLookup = false): Promise<ActionResult> {
   return run("/tracker", async () => {
     const { repository } = await getSignedInSource();
     const previous = await repository.getRun(runId);
@@ -133,6 +148,9 @@ export async function rerunSearch(runId: string): Promise<ActionResult> {
       workplace_types: input.workplace_types ?? [],
       location: input.location ?? null,
       limit: input.limit ?? 10,
+      web_lookup: webLookup || (input.web_lookup ?? false),
+      exclude: input.exclude ?? [],
+      posted_within_days: input.posted_within_days ?? null,
     };
     await callAgent("/runs/search", { method: "POST", body: rule });
   });
@@ -166,5 +184,12 @@ export async function setCompanyHidden(companyId: string, hidden: boolean): Prom
   return run("/companies", async () => {
     const { repository } = await getSignedInSource();
     await repository.setCompanyHidden(companyId, hidden);
+  });
+}
+
+/** Re-scores the Tracker and Jobs entries scored against an older resume. */
+export async function rescoreJobs(): Promise<ActionResult> {
+  return run(["/tracker", "/jobs"], async () => {
+    await callAgent("/runs/rescore", { method: "POST" });
   });
 }

@@ -42,3 +42,18 @@ def test_unknown_board_raises():
 
     with pytest.raises(BoardNotFound):
         AshbySource().fetch("nope", "Nope")
+
+
+@respx.mock
+def test_each_location_gets_its_address_country():
+    job = {
+        **JOB,
+        "location": "Tokyo",
+        "address": {"postalAddress": {"addressCountry": "Japan"}},
+        "secondaryLocations": [{"location": "Austin, TX", "address": {"postalAddress": {"addressCountry": "United States"}}}],
+    }
+    respx.get(f"{API}/acme").mock(return_value=httpx.Response(200, json={"jobs": [job]}))
+
+    [posting] = AshbySource().fetch("acme", "Acme")
+
+    assert posting.location == "Tokyo, Japan; Austin, TX, United States"

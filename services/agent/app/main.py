@@ -1,23 +1,38 @@
 import io
 import logging
-from datetime import UTC, datetime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 import anthropic
+import httpx
 from docx import Document
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from pypdf import PdfReader
 
-from app.agents.orchestrator import SearchResult, run_search as orchestrate_search
+from app.agents.orchestrator import SearchResult, rescore as orchestrate_rescore, run_search as orchestrate_search
 from app.agents.schemas import AnthropicKeyRequest, SearchRule, Usage
 from app.auth import CurrentUser, current_user
 from app.config import Settings, get_settings
 from app.crypto import decrypt, encrypt, key_hint
-from app.db import service_db, user_db
+from app.db import Rest, service_db, user_db
+from app.sources.base import CompanyNotFound
 
 logger = logging.getLogger("agent")
 
-app = FastAPI(title="job-finder agent")
+RUN_TIME_LIMIT = timedelta(minutes=10)
+UNFINISHED = "in.(queued,running)"
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Searches run inside this process, so any still unfinished at startup were cut off by a restart."""
+    fail_runs(service_db(get_settings()), {"status": UNFINISHED}, "Stopped when the agent restarted. Re-run it.")
+    yield
+
+
+app = FastAPI(title="job-finder agent", lifespan=lifespan)
 
 User = Annotated[CurrentUser, Depends(current_user)]
 Config = Annotated[Settings, Depends(get_settings)]
@@ -98,7 +113,14 @@ def extract_resume(resume_id: str, user: User, settings: Config) -> dict[str, An
 @app.post("/runs/search", status_code=202)
 def start_search(body: SearchRule, user: User, settings: Config, background: BackgroundTasks) -> dict[str, str]:
     db = user_db(settings, user.access_token)
-    run = db.insert("agent_runs", {"user_id": user.id, "kind": "search", "input": body.model_dump()})[0]
+    cutoff = (datetime.now(UTC) - RUN_TIME_LIMIT).isoformat()
+    fail_runs(db, {"status": UNFINISHED, "created_at": f"lt.{cutoff}"}, "Stopped after running for more than 10 minutes.")
+    try:
+        run = db.insert("agent_runs", {"user_id": user.id, "kind": "search", "input": body.model_dump()})[0]
+    except httpx.HTTPStatusError as error:
+        if error.response.status_code == 409:
+            raise HTTPException(409, "A search is already running. Wait for it to finish.")
+        raise
     background.add_task(run_search, run["id"], body, user, settings)
     return {"run_id": run["id"]}
 
@@ -137,11 +159,13 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
             usage=usage,
             report=report,
         )
-        status, error = "done", None
+        status, error, error_code = "done", None, None
         progress = summarize(result)
+    except CompanyNotFound as exc:
+        status, error, error_code = "failed", str(exc), "company_not_found"
     except Exception as exc:
         logger.exception("search run %s failed", run_id)
-        status, error = "failed", str(exc) or exc.__class__.__name__
+        status, error, error_code = "failed", str(exc) or exc.__class__.__name__, None
 
     db.update(
         "agent_runs",
@@ -149,6 +173,7 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
         {
             "status": status,
             "error": error,
+            "error_code": error_code,
             "progress": progress,
             "usage": usage.model_dump(),
             "finished_at": datetime.now(UTC).isoformat(),
@@ -165,12 +190,100 @@ def extract_pdf_text(data: bytes) -> str:
 
 def summarize(result: SearchResult) -> str:
     """Final one-line progress for a finished search."""
+    if result.company and result.found == 0:
+        return f"Found {result.company}, but it has no open jobs listed."
     companies = "1 company" if result.companies == 1 else f"{result.companies} companies"
+    unreachable = f" Couldn't reach {result.unreachable} more." if result.unreachable else ""
     if result.matched == 0:
-        return f"Found {result.found} open jobs at {companies}, none match."
-    parts = [f"Scored and saved {result.scored} jobs from {companies}"]
+        return f"Found {result.found} open jobs at {companies}, none match.{unreachable}"
+    if result.kept < result.scored:
+        parts = [f"Scored {result.scored} jobs from {companies} and kept the top {result.kept}"]
+    else:
+        parts = [f"Scored and saved {result.scored} jobs from {companies}"]
     if result.failed:
         parts.append(f"{result.failed} failed")
     if result.already_tracked:
         parts.append(f"skipped {result.already_tracked} already tracked")
+    if result.unreachable:
+        parts.append(f"couldn't reach {result.unreachable} {'company' if result.unreachable == 1 else 'companies'}")
     return ", ".join(parts) + "."
+
+
+def fail_runs(db: Rest, filters: dict[str, str], error: str) -> None:
+    """Marks matching unfinished runs as failed so they stop showing as running."""
+    db.update(
+        "agent_runs",
+        filters,
+        {"status": "failed", "error": error, "progress": None, "finished_at": datetime.now(UTC).isoformat()},
+    )
+
+
+@app.post("/runs/rescore", status_code=202)
+def start_rescore(user: User, settings: Config, background: BackgroundTasks) -> dict[str, str]:
+    db = user_db(settings, user.access_token)
+    cutoff = (datetime.now(UTC) - RUN_TIME_LIMIT).isoformat()
+    fail_runs(db, {"status": UNFINISHED, "created_at": f"lt.{cutoff}"}, "Stopped after running for more than 10 minutes.")
+    try:
+        run = db.insert("agent_runs", {"user_id": user.id, "kind": "rescore", "input": {}})[0]
+    except httpx.HTTPStatusError as error:
+        if error.response.status_code == 409:
+            raise HTTPException(409, "A search is already running. Wait for it to finish.")
+        raise
+    background.add_task(run_rescore, run["id"], user, settings)
+    return {"run_id": run["id"]}
+
+
+def run_rescore(run_id: str, user: CurrentUser, settings: Settings) -> None:
+    db = user_db(settings, user.access_token)
+    service = service_db(settings)
+    usage = Usage()
+    db.update("agent_runs", {"id": f"eq.{run_id}"}, {"status": "running", "progress": "Starting…"})
+
+    def report(message: str) -> None:
+        db.update("agent_runs", {"id": f"eq.{run_id}"}, {"progress": message})
+
+    progress = None
+    try:
+        credentials = service.select(
+            "api_credentials",
+            {"user_id": f"eq.{user.id}", "provider": "eq.anthropic", "select": "ciphertext"},
+        )
+        if not credentials:
+            raise RuntimeError("Add your Anthropic API key in Settings first.")
+
+        resumes = db.select("resumes", {"is_primary": "eq.true", "select": "id,text"})
+        if not resumes or not resumes[0]["text"]:
+            raise RuntimeError("Upload a resume first.")
+
+        count = orchestrate_rescore(
+            client=make_client(decrypt(credentials[0]["ciphertext"], settings.agent_encryption_key)),
+            settings=settings,
+            resume_id=resumes[0]["id"],
+            resume_text=resumes[0]["text"],
+            user_id=user.id,
+            user=db,
+            service=service,
+            usage=usage,
+            report=report,
+        )
+        status, error = "done", None
+        progress = (
+            f"Re-scored {count} {'job' if count == 1 else 'jobs'} with your current resume."
+            if count
+            else "Every job is already scored with your current resume."
+        )
+    except Exception as exc:
+        logger.exception("rescore run %s failed", run_id)
+        status, error = "failed", str(exc) or exc.__class__.__name__
+
+    db.update(
+        "agent_runs",
+        {"id": f"eq.{run_id}"},
+        {
+            "status": status,
+            "error": error,
+            "progress": progress,
+            "usage": usage.model_dump(),
+            "finished_at": datetime.now(UTC).isoformat(),
+        },
+    )

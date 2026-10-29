@@ -2,7 +2,7 @@ import logging
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from app.agents.schemas import FitScore, Usage
@@ -21,8 +21,11 @@ class ScoringError(Exception):
 
 @dataclass
 class ScoringResult:
+    """How many jobs were scored and failed, and each scored posting id's score."""
+
     scored: int
     failed: int
+    scores: dict[str, int] = field(default_factory=dict)
 
 
 def score_posting(client: Any, model: str, effort: str, resume_text: str, posting: Posting) -> tuple[FitScore, Any]:
@@ -60,6 +63,7 @@ def score_and_save(
     """
     lock = threading.Lock()
     done = {"scored": 0, "failed": 0}
+    scores: dict[str, int] = {}
 
     def score_one(posting_id: str, posting: Posting) -> None:
         fit, call_usage = score_posting(client, model, effort, resume_text, posting)
@@ -78,6 +82,7 @@ def score_and_save(
         )
         with lock:
             usage.add(call_usage)
+            scores[posting_id] = fit.score
             done["scored"] += 1
             report(f"Scored {done['scored']} of {len(todo)}: {posting.title} at {posting.company}")
 
@@ -95,4 +100,4 @@ def score_and_save(
                 with lock:
                     done["failed"] += 1
 
-    return ScoringResult(done["scored"], done["failed"])
+    return ScoringResult(done["scored"], done["failed"], scores)

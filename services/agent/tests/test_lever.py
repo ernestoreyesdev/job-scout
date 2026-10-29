@@ -44,3 +44,13 @@ def test_unknown_board_raises():
 
     with pytest.raises(BoardNotFound):
         LeverSource().fetch("nope", "Nope")
+
+
+@respx.mock
+def test_the_country_code_is_named_on_the_main_location():
+    job = {**JOB, "country": "IN", "categories": {"location": "Bengaluru"}}
+    respx.get(f"{API}/acme").mock(return_value=httpx.Response(200, json=[job]))
+
+    [posting] = LeverSource().fetch("acme", "Acme")
+
+    assert posting.location == "Bengaluru, India"

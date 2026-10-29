@@ -1,23 +1,41 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 
 import type {
   AgentRunRow,
+  ApplicationEventRow,
   ApplicationRow,
   ApplicationStatusRow,
   CompanyRow,
   Database,
+  JobSort,
   PostingRow,
   ProfileRow,
   ResumeRow,
 } from "./schema";
+import { SKIPPED_COMPANY_KINDS } from "./schema";
 
 export type JobFinderClient = SupabaseClient<Database>;
 
-export type TrackedJob = ApplicationRow & { posting: PostingRow };
+export type TrackedJob = ApplicationRow & {
+  posting: PostingRow;
+  events: Pick<ApplicationEventRow, "status" | "changed_at">[];
+};
+
+/** Narrows the Tracker or Jobs list; every field is optional. */
+export type JobFilters = { status?: ApplicationStatusRow; company?: string; hideClosed?: boolean };
 
 export type DirectoryCompany = CompanyRow & { hidden: boolean };
 
 export type ApplicationPatch = { status?: ApplicationStatusRow; notes?: string | null };
+
+/** One page of a list: its rows, the page number shown and how many pages there are. */
+export type Page<T> = { items: T[]; page: number; pageCount: number; total: number };
+
+export const PAGE_SIZE = 10;
+
+export const COMPANIES_PAGE_SIZE = 15;
+
+type PageResult<T> = { data: T[] | null; error: PostgrestError | null; count: number | null };
 
 const RESUME_BUCKET = "resumes";
 
@@ -79,18 +97,34 @@ export class JobFinderRepository {
   }
 
   /** "tracker" lists jobs not removed from the Tracker; "jobs" lists every job the user has moved past new. */
-  async listTrackedJobs(view: "tracker" | "jobs", scoreAscending = false): Promise<TrackedJob[]> {
-    const query = this.client.from("applications").select("*, posting:postings(*)");
-    const { data, error } = await (view === "tracker" ? query.eq("in_tracker", true) : query.neq("status", "new")).order(
-      "fit_score",
-      { ascending: scoreAscending, nullsFirst: false },
-    );
-    if (error) throw error;
-    return data;
+  async listTrackedJobs(
+    view: "tracker" | "jobs",
+    sort: JobSort = "desc",
+    page = 1,
+    filters: JobFilters = {},
+  ): Promise<Page<TrackedJob>> {
+    return this.paged(page, (from, to) => {
+      let query = this.client
+        .from("applications")
+        .select("*, posting:postings!inner(*), events:application_events(status, changed_at)", { count: "exact" });
+      query = view === "tracker" ? query.eq("in_tracker", true) : query.neq("status", "new");
+      if (filters.status) query = query.eq("status", filters.status);
+      if (filters.company) query = query.eq("posting.company", filters.company);
+      if (filters.hideClosed) query = query.is("posting.closed_at", null);
+      const ordered =
+        sort === "posted"
+          ? query.order("posting(posted_at)", { ascending: false, nullsFirst: false })
+          : sort === "added"
+            ? query.order("created_at", { ascending: false })
+            : query.order("fit_score", { ascending: sort === "asc", nullsFirst: false });
+      return ordered.order("id").order("changed_at", { referencedTable: "events" }).range(from, to);
+    });
   }
 
+  /** Setting a job back to "new" also returns it to the Tracker, since Jobs only lists jobs past new. */
   async updateApplication(id: string, patch: ApplicationPatch): Promise<void> {
-    const { error } = await this.client.from("applications").update(patch).eq("id", id);
+    const update = patch.status === "new" ? { ...patch, in_tracker: true } : patch;
+    const { error } = await this.client.from("applications").update(update).eq("id", id);
     if (error) throw error;
   }
 
@@ -137,26 +171,89 @@ export class JobFinderRepository {
   }
 
   /** The shared directory, most open jobs first, flagged with whether this user hid each company. */
-  async listCompanies(): Promise<DirectoryCompany[]> {
+  async listCompanies(page = 1): Promise<Page<DirectoryCompany>> {
     const [companies, hidden] = await Promise.all([
-      this.client.from("companies").select("*").order("open_jobs", { ascending: false }),
-      this.client.from("hidden_companies").select("company_id"),
+      this.paged(
+        page,
+        (from, to) =>
+          this.client
+            .from("companies")
+            .select("*", { count: "exact" })
+            .order("open_jobs", { ascending: false })
+            .order("id")
+            .range(from, to),
+        COMPANIES_PAGE_SIZE,
+      ),
+      this.client.from("hidden_companies").select("company_id, hidden"),
     ]);
-    if (companies.error) throw companies.error;
     if (hidden.error) throw hidden.error;
-    const hiddenIds = new Set(hidden.data.map((row) => row.company_id));
-    return companies.data.map((company) => ({ ...company, hidden: hiddenIds.has(company.id) }));
+    const choices = new Map(hidden.data.map((row) => [row.company_id, row.hidden]));
+    return {
+      ...companies,
+      items: companies.items.map((company) => ({
+        ...company,
+        hidden: choices.get(company.id) ?? (company.kind !== null && SKIPPED_COMPANY_KINDS.includes(company.kind)),
+      })),
+    };
   }
 
+  /** Records the user's choice, which overrides the default of hiding staffing agencies and aggregators. */
   async setCompanyHidden(companyId: string, hidden: boolean): Promise<void> {
-    if (hidden) {
-      const { error } = await this.client
-        .from("hidden_companies")
-        .upsert({ user_id: await this.userId(), company_id: companyId });
-      if (error) throw error;
-      return;
-    }
-    const { error } = await this.client.from("hidden_companies").delete().eq("company_id", companyId);
+    const { error } = await this.client
+      .from("hidden_companies")
+      .upsert({ user_id: await this.userId(), company_id: companyId, hidden });
     if (error) throw error;
+  }
+
+  /**
+   * Loads one page of `size` rows with the total count. A page past the end
+   * (the last row of the last page was just deleted) falls back to the last page.
+   */
+  private async paged<T>(
+    page: number,
+    load: (from: number, to: number) => PromiseLike<PageResult<T>>,
+    size = PAGE_SIZE,
+  ): Promise<Page<T>> {
+    const fetchPage = (n: number) => load((n - 1) * size, n * size - 1);
+    let current = Math.max(1, Math.floor(page));
+    let result = await fetchPage(current);
+    if (result.error?.code === "PGRST103" && current > 1) {
+      const first = await fetchPage(1);
+      if (first.error) throw first.error;
+      current = Math.max(1, Math.ceil((first.count ?? 0) / size));
+      result = current === 1 ? first : await fetchPage(current);
+    }
+    if (result.error) throw result.error;
+    const total = result.count ?? 0;
+    return { items: result.data ?? [], page: current, pageCount: Math.max(1, Math.ceil(total / size)), total };
+  }
+
+  /** Jobs on the Tracker or Jobs that were scored against a resume other than `resumeId`. */
+  async countStaleJobs(resumeId: string): Promise<number> {
+    const { count, error } = await this.client
+      .from("applications")
+      .select("id", { count: "exact", head: true })
+      .neq("resume_id", resumeId)
+      .or("in_tracker.eq.true,status.neq.new");
+    if (error) throw error;
+    return count ?? 0;
+  }
+
+  /** Companies of the jobs in a view, for its company filter. */
+  async listTrackedCompanies(view: "tracker" | "jobs"): Promise<string[]> {
+    const query = this.client.from("applications").select("posting:postings!inner(company)");
+    const { data, error } = await (view === "tracker" ? query.eq("in_tracker", true) : query.neq("status", "new"));
+    if (error) throw error;
+    return [...new Set(data.map((row) => row.posting.company))].sort((a, b) => a.localeCompare(b));
+  }
+
+  /** Every job on the Tracker, whatever the filters, since Clear empties all of them. */
+  async countTrackerJobs(): Promise<number> {
+    const { count, error } = await this.client
+      .from("applications")
+      .select("id", { count: "exact", head: true })
+      .eq("in_tracker", true);
+    if (error) throw error;
+    return count ?? 0;
   }
 }

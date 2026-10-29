@@ -5,7 +5,8 @@ from typing import Any
 from app.agents.schemas import FitScore, Usage
 from app.agents.scoring.prompts import FIT_SYSTEM, fit_message
 from app.db import Rest
-from app.sources.base import Posting, matches_keywords
+from app.sources.base import Posting
+from app.sources.filters import matches_keywords
 
 # Refusals are rerouted server-side by category instead of failing the call.
 FALLBACK_BETAS = ["server-side-fallback-2026-07-01"]

@@ -2,8 +2,10 @@ import httpx
 import pytest
 import respx
 
-from app.sources.base import BoardNotFound, Posting, matches_keywords
-from app.sources.greenhouse import API, GreenhouseSource, html_to_text
+from app.sources.base import BoardNotFound, Posting
+from app.sources.filters import matches_keywords
+from app.sources.greenhouse import API, GreenhouseSource
+from app.sources.text import html_to_text
 
 JOB = {
     "id": 5456619008,
@@ -71,11 +73,12 @@ def _posting(title: str, location: str | None) -> Posting:
     )
 
 
-def test_keywords_match_title_or_location_case_insensitively():
-    posting = _posting("Senior Software Engineer", "Remote, US")
+def test_keywords_match_whole_words_in_the_title_case_insensitively():
+    posting = _posting("Senior Software Engineers", "Remote, US")
 
     assert matches_keywords(posting, [])
-    assert matches_keywords(posting, ["engineer"])
-    assert matches_keywords(posting, ["designer", "REMOTE"])
-    assert not matches_keywords(posting, ["designer"])
-    assert not matches_keywords(_posting("Designer", None), ["remote"])
+    assert matches_keywords(posting, ["ENGINEER"])
+    assert matches_keywords(posting, ["designer", "software engineer"])
+    assert not matches_keywords(posting, ["designer", "remote"])
+    assert not matches_keywords(_posting("Engineering Manager", None), ["engineer"])
+    assert not matches_keywords(_posting("JavaScript Developer", None), ["java"])

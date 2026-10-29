@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "turbo run dev",
     "dev:web": "npm run dev -w @job-finder/web",
-    "dev:agent": "cd services/agent && uv run fastapi dev app/main.py --port 8000",
+    "dev:agent": "cd services/agent && uv run fastapi dev app/main.py --port 8001",
     "test:agent": "cd services/agent && uv run pytest",
     "build": "turbo run build",
     "lint": "turbo run lint",

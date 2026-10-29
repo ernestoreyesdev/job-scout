@@ -23,7 +23,7 @@ cd services/agent && uv sync && cd ../..
 Copy `apps/web/.env.example` to `apps/web/.env.local` and `services/agent/.env.example` to `services/agent/.env`, filling the keys from `npx supabase status`.
 
 ```bash
-npm run dev:agent   # http://127.0.0.1:8000
+npm run dev:agent   # http://127.0.0.1:8001
 npm run dev:web     # http://localhost:3000
 ```
 

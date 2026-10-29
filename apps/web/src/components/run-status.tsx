@@ -3,10 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
-import { rerunSearch } from "@/app/actions";
+import { rerunSearch, rescoreJobs } from "@/app/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { AgentRunRow, SearchRuleInput } from "@/lib/db";
+import { describeRun } from "@/lib/runs";
 
 const REFRESH_MS = 3000;
 
@@ -17,9 +18,9 @@ export function RunStatus({ run }: { run: AgentRunRow }) {
   const [rerunError, setRerunError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  function rerun() {
+  function rerun(webLookup: boolean) {
     startTransition(async () => {
-      const result = await rerunSearch(run.id);
+      const result = run.kind === "rescore" ? await rescoreJobs() : await rerunSearch(run.id, webLookup);
       setRerunError(result.ok ? null : (result.error ?? "Could not re-run the search."));
     });
   }
@@ -33,16 +34,15 @@ export function RunStatus({ run }: { run: AgentRunRow }) {
 
   const input = run.input as Partial<SearchRuleInput>;
   const tokens = run.usage ? run.usage.input_tokens + run.usage.output_tokens : null;
+  const offerWebLookup = run.error_code === "company_not_found" && !!input.company && !input.web_lookup;
+  const { title, detail } = describeRun(run);
 
   return (
     <div className="mt-6 flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 text-sm">
       <Badge variant={run.status === "failed" ? "destructive" : active ? "secondary" : "default"}>{run.status}</Badge>
       <span>
-        <span className="font-medium">{input.company || "All companies"}</span>
-        {input.keywords?.length ? ` for ${input.keywords.join(", ")}` : ""}
-        {input.workplace_types?.length ? `, location_type=${input.workplace_types.join("/")}` : ""}
-        {input.location ? `, location=${input.location}` : ""}
-        {input.limit !== undefined && `, max_jobs=${input.limit}`}
+        <span className="font-medium">{title}</span>
+        {detail}
       </span>
       {tokens !== null && <span className="text-muted-foreground">{tokens.toLocaleString()} tokens</span>}
       {run.progress && (
@@ -51,8 +51,14 @@ export function RunStatus({ run }: { run: AgentRunRow }) {
         </span>
       )}
       {run.status === "failed" && (
-        <Button variant="outline" size="sm" className={run.progress ? undefined : "ml-auto"} onClick={rerun} disabled={pending}>
-          {pending ? "Starting…" : "Re-run"}
+        <Button
+          variant="outline"
+          size="sm"
+          className={run.progress ? undefined : "ml-auto"}
+          onClick={() => rerun(offerWebLookup)}
+          disabled={pending}
+        >
+          {pending ? "Starting…" : offerWebLookup ? `Search the web for ${input.company}` : "Re-run"}
         </Button>
       )}
       {run.error && <span className="w-full text-destructive">{run.error}</span>}

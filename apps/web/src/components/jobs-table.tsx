@@ -4,20 +4,32 @@ import Link from "next/link";
 import { JobRow } from "@/components/job-row";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { TrackedJob } from "@/lib/db";
+import { jobListHref } from "@/lib/job-query";
 
-/** Numbered jobs table with a Score header that flips the sort order through `?sort=`. */
+const DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+
+/**
+ * Numbered jobs table with a Score header that flips the score sort through
+ * `?sort=`, keeping the other list settings in `params`; numbering starts after `offset`.
+ */
 export function JobsTable({
   jobs,
   basePath,
   ascending,
+  params,
   showNotes,
   canRemoveFromTracker,
+  offset,
+  currentResumeId,
 }: {
   jobs: TrackedJob[];
   basePath: string;
   ascending: boolean;
+  params: Record<string, string>;
   showNotes: boolean;
   canRemoveFromTracker: boolean;
+  offset: number;
+  currentResumeId: string | null;
 }) {
   return (
     <Table>
@@ -26,7 +38,7 @@ export function JobsTable({
           <TableHead className="w-10">#</TableHead>
           <TableHead className="w-20">
             <Link
-              href={`${basePath}?sort=${ascending ? "desc" : "asc"}`}
+              href={jobListHref(basePath, { ...params, sort: ascending ? "" : "asc" })}
               className="inline-flex items-center gap-1 hover:text-foreground"
               aria-label={ascending ? "Sort by score, highest first" : "Sort by score, lowest first"}
             >
@@ -47,9 +59,12 @@ export function JobsTable({
           <JobRow
             key={job.id}
             job={job}
-            position={index + 1}
+            position={offset + index + 1}
             showNotes={showNotes}
             canRemoveFromTracker={canRemoveFromTracker}
+            staleResume={currentResumeId !== null && job.resume_id !== null && job.resume_id !== currentResumeId}
+            closedOn={job.posting.closed_at ? DAY.format(new Date(job.posting.closed_at)) : null}
+            timeline={job.events.map((event) => `${event.status === "new" ? "added" : event.status} ${DAY.format(new Date(event.changed_at))}`)}
           />
         ))}
       </TableBody>

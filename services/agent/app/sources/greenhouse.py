@@ -1,52 +1,19 @@
-import html
-from html.parser import HTMLParser
-
-import httpx
-
-from app.sources.base import BoardNotFound, Posting, workplace_from_location
+from app.sources.base import JobSource, Posting
+from app.sources.text import html_to_text, workplace_from_location
 
 API = "https://boards-api.greenhouse.io/v1/boards"
 
 
-class _TextExtractor(HTMLParser):
-    BLOCKS = {"p", "div", "br", "li", "h1", "h2", "h3", "h4", "tr"}
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.parts: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in self.BLOCKS:
-            self.parts.append("\n")
-        if tag == "li":
-            self.parts.append("- ")
-
-    def handle_data(self, data: str) -> None:
-        self.parts.append(data)
-
-
-def html_to_text(content: str) -> str:
-    """Greenhouse returns entity-escaped HTML; unescape it, then keep only the text."""
-    parser = _TextExtractor()
-    parser.feed(html.unescape(content))
-    lines = (line.strip() for line in "".join(parser.parts).splitlines())
-    return "\n".join(line for line in lines if line)
-
-
-class GreenhouseSource:
-    """Public Greenhouse job board API; no credentials needed."""
+class GreenhouseSource(JobSource):
+    """Greenhouse job board API: one request returns every job with its description."""
 
     name = "greenhouse"
-
-    def __init__(self, http: httpx.Client | None = None):
-        self._http = http or httpx.Client(timeout=30)
+    label = "Greenhouse"
+    board_hosts = ("boards.greenhouse.io", "job-boards.greenhouse.io")
+    reserved_paths = frozenset({"embed", "job-openings", "jobs"})
 
     def fetch(self, board: str, company: str) -> list[Posting]:
-        res = self._http.get(f"{API}/{board}/jobs", params={"content": "true"})
-        if res.status_code == 404:
-            raise BoardNotFound(f"Greenhouse board '{board}' does not exist.")
-        res.raise_for_status()
-
+        data = self._get_json(board, f"{API}/{board}/jobs", {"content": "true"})
         return [
             Posting(
                 source="greenhouse",
@@ -60,5 +27,8 @@ class GreenhouseSource:
                 posted_at=job.get("first_published") or job.get("updated_at"),
                 workplace_type=workplace_from_location((job.get("location") or {}).get("name")),
             )
-            for job in res.json()["jobs"]
+            for job in data["jobs"]
         ]
+
+    def careers_url(self, board: str) -> str:
+        return f"https://job-boards.greenhouse.io/{board}"

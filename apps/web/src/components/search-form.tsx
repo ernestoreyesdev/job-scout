@@ -7,7 +7,7 @@ import { startSearch } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MAX_JOBS_PER_SEARCH, WORKPLACE_TYPES } from "@/lib/db";
+import { MAX_JOBS_PER_SEARCH, POSTED_WITHIN_DAYS, WORKPLACE_TYPES } from "@/lib/db";
 
 const WORKPLACE_LABELS = { onsite: "On-site", hybrid: "Hybrid", remote: "Remote" } as const;
 
@@ -60,6 +60,26 @@ export function SearchForm() {
           <div className="space-y-1">
             <Label htmlFor="location">Location</Label>
             <Input id="location" name="location" placeholder="City or state" className="w-48" />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="exclude">Exclude (comma separated)</Label>
+            <Input id="exclude" name="exclude" placeholder="intern, manager" className="w-56" />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="postedWithin">Posted within</Label>
+            <select
+              id="postedWithin"
+              name="postedWithin"
+              defaultValue=""
+              className="h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs"
+            >
+              <option value="">Any time</option>
+              {POSTED_WITHIN_DAYS.map((days) => (
+                <option key={days} value={days}>
+                  {days === 1 ? "1 day" : `${days} days`}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="space-y-1">
             <Label htmlFor="limit">Max jobs (1 to {MAX_JOBS_PER_SEARCH})</Label>
