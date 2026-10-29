@@ -1,0 +1,20 @@
+{
+  "name": "job-finder",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:web": "npm run dev -w @job-finder/web",
+    "dev:agent": "cd services/agent && uv run fastapi dev app/main.py --port 8000",
+    "test:agent": "cd services/agent && uv run pytest",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "turbo": "^2"
+  },
+  "packageManager": "npm@11.16.0"
+}

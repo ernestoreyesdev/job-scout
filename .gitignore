@@ -1,0 +1,20 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+node_modules/
+.turbo/
+.vercel
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local resume copies for testing; never commit real resumes
+*.docx
+
+# Supabase local state
+supabase/.branches/
+supabase/.temp/
