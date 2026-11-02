@@ -1,4 +1,6 @@
 import html
+import json
+import re
 from html.parser import HTMLParser
 
 from app.sources.base import WorkplaceType
@@ -81,3 +83,18 @@ def with_country(location: str | None, country: str | None) -> str | None:
     if not country or country.lower() in location.lower():
         return location
     return f"{location.strip()}, {country}"
+
+
+JSON_LD = re.compile(r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>', re.S)
+
+
+def job_posting_ld(page: str) -> dict:
+    """The schema.org JobPosting a job page embeds as JSON-LD, or {} when it has none."""
+    for block in JSON_LD.findall(page):
+        try:
+            data = json.loads(block)
+        except ValueError:
+            continue
+        if isinstance(data, dict) and data.get("@type") == "JobPosting":
+            return data
+    return {}

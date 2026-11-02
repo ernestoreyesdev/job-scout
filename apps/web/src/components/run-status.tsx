@@ -50,7 +50,7 @@ export function RunStatus({ run }: { run: AgentRunRow }) {
           {run.progress}
         </span>
       )}
-      {run.status === "failed" && (
+      {run.status === "failed" && (run.kind === "search" || run.kind === "rescore") && (
         <Button
           variant="outline"
           size="sm"

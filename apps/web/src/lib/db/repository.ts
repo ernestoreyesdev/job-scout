@@ -171,17 +171,17 @@ export class JobFinderRepository {
   }
 
   /** The shared directory, most open jobs first, flagged with whether this user hid each company. */
-  async listCompanies(page = 1): Promise<Page<DirectoryCompany>> {
+  async listCompanies(page = 1, search = ""): Promise<Page<DirectoryCompany>> {
     const [companies, hidden] = await Promise.all([
       this.paged(
         page,
-        (from, to) =>
-          this.client
-            .from("companies")
-            .select("*", { count: "exact" })
+        (from, to) => {
+          const query = this.client.from("companies").select("*", { count: "exact" });
+          return (search ? query.ilike("name", `%${search.replace(/[\\%_]/g, "\\$&")}%`) : query)
             .order("open_jobs", { ascending: false })
             .order("id")
-            .range(from, to),
+            .range(from, to);
+        },
         COMPANIES_PAGE_SIZE,
       ),
       this.client.from("hidden_companies").select("company_id, hidden"),
@@ -253,6 +253,16 @@ export class JobFinderRepository {
       .from("applications")
       .select("id", { count: "exact", head: true })
       .eq("in_tracker", true);
+    if (error) throw error;
+    return count ?? 0;
+  }
+
+  /** Directory companies whose careers page has never been looked up. */
+  async countCompaniesWithoutCareersPage(): Promise<number> {
+    const { count, error } = await this.client
+      .from("companies")
+      .select("id", { count: "exact", head: true })
+      .is("careers_page_checked_at", null);
     if (error) throw error;
     return count ?? 0;
   }

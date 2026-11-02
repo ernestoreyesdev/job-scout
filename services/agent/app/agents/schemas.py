@@ -77,6 +77,13 @@ class CompanyName(BaseModel):
             "companies (recruitment, contract staffing, talent placement). aggregator: reposts other companies' jobs."
         )
     )
+    careers_page: str | None = Field(
+        default=None,
+        description=(
+            "The company's own careers page on its website, e.g. 'https://www.boeing.com/careers'; never a job "
+            "board or applicant tracking system page. Null when you don't know it."
+        ),
+    )
 
 
 class CompanyNames(BaseModel):
@@ -85,3 +92,28 @@ class CompanyNames(BaseModel):
 
 class Shortlist(BaseModel):
     ids: list[int] = Field(description="Numbers of the best-fitting jobs, best first.")
+
+
+class CompanyImport(BaseModel):
+    """Companies to add to the directory, each a careers page URL or a company name."""
+
+    entries: list[str] = Field(min_length=1, max_length=100)
+
+
+class HiringJob(BaseModel):
+    post: int = Field(description="Number of the post the role comes from.")
+    company: str = Field(description="The hiring company's name as people write it.")
+    title: str = Field(description="One role's job title, e.g. 'Senior Backend Engineer'.")
+    location: str | None = Field(description="Where the role is based, as the post states it, e.g. 'Remote (US)' or 'NYC'.")
+    workplace_type: WorkplaceType | None = Field(description="onsite, hybrid or remote when the post says; otherwise null.")
+
+
+class HiringJobs(BaseModel):
+    jobs: list[HiringJob]
+
+
+class CareersPageRequest(BaseModel):
+    """A careers page address the user entered for a directory company."""
+
+    url: str = Field(max_length=500, pattern=r"^https?://\S+$")
+

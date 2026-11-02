@@ -153,6 +153,10 @@ def test_board_from_url_covers_every_system():
     assert board_from_url("https://jobs.smartrecruiters.com/BoschGroup/744000158566919") == ("smartrecruiters", "boschgroup")
     assert board_from_url("https://apply.workable.com/huggingface/j/81B46579FE/") == ("workable", "huggingface")
     assert board_from_url("https://bunq.recruitee.com/o/data-scientist") == ("recruitee", "bunq")
+    assert board_from_url("https://arconsis.jobs.personio.de/job/2868471") == ("personio", "arconsis")
+    assert board_from_url("https://hubstaff.bamboohr.com/careers/21") == ("bamboohr", "hubstaff")
+    assert board_from_url("https://careers-gdms.icims.com/jobs/76097/role/job") == ("icims", "careers-gdms")
+    assert board_from_url("https://jobs.jobvite.com/egnyte/job/opPUAfws") == ("jobvite", "egnyte")
 
 
 def test_board_from_url_skips_site_pages_and_other_hosts():
@@ -171,6 +175,11 @@ def test_board_hosts_lists_every_system():
         "jobs.smartrecruiters.com",
         "apply.workable.com",
         "recruitee.com",
+        "jobs.personio.de",
+        "jobs.personio.com",
+        "bamboohr.com",
+        "icims.com",
+        "jobs.jobvite.com",
     }
 
 
@@ -183,6 +192,10 @@ def test_careers_urls_for_every_system():
     assert careers_url("smartrecruiters", "boschgroup") == "https://jobs.smartrecruiters.com/boschgroup"
     assert careers_url("workable", "huggingface") == "https://apply.workable.com/huggingface"
     assert careers_url("recruitee", "bunq") == "https://bunq.recruitee.com/"
+    assert careers_url("personio", "arconsis") == "https://arconsis.jobs.personio.de/"
+    assert careers_url("bamboohr", "hubstaff") == "https://hubstaff.bamboohr.com/careers"
+    assert careers_url("icims", "careers-gdms") == "https://careers-gdms.icims.com/jobs/search?ss=1"
+    assert careers_url("jobvite", "egnyte") == "https://jobs.jobvite.com/egnyte/jobs"
     assert careers_url("workday", "nvidia.wd5/nvidiaexternalcareersite") == (
         "https://nvidia.wd5.myworkdayjobs.com/nvidiaexternalcareersite"
     )

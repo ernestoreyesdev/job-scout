@@ -11,8 +11,15 @@ from docx import Document
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from pypdf import PdfReader
 
-from app.agents.orchestrator import SearchResult, rescore as orchestrate_rescore, run_search as orchestrate_search
-from app.agents.schemas import AnthropicKeyRequest, SearchRule, Usage
+from app.agents.orchestrator import (
+    ImportResult,
+    SearchResult,
+    fill_careers_pages,
+    import_companies,
+    rescore as orchestrate_rescore,
+    run_search as orchestrate_search,
+)
+from app.agents.schemas import AnthropicKeyRequest, CareersPageRequest, CompanyImport, SearchRule, Usage
 from app.auth import CurrentUser, current_user
 from app.config import Settings, get_settings
 from app.crypto import decrypt, encrypt, key_hint
@@ -286,4 +293,149 @@ def run_rescore(run_id: str, user: CurrentUser, settings: Settings) -> None:
             "usage": usage.model_dump(),
             "finished_at": datetime.now(UTC).isoformat(),
         },
+    )
+
+
+@app.post("/runs/import", status_code=202)
+def start_import(body: CompanyImport, user: User, settings: Config, background: BackgroundTasks) -> dict[str, str]:
+    db = user_db(settings, user.access_token)
+    cutoff = (datetime.now(UTC) - RUN_TIME_LIMIT).isoformat()
+    fail_runs(db, {"status": UNFINISHED, "created_at": f"lt.{cutoff}"}, "Stopped after running for more than 10 minutes.")
+    try:
+        run = db.insert("agent_runs", {"user_id": user.id, "kind": "import", "input": body.model_dump()})[0]
+    except httpx.HTTPStatusError as error:
+        if error.response.status_code == 409:
+            raise HTTPException(409, "A search is already running. Wait for it to finish.")
+        raise
+    background.add_task(run_import, run["id"], body, user, settings)
+    return {"run_id": run["id"]}
+
+
+def run_import(run_id: str, body: CompanyImport, user: CurrentUser, settings: Settings) -> None:
+    db = user_db(settings, user.access_token)
+    service = service_db(settings)
+    usage = Usage()
+    db.update("agent_runs", {"id": f"eq.{run_id}"}, {"status": "running", "progress": "Starting…"})
+
+    def report(message: str) -> None:
+        db.update("agent_runs", {"id": f"eq.{run_id}"}, {"progress": message})
+
+    progress = None
+    try:
+        credentials = service.select(
+            "api_credentials",
+            {"user_id": f"eq.{user.id}", "provider": "eq.anthropic", "select": "ciphertext"},
+        )
+        if not credentials:
+            raise RuntimeError("Add your Anthropic API key in Settings first.")
+
+        result = import_companies(
+            entries=body.entries,
+            client=make_client(decrypt(credentials[0]["ciphertext"], settings.agent_encryption_key)),
+            settings=settings,
+            service=service,
+            usage=usage,
+            report=report,
+        )
+        status, error = "done", None
+        progress = summarize_import(result)
+    except Exception as exc:
+        logger.exception("import run %s failed", run_id)
+        status, error = "failed", str(exc) or exc.__class__.__name__
+
+    db.update(
+        "agent_runs",
+        {"id": f"eq.{run_id}"},
+        {
+            "status": status,
+            "error": error,
+            "progress": progress,
+            "usage": usage.model_dump(),
+            "finished_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+def summarize_import(result: ImportResult) -> str:
+    """Final one-line progress for a finished import."""
+    parts = [f"Added {len(result.added)} {'company' if len(result.added) == 1 else 'companies'}"]
+    if result.existing:
+        parts.append(f"{result.existing} already in the directory")
+    if result.not_found:
+        parts.append(f"couldn't find {', '.join(result.not_found)}")
+    return ", ".join(parts) + "."
+
+
+@app.post("/runs/careers-pages", status_code=202)
+def start_careers_pages(user: User, settings: Config, background: BackgroundTasks) -> dict[str, str]:
+    db = user_db(settings, user.access_token)
+    cutoff = (datetime.now(UTC) - RUN_TIME_LIMIT).isoformat()
+    fail_runs(db, {"status": UNFINISHED, "created_at": f"lt.{cutoff}"}, "Stopped after running for more than 10 minutes.")
+    try:
+        run = db.insert("agent_runs", {"user_id": user.id, "kind": "careers_pages", "input": {}})[0]
+    except httpx.HTTPStatusError as error:
+        if error.response.status_code == 409:
+            raise HTTPException(409, "A search is already running. Wait for it to finish.")
+        raise
+    background.add_task(run_careers_pages, run["id"], user, settings)
+    return {"run_id": run["id"]}
+
+
+def run_careers_pages(run_id: str, user: CurrentUser, settings: Settings) -> None:
+    db = user_db(settings, user.access_token)
+    service = service_db(settings)
+    usage = Usage()
+    db.update("agent_runs", {"id": f"eq.{run_id}"}, {"status": "running", "progress": "Starting…"})
+
+    def report(message: str) -> None:
+        db.update("agent_runs", {"id": f"eq.{run_id}"}, {"progress": message})
+
+    progress = None
+    try:
+        credentials = service.select(
+            "api_credentials",
+            {"user_id": f"eq.{user.id}", "provider": "eq.anthropic", "select": "ciphertext"},
+        )
+        if not credentials:
+            raise RuntimeError("Add your Anthropic API key in Settings first.")
+
+        found, checked = fill_careers_pages(
+            client=make_client(decrypt(credentials[0]["ciphertext"], settings.agent_encryption_key)),
+            settings=settings,
+            service=service,
+            usage=usage,
+            report=report,
+        )
+        status, error = "done", None
+        progress = (
+            f"Found careers pages for {found} of {checked} companies."
+            if checked
+            else "Every company already has its careers page looked up."
+        )
+    except Exception as exc:
+        logger.exception("careers pages run %s failed", run_id)
+        status, error = "failed", str(exc) or exc.__class__.__name__
+
+    db.update(
+        "agent_runs",
+        {"id": f"eq.{run_id}"},
+        {
+            "status": status,
+            "error": error,
+            "progress": progress,
+            "usage": usage.model_dump(),
+            "finished_at": datetime.now(UTC).isoformat(),
+        },
+    )
+
+
+@app.put("/companies/{company_id}/careers-page", status_code=204)
+def put_careers_page(company_id: str, body: CareersPageRequest, user: User, settings: Config) -> None:
+    service = service_db(settings)
+    if not service.select("companies", {"select": "id", "id": f"eq.{company_id}"}):
+        raise HTTPException(404, "Company not found.")
+    service.update(
+        "companies",
+        {"id": f"eq.{company_id}"},
+        {"careers_page_url": body.url, "careers_page_checked_at": datetime.now(UTC).isoformat()},
     )

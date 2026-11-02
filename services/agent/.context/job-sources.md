@@ -1,6 +1,6 @@
 # Job Sources
 
-The agent reads open jobs from the public job board APIs of applicant tracking systems (ATS). None of them need credentials. This document covers how the source layer is built and what each API looks like, as verified against the live APIs on 2026-10-29.
+The agent reads open jobs from applicant tracking systems (ATS): their public job board APIs, the JSON endpoints their own career pages call (Workday, BambooHR) and, for iCIMS and Jobvite, their HTML career pages. It also reads Hacker News "Who is hiring?" threads. None of them need credentials. This document covers how the source layer is built and what each source looks like, as verified against the live sites on the date each section gives (2026-10-29 unless stated).
 
 ## Architecture
 
@@ -11,7 +11,8 @@ The agent reads open jobs from the public job board APIs of applicant tracking s
 | `app/sources/base.py` | `Posting` (the normalized job), `BoardNotFound`, `CompanyNotFound`, and the abstract `JobSource` class |
 | `app/sources/__init__.py` | Registry (`SOURCES`) and the functions the rest of the app calls: `find_company`, `fetch_board`, `describe`, `board_from_url`, `board_hosts`, `source_named` |
 | `app/sources/<system>.py` | One `JobSource` subclass per system: its endpoints and how its JSON maps to `Posting`, nothing else |
-| `app/sources/text.py` | Helpers adapters share: `html_to_text`, `join_locations`, `workplace_from_location` |
+| `app/sources/text.py` | Helpers adapters share: `html_to_text`, `join_locations`, `workplace_from_location`, `country_name`, `with_country`, `job_posting_ld` (a job page's schema.org JobPosting) |
+| `app/agents/hiring_threads/` | Hacker News "Who is hiring?" posts: reading the threads and the Haiku call that lists each post's roles. Not a `JobSource` (see below) |
 | `app/sources/filters.py` | Search filters applied after fetching: `matches_keywords`, `matches_workplace`, `matches_location`, `remote_in_us` |
 | `supabase/migrations/*` | The `job_source` enum lists every system a posting or company row can come from |
 
@@ -44,7 +45,7 @@ Callers outside `app/sources/` only use the registry functions. They never impor
 | `board_from_url(url)` | First path segment of a URL on one of `board_hosts`, lowercased, skipping `reserved_paths` | The board lives elsewhere in the URL (Recruitee subdomains, Workday) |
 | `careers_url(board)` | The company's public job listing page: `https://{board_hosts[0]}/{board}`, saved on `companies.careers_url` whenever a company is checked | The page lives elsewhere (Greenhouse uses `job-boards.greenhouse.io`, Recruitee a subdomain, Workday `tenant.server/site`) |
 | `default_name(board)` | Name shown for a newly discovered board until its jobs give one: `scale-ai` → `Scale Ai` | The board string isn't a name (Workday) |
-| `_get_json(board, url, params)`, `_post_json(board, url, body)` | Request with the shared client; a status in `not_found_statuses` (404 by default) raises `BoardNotFound`; other errors raise | |
+| `_get_json(board, url, params)`, `_post_json(board, url, body)`, `_get_text(board, url, params)` | Request with the shared client (JSON, or text for XML and HTML); a status in `not_found_statuses` (404 by default) raises `BoardNotFound`; other errors raise. Redirects aren't followed, so a system that redirects unknown boards lists 302 there | |
 
 Class attributes each subclass sets: `name` (the enum value), `label` (for messages), `board_hosts` (public job page hosts, also used to limit discovery web searches; a parent domain such as `myworkdayjobs.com` also covers its subdomains in the search), and optionally `reserved_paths` (site pages that aren't boards) and `not_found_statuses`.
 
@@ -68,8 +69,10 @@ Class attributes each subclass sets: `name` (the enum value), `label` (for messa
 - **Board cache** (`cached_fetch` in the registry): each board's postings are kept in memory and reused for 6 hours (`CACHE_SECONDS`); a restart of the agent clears it. Boards that don't exist aren't kept.
 - **Closed postings** (`mark_closed` in the orchestrator): after a board is read, the user's tracked postings it no longer lists get `postings.closed_at`, and ones it lists again are reopened. A fetch that hit its system's limit (`max_jobs`, Workday's 2,000) is skipped, since missing jobs may still be open. With the cache, a closing can show up to 6 hours late.
 - **Descriptions** (`with_descriptions` in the orchestrator): fetched only for the jobs about to be scored, then saved to `postings`. A job whose description can't be fetched is skipped, not scored blind.
-- **Discovery** (`app/agents/discovery/agent.py`): web searches limited to `board_hosts()`; result URLs go through `board_from_url` to find new boards. It runs on a search across all companies while the directory has fewer than 25 companies, or when the last run in `directory_discoveries` is over 7 days old. Each run is logged there with its keywords and how many boards it found and added.
+- **Discovery** (`app/agents/discovery/agent.py`): web searches limited to `board_hosts()`; result URLs go through `board_from_url` to find new boards. It runs on a search across all companies while the directory has fewer than 25 companies, when no run in `directory_discoveries` used the same keywords (compared ignoring case, spacing and order), or when the last run is over 7 days old. Each run is logged there with its keywords and how many boards it found and added.
 - **Naming and kind** (`name_companies`): newly discovered boards get their company's name and kind (`employer`, `staffing`, `aggregator`, saved on `companies.kind`) from one small Haiku call that reads the titles of the search results that pointed to each board (`cvshealth.wd1/cvs_health_careers` → `CVS Health`, employer). A company found by name or web lookup is labeled the first time it's found. Searches across all companies skip staffing and aggregator companies unless the user chose Show (a `hidden_companies` row with `hidden = false`).
+- **Import** (`import_companies` in the orchestrator, `POST /runs/import`): the Companies page takes up to 100 careers page URLs or company names and starts an `import` run. Names go through `find_company`; URLs through `board_from_url`. One `name_companies` call names and labels every new company before URL boards are fetched, so their jobs carry the real name. New companies are saved with `found_by = 'import'`; ones already in the directory are counted and left as they are.
+- **Careers pages** (`app/agents/careers_pages/`, `record_careers_pages` in the orchestrator): a company's own careers page on its website, saved on `companies.careers_page_url`, separate from `careers_url` (its job board page). The naming call suggests one; the agent keeps it when it loads (anything but 404, 410 or a 5xx, following redirects, since some sites answer scripts with 403). Otherwise one web search that leaves out job board sites (about 1 cent) takes the first result whose address looks like a careers page. `careers_page_checked_at` is set either way, so a company with a check time and no URL is "not found" and isn't looked up again. New companies from discovery, import and company searches are looked up as they're added; `POST /runs/careers-pages` (the Companies page's "Find careers pages" button) fills in companies never looked up. `PUT /companies/{id}/careers-page` saves a link the user typed; it's shared, like the rest of the directory.
 - **Countries in locations**: Lever's `country` code and SmartRecruiters' country code are written out as names (`IN` → `India`, so they can't be read as US state codes), and Ashby's address country is appended when the location text lacks it. The search filters rely on this to keep jobs outside the US out of searches with no location. Boards already in the directory keep their names. Systems whose jobs carry a company name (Greenhouse, SmartRecruiters, Workable, Recruitee) overwrite it with theirs on the next check.
 
 ## Adding a system
@@ -202,9 +205,92 @@ Class attributes each subclass sets: `name` (the enum value), `label` (for messa
 | Job page host | `{tenant}.{server}.myworkdayjobs.com/{locale?}/{site}/...`, where the optional locale looks like `en-US` and `wday` paths are the API, not boards |
 | Verified | NVIDIA (2,000 jobs), Workday (400), CVS Health (2,000, capped), Surescripts (23). One discovery call found 4 Workday boards among 25 |
 
+### Personio
+
+Verified on 2026-11-02.
+
+| | |
+|---|---|
+| Endpoint | `GET https://{board}.jobs.personio.de/xml` (XML, not JSON). The same boards answer on `jobs.personio.com` |
+| Unknown board | 404. A real company with no open jobs returns an empty `<workzag-jobs>` list |
+| Pagination | None |
+| Description | `jobDescriptions/jobDescription`, each a `name` heading and an HTML `value`. **Only in the language the job was written in**: `?language=en` returns English jobs' descriptions and leaves German ones empty, the default feed the reverse. The English feed is read first and the default feed fills in the rest (a second request only when needed) |
+| Company name | Not given (`subcompany` is a legal entity name). The board's directory name is used |
+| Location | `office` plus `additionalOffices/office`, city names only (`Berlin`, `Augsburg`, `Remote`), **no country** |
+| Workplace type | Not provided. Inferred from `office` ("Remote" in it) |
+| Posted | `createdAt`, ISO 8601 |
+| Job URL | `https://{board}.jobs.personio.de/job/{id}` |
+| Job page host | `{board}.jobs.personio.de` or `.com`: the board is the **subdomain** |
+| Verified | meteocontrol (47 jobs), GoKarla (4), arconsis (2). Customers are mostly German and other European companies |
+
+### BambooHR
+
+**Not a published API.** These are the JSON endpoints BambooHR's own careers pages call. Verified on 2026-11-02.
+
+| | |
+|---|---|
+| List endpoint | `GET https://{board}.bamboohr.com/careers/list` |
+| Detail endpoint | `GET https://{board}.bamboohr.com/careers/{id}/detail` |
+| Unknown board | **302 redirect** to `https://www.bamboohr.com/`; counts as not found (redirects aren't followed). A real company with no jobs returns `{"meta": {"totalCount": 0}, "result": []}` |
+| Pagination | None |
+| Description | **Not in the list.** `describe` reads `result.jobOpening.description` (HTML) from the detail endpoint |
+| Company name | Not given. The board's directory name is used |
+| Location | `location.city` and `location.state` (often the same text), plus `atsLocation` city, state or province and country when set. The list has **no country** for most jobs; only the detail endpoint's `location.addressCountry` has it |
+| Workplace type | `isRemote: true` → remote; otherwise inferred from the location text. `locationType` is also sent, but only `"0"` was seen, so it isn't read |
+| Posted | **Not in the list.** The detail endpoint's `datePosted` isn't fetched for every job, so postings are undated and pass the Posted within filter |
+| Job URL | `https://{board}.bamboohr.com/careers/{id}` |
+| Job page host | `{board}.bamboohr.com`: the board is the **subdomain**; `www` and other site hosts are reserved |
+| Verified | Hubstaff (2 jobs); Toggl, Zapier and MailerLite have accounts with no open jobs |
+
+### iCIMS
+
+**Not an API.** These are iCIMS's HTML career pages, so a template change can break them. Verified on 2026-11-02.
+
+| | |
+|---|---|
+| List page | `GET https://{board}.icims.com/jobs/search?ss=1&in_iframe=1&pr={page}` (pages from 0). Each `li.iCIMS_JobCardItem` is one job; `Page 1 of N` gives the page count |
+| Board | The whole subdomain, which varies by company: `careers-gdms`, `careers-healthedge`, `hubcareers-docusign`. `board_candidates` guesses `careers-{name}` |
+| Unknown board | 404 |
+| Pagination | About 20 cards per page. Pages after the first are read 8 at a time, up to 100 pages (GDMS: 632 jobs in 32 pages, about 2.4 seconds) |
+| Description | **Not in the list.** `describe` reads the job page's JSON-LD `description` (HTML) |
+| Company name | Not in the list (JSON-LD `hiringOrganization` has it). `default_name` drops the `careers-` prefix |
+| Location | **Varies by company**: a header field (HealthEdge) or a "Job Location" field (GDMS). Coded as `US-MA-Pittsfield`, written out as `Pittsfield, MA, United States` |
+| Workplace type | Not provided. Inferred from the location ("US-Remote") |
+| Posted | Only when the company shows it: the `title` of the posted-date span, `11/2/2026 12:00 PM` (no time zone; read as UTC). HealthEdge's cards have none |
+| Job URL | The card link without `?in_iframe=1` |
+| Verified | GDMS (632 jobs), HealthEdge (54) |
+
+### Jobvite
+
+**Not an API.** These are Jobvite's HTML career pages, so a template change can break them. Verified on 2026-11-02.
+
+| | |
+|---|---|
+| List page | `GET https://jobs.jobvite.com/{board}/jobs`: tables grouped by department, each row a `td.jv-job-list-name` link and a `td.jv-job-list-location` |
+| Unknown board | **302** to Jobvite's support or search site; counts as not found |
+| Pagination | None seen (NinjaOne's 74 jobs are on one page) |
+| Description | **Not in the list.** `describe` reads the job page's JSON-LD `description` (HTML) |
+| Company name | Not in the list. The board's directory name is used |
+| Location | The cell text, e.g. `Mountain View, California`. Jobs in several places say only `2 Locations` (or `Remote , 19 Locations`) |
+| Workplace type | Not provided. Inferred from the location text |
+| Posted | Not in the list (JSON-LD `datePosted` has it), so jobs are undated |
+| Job URL | `https://jobs.jobvite.com/{board}/job/{id}` |
+| Verified | Egnyte (28 jobs), NinjaOne (74), Optimizely (16) |
+
+## Hacker News "Who is hiring?"
+
+Not a `JobSource`: one monthly thread holds posts from hundreds of companies, so it doesn't fit a per-company board. Verified on 2026-11-02.
+
+| | |
+|---|---|
+| Threads | `GET https://hn.algolia.com/api/v1/search_by_date?tags=story,author_whoishiring`, keeping titles that start with "Ask HN: Who is hiring?". The two newest threads are read, since the current one is thin early in the month |
+| Posts | `GET https://hn.algolia.com/api/v1/items/{thread}`: top-level `children` with HTML `text` and `created_at`. October 2026 had 261 posts; the two threads read on 2026-11-02 had 325 (median 1,066 characters) |
+| Extraction | Free text, so one Haiku call per 25 posts (4 in parallel) lists each role's company, title, location and workplace type. Each role is saved as a posting: `source = 'hackernews'`, `board` = the company name as a slug, `external_id` = `{comment id}-{role number}`, `url` = the post on news.ycombinator.com, `description` = the whole post |
+| When | Searches across all companies only. Posts already saved as postings aren't read again; posts that listed no role are read again on the next search. A failure skips Hacker News for that search |
+| Not covered | Hidden companies and company kinds don't apply; closed postings aren't detected |
+
 ## Systems checked but not in use
 
 | System | Status |
 |--------|--------|
-| Personio, BambooHR | Test requests failed; endpoints not confirmed |
 | IBM Kenexa BrassRing | Used by Publix. No public listing endpoint found; only reachable through an aggregator |

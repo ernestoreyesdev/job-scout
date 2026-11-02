@@ -7,7 +7,16 @@ import pytest
 
 from app.agents import orchestrator
 from app.agents.discovery.agent import FoundBoard
-from app.agents.orchestrator import MAX_MISSED_CHECKS, MIN_DIRECTORY, run_search
+from app.agents.hiring_threads.agent import HiringPost
+from app.agents.orchestrator import (
+    MAX_MISSED_CHECKS,
+    MIN_DIRECTORY,
+    fill_careers_pages,
+    hiring_thread_postings,
+    import_companies,
+    keyword_set,
+    run_search,
+)
 from app.agents.schemas import CompanyName, FitScore, SearchRule, Usage
 from app.agents.scoring.agent import ScoringError
 from app.config import Settings
@@ -142,6 +151,8 @@ def run(
         finder=overrides.pop("finder", lambda company: CompanyBoard("ashby", "acme", "Acme", jobs)),
         triage=overrides.pop("triage", newest_first),
         namer=overrides.pop("namer", lambda client, model, boards, usage: {}),
+        read_posts=overrides.pop("read_posts", lambda: []),
+        careers=overrides.pop("careers", lambda *args: None),
         **overrides,
     )
     return result, messages, user, service, progress, usage
@@ -322,7 +333,7 @@ def directory_run(
             for key, name in (names or {}).items()
         }
 
-    service = FakeRest(companies=companies, discoveries=[{"id": "recent"}] if recent_discovery else [])
+    service = FakeRest(companies=companies, discoveries=[{"id": "recent", "keywords": ["software engineer"]}] if recent_discovery else [])
     outcome = run(
         rule=SearchRule(keywords=["software engineer"], workplace_types=["remote"]),
         service=service,
@@ -630,7 +641,7 @@ def test_staffing_companies_are_skipped_unless_the_user_shows_them():
     user.select = lambda table, params: [{"company_id": "id-recruitly", "hidden": False}] if table == "hidden_companies" else []
     run(
         rule=SearchRule(keywords=["software engineer"]),
-        service=FakeRest(companies=companies, discoveries=[{"id": "recent"}]),
+        service=FakeRest(companies=companies, discoveries=[{"id": "recent", "keywords": ["software engineer"]}]),
         user=user,
         fetcher=fetcher,
     )
@@ -813,3 +824,141 @@ def test_a_company_search_checks_its_board_for_closed_jobs():
     _, _, _, service, _, _ = run(user=user)
 
     assert ("postings", {"id": "in.(p-gone)"}) in [(t, f) for t, f, p in service.updates if p.get("closed_at")]
+
+
+def test_a_new_keyword_set_runs_discovery_even_after_a_recent_one():
+    companies = [company(f"co{n}") for n in range(MIN_DIRECTORY)]
+    service = FakeRest(companies=companies, discoveries=[{"id": "recent", "keywords": ["data engineer"]}])
+    discover_calls: list[tuple[Any, ...]] = []
+
+    def discover(*args: Any) -> list[FoundBoard]:
+        discover_calls.append(args)
+        return []
+
+    run(
+        rule=SearchRule(keywords=["Software  Engineer"], workplace_types=["remote"]),
+        service=service,
+        fetcher=lambda source, board, name: [REMOTE_JOB],
+        discover=discover,
+    )
+
+    assert len(discover_calls) == 1
+
+
+def test_keyword_sets_ignore_case_spacing_and_order():
+    assert keyword_set(["AI  Engineer", "software engineer"]) == keyword_set(["Software Engineer", "ai engineer"])
+    assert keyword_set(["ai engineer"]) != keyword_set(["ai engineer", "ml engineer"])
+
+
+def test_import_adds_names_and_urls_and_reports_the_rest():
+    fetched: list[tuple[str, str, str]] = []
+    namer_calls: list[list[FoundBoard]] = []
+
+    def finder(name: str) -> CompanyBoard:
+        if name == "Acme":
+            return CompanyBoard("greenhouse", "acme", "Acme", [posting("1", "Software Engineer")])
+        if name == "Globex":
+            return CompanyBoard("lever", "globex", "Globex", [])
+        raise CompanyNotFound(name)
+
+    def fetcher(source: str, board: str, name: str) -> list[Posting]:
+        fetched.append((source, board, name))
+        return [posting("2", "Data Engineer").model_copy(update={"company": name})]
+
+    def namer(client: Any, model: str, boards: list[FoundBoard], usage: Usage) -> dict[tuple[str, str], CompanyName]:
+        namer_calls.append(boards)
+        return {
+            ("greenhouse", "acme"): CompanyName(board="greenhouse/acme", name="Acme", kind="employer"),
+            ("workday", "cvshealth.wd1/cvs_health_careers"): CompanyName(
+                board="workday/cvshealth.wd1/cvs_health_careers", name="CVS Health", kind="employer"
+            ),
+        }
+
+    service = FakeRest(companies=[{"source": "lever", "board": "globex"}])
+    result = import_companies(
+        entries=[
+            "Acme",
+            "Globex",
+            "Nowhere Inc",
+            "https://cvshealth.wd1.myworkdayjobs.com/en-US/CVS_Health_Careers/job/123",
+            "https://example.com/careers",
+        ],
+        client=None,
+        settings=SETTINGS,
+        service=service,
+        usage=Usage(),
+        report=lambda message: None,
+        finder=finder,
+        fetcher=fetcher,
+        namer=namer,
+        careers=lambda client, model, name, suggestion, usage, http: suggestion,
+    )
+
+    assert result.added == ["Acme", "CVS Health"] and result.existing == 1
+    assert sorted(result.not_found) == ["Nowhere Inc", "https://example.com/careers"]
+    assert fetched == [("workday", "cvshealth.wd1/cvs_health_careers", "CVS Health")]
+    [boards] = namer_calls
+    assert [(b.source, b.board) for b in boards] == [("greenhouse", "acme"), ("workday", "cvshealth.wd1/cvs_health_careers")]
+    [rows] = service.inserted("companies")
+    assert {(row["board"], row["name"], row["found_by"], row["open_jobs"]) for row in rows} == {
+        ("acme", "Acme", "import", 1),
+        ("cvshealth.wd1/cvs_health_careers", "CVS Health", "import", 1),
+    }
+
+
+def test_hiring_posts_are_read_once_and_reused():
+    when = datetime(2026, 10, 1, tzinfo=UTC)
+    saved = posting("111-1", "Backend Engineer", source="hackernews", board="prairielearn", posted_at=when)
+    service = FakeRest()
+    service.select = lambda table, params: [saved.model_dump(mode="json")] if table == "postings" else []
+    extracted: list[list[str]] = []
+
+    def extractor(client: Any, model: str, posts: list[HiringPost], usage: Usage) -> list[Posting]:
+        extracted.append([post.id for post in posts])
+        return [posting("222-1", "ML Engineer", source="hackernews", board="globex", posted_at=when)]
+
+    found = hiring_thread_postings(
+        None,
+        SETTINGS,
+        service,
+        Usage(),
+        lambda message: None,
+        lambda: [HiringPost("111", "PrairieLearn | Backend", when), HiringPost("222", "Globex | ML", when)],
+        extractor,
+    )
+
+    assert extracted == [["222"]]
+    assert [p.external_id for p in found] == ["111-1", "222-1"]
+    [rows] = service.inserted("postings")
+    assert [row["external_id"] for row in rows] == ["222-1"]
+
+
+def test_an_unreachable_hacker_news_is_skipped():
+    progress: list[str] = []
+
+    def unreachable() -> list[HiringPost]:
+        raise RuntimeError("timed out")
+
+    assert hiring_thread_postings(None, SETTINGS, FakeRest(), Usage(), progress.append, unreachable, None) == []
+    assert progress == ["Couldn't reach Hacker News; skipped its hiring posts this time."]
+
+
+def test_careers_pages_are_saved_found_or_not():
+    service = FakeRest(companies=[{"source": "greenhouse", "board": "acme", "name": "Acme"}, {"source": "lever", "board": "globex", "name": "Globex"}])
+    asked: list[tuple[str, str | None]] = []
+
+    def namer(client: Any, model: str, boards: list[FoundBoard], usage: Usage) -> dict[tuple[str, str], CompanyName]:
+        return {("greenhouse", "acme"): CompanyName(board="greenhouse/acme", name="Acme", kind="employer", careers_page="https://acme.com/careers")}
+
+    def careers(client: Any, model: str, name: str, suggestion: str | None, usage: Usage, http: Any) -> str | None:
+        asked.append((name, suggestion))
+        return suggestion
+
+    found, checked = fill_careers_pages(
+        client=None, settings=SETTINGS, service=service, usage=Usage(), report=lambda m: None, namer=namer, careers=careers
+    )
+
+    assert (found, checked) == (1, 2)
+    assert sorted(asked) == [("Acme", "https://acme.com/careers"), ("Globex", None)]
+    saved = {filters["board"]: patch["careers_page_url"] for table, filters, patch in service.updates if table == "companies"}
+    assert saved == {"eq.acme": "https://acme.com/careers", "eq.globex": None}

@@ -8,7 +8,20 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import BaseModel
 
-SourceName = Literal["greenhouse", "lever", "ashby", "smartrecruiters", "workable", "recruitee", "workday"]
+SourceName = Literal[
+    "greenhouse",
+    "lever",
+    "ashby",
+    "smartrecruiters",
+    "workable",
+    "recruitee",
+    "workday",
+    "personio",
+    "bamboohr",
+    "icims",
+    "jobvite",
+    "hackernews",
+]
 WorkplaceType = Literal["onsite", "hybrid", "remote"]
 
 BOARD_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -103,11 +116,18 @@ class JobSource(ABC):
         """POST to a board's JSON endpoint; a not-found status means the board doesn't exist on this system."""
         return self._json(board, self._http.post(url, json=body))
 
+    def _get_text(self, board: str, url: str, params: dict[str, Any] | None = None) -> str:
+        """GET a board's page or feed as text; a not-found status means the board doesn't exist on this system."""
+        return self._checked(board, self._http.get(url, params=params)).text
+
     def _json(self, board: str, res: httpx.Response) -> Any:
+        return self._checked(board, res).json()
+
+    def _checked(self, board: str, res: httpx.Response) -> httpx.Response:
         if res.status_code in self.not_found_statuses:
             raise BoardNotFound(f"{self.label} board '{board}' does not exist.")
         res.raise_for_status()
-        return res.json()
+        return res
 
     def careers_url(self, board: str) -> str:
         """The company's public job listing page on this system."""

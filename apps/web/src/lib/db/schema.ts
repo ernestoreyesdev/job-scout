@@ -7,7 +7,19 @@
  * `Record<string, unknown>`, and an interface has no implicit index signature,
  * so declaring one here silently collapses every query result to `never`.
  */
-export type JobSourceRow = "greenhouse" | "lever" | "ashby" | "smartrecruiters" | "workable" | "recruitee" | "workday";
+export type JobSourceRow =
+  | "greenhouse"
+  | "lever"
+  | "ashby"
+  | "smartrecruiters"
+  | "workable"
+  | "recruitee"
+  | "workday"
+  | "personio"
+  | "bamboohr"
+  | "icims"
+  | "jobvite"
+  | "hackernews";
 
 export const APPLICATION_STATUSES = ["new", "saved", "tailored", "applied", "interviewing", "rejected"] as const;
 
@@ -19,7 +31,7 @@ export const WORKPLACE_TYPES = ["onsite", "hybrid", "remote"] as const;
 
 export type WorkplaceTypeRow = (typeof WORKPLACE_TYPES)[number];
 
-export type CompanyOriginRow = "lookup" | "discovery";
+export type CompanyOriginRow = "lookup" | "discovery" | "import";
 
 export type CompanyKindRow = "employer" | "staffing" | "aggregator";
 
@@ -30,6 +42,9 @@ export const POSTED_WITHIN_DAYS = [1, 3, 7, 14, 30] as const;
 
 /** Upper bound the agent accepts for jobs scored in one search. */
 export const MAX_JOBS_PER_SEARCH = 25;
+
+/** Upper bound the agent accepts for companies added in one import. */
+export const MAX_COMPANY_IMPORT = 100;
 
 export type ProfileRow = {
   user_id: string;
@@ -98,6 +113,8 @@ export type CompanyRow = {
   found_by: CompanyOriginRow;
   checked_at: string;
   careers_url: string | null;
+  careers_page_url: string | null;
+  careers_page_checked_at: string | null;
   kind: CompanyKindRow | null;
   created_at: string;
 };

@@ -5,6 +5,7 @@ import { unstable_rethrow } from "next/navigation";
 
 import {
   APPLICATION_STATUSES,
+  MAX_COMPANY_IMPORT,
   MAX_JOBS_PER_SEARCH,
   POSTED_WITHIN_DAYS,
   WORKPLACE_TYPES,
@@ -191,5 +192,32 @@ export async function setCompanyHidden(companyId: string, hidden: boolean): Prom
 export async function rescoreJobs(): Promise<ActionResult> {
   return run(["/tracker", "/jobs"], async () => {
     await callAgent("/runs/rescore", { method: "POST" });
+  });
+}
+
+/** Starts a run that adds companies to the directory, one careers page URL or company name per line. */
+export async function importCompanies(formData: FormData): Promise<ActionResult> {
+  return run("/companies", async () => {
+    const entries = [...new Set(text(formData.get("entries")).split(/[\n,]/).map((entry) => entry.trim()).filter(Boolean))];
+    if (entries.length === 0) throw new Error("Enter at least one company or careers page URL.");
+    if (entries.length > MAX_COMPANY_IMPORT) throw new Error(`Import up to ${MAX_COMPANY_IMPORT} companies at a time.`);
+    if (entries.some((entry) => entry.length > 300)) throw new Error("Each entry must be under 300 characters.");
+    await callAgent("/runs/import", { method: "POST", body: { entries } });
+  });
+}
+
+/** Starts a run that looks up careers pages for directory companies that never had one looked up. */
+export async function findCareersPages(): Promise<ActionResult> {
+  return run("/companies", async () => {
+    await callAgent("/runs/careers-pages", { method: "POST" });
+  });
+}
+
+/** Saves the careers page the user entered for a directory company. */
+export async function setCareersPage(companyId: string, formData: FormData): Promise<ActionResult> {
+  return run("/companies", async () => {
+    const url = text(formData.get("url"));
+    if (!/^https?:\/\/\S+$/.test(url) || url.length > 500) throw new Error("Enter a link starting with http:// or https://.");
+    await callAgent(`/companies/${encodeURIComponent(companyId)}/careers-page`, { method: "PUT", body: { url } });
   });
 }

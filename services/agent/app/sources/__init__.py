@@ -9,9 +9,13 @@ import time
 from functools import cache
 
 from app.sources.ashby import AshbySource
+from app.sources.bamboohr import BambooHRSource
 from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, JobSource, Posting, SourceName
 from app.sources.greenhouse import GreenhouseSource
+from app.sources.icims import ICIMSSource
+from app.sources.jobvite import JobviteSource
 from app.sources.lever import LeverSource
+from app.sources.personio import PersonioSource
 from app.sources.recruitee import RecruiteeSource
 from app.sources.smartrecruiters import SmartRecruitersSource
 from app.sources.workable import WorkableSource
@@ -31,6 +35,10 @@ SOURCES: tuple[type[JobSource], ...] = (
     WorkableSource,
     RecruiteeSource,
     WorkdaySource,
+    PersonioSource,
+    BambooHRSource,
+    ICIMSSource,
+    JobviteSource,
 )
 
 
