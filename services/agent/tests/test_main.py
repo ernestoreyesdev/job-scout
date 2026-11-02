@@ -6,7 +6,7 @@ import pytest
 from fastapi import BackgroundTasks, HTTPException
 
 from app import main
-from app.agents.orchestrator import SearchResult
+from app.agents.orchestrator import ImportResult, SearchResult
 from app.agents.schemas import SearchRule
 from app.sources.base import CompanyNotFound
 
@@ -96,3 +96,11 @@ def test_summary_says_how_many_of_the_scored_jobs_were_kept():
     result = SearchResult(companies=4, found=300, matched=40, already_tracked=0, scored=20, failed=0, kept=10)
 
     assert main.summarize(result) == "Scored 20 jobs from 4 companies and kept the top 10."
+
+
+def test_import_summary_names_companies_with_no_open_jobs():
+    result = ImportResult(added=["Acme", "Boeing"], existing=1, not_found=["Nowhere"], empty=["Boeing"])
+
+    assert main.summarize_import(result) == (
+        "Added 2 companies, Boeing has no open jobs listed, 1 already in the directory, couldn't find Nowhere."
+    )

@@ -9,9 +9,7 @@ from datetime import UTC, datetime, timedelta
 from itertools import zip_longest
 from typing import Any
 
-import httpx
 
-from app.agents.careers_pages.agent import find_careers_page
 from app.agents.discovery.agent import FoundBoard, discover_boards, find_company_boards, name_companies
 from app.agents.hiring_threads.agent import HiringPost, extract_jobs, recent_posts
 from app.agents.triage.agent import shortlist
@@ -96,7 +94,6 @@ def run_search(
     triage: Callable[..., list[int]] = shortlist,
     read_posts: Callable[[], list[HiringPost]] = recent_posts,
     extractor: Callable[..., list[Posting]] = extract_jobs,
-    careers: Callable[..., str | None] = find_careers_page,
 ) -> SearchResult:
     """
     One search run: gathers open jobs from one company, or from the whole
@@ -116,7 +113,8 @@ def run_search(
         save_companies(
             service, [(found.source, found.board, found.name, "lookup")], {f"{found.source}/{found.board}": found.postings}
         )
-        label_if_new(found, client, settings, service, usage, namer, careers)
+        label_if_new(found, client, settings, service, usage, namer)
+        remove_duplicate_names(service)
         mark_closed(user, service, {f"{found.source}/{found.board}": found.postings})
         if not found.postings:
             report(f"Found {found.name}, but it has no open jobs listed.")
@@ -125,7 +123,7 @@ def run_search(
         companies = 1
     else:
         everything, companies, unreachable = directory_postings(
-            rule, client, settings, user, service, usage, report, fetcher, discover, namer, careers
+            rule, client, settings, user, service, usage, report, fetcher, discover, namer
         )
         everything += hiring_thread_postings(client, settings, service, usage, report, read_posts, extractor)
 
@@ -143,7 +141,7 @@ def run_search(
         return SearchResult(companies, len(everything), 0, 0, 0, 0, unreachable)
 
     matched.sort(key=lambda p: p.posted_at or datetime.min.replace(tzinfo=UTC), reverse=True)
-    matched = one_per_title(matched)
+    matched = one_per_job(one_per_title(matched))
     rows = service.insert("postings", [p.model_dump(mode="json") for p in matched], on_conflict="source,external_id")
     ids = {(row["source"], row["external_id"]): row["id"] for row in rows}
     tracked = {row["posting_id"] for row in user.select("applications", {"select": "posting_id"})}
@@ -197,7 +195,6 @@ def directory_postings(
     fetcher: Callable[[str, str, str], list[Posting]],
     discover: Callable[..., list[FoundBoard]],
     namer: Callable[..., dict[tuple[str, str], CompanyName]],
-    careers: Callable[..., str | None],
 ) -> tuple[list[Posting], int, int]:
     """
     Open jobs at every directory company the user hasn't hidden, topping the
@@ -215,7 +212,6 @@ def directory_postings(
     ]
     skipped: set[str] = set()
     kinds: dict[tuple[str, str], str] = {}
-    named: dict[tuple[str, str], CompanyName] = {}
 
     if len(directory) < MIN_DIRECTORY or discovery_due(service, rule.keywords):
         report("Searching the web for companies that are hiring…")
@@ -272,12 +268,10 @@ def directory_postings(
 
     live = [entry for entry in boards if f"{entry[0]}/{entry[1]}" in fetched]
     save_companies(service, live, fetched)
+    if any(entry[3] == "discovery" and (entry[0], entry[1]) not in known for entry in live):
+        remove_duplicate_names(service)
     if kinds:
         record_kinds(service, {key: kind for key, kind in kinds.items() if f"{key[0]}/{key[1]}" in fetched})
-    new_live = [entry for entry in live if entry[3] == "discovery" and (entry[0], entry[1]) not in known]
-    if new_live:
-        report(f"Finding careers pages for {len(new_live)} new companies…")
-    record_careers_pages(service, client, settings, usage, careers, pages_for(new_live, named))
     record_misses(service, [c for c in directory if f"{c['source']}/{c['board']}" in gone])
     mark_closed(user, service, fetched)
     if unreachable:
@@ -482,12 +476,8 @@ def label_if_new(
     service: Rest,
     usage: Usage,
     namer: Callable[..., dict[tuple[str, str], CompanyName]],
-    careers: Callable[..., str | None],
 ) -> None:
-    """
-    Labels a company found by name the first time it's found and looks up its
-    careers page; its name stays the one its board gave.
-    """
+    """Labels a company found by name the first time it's found; its name stays the one its board gave."""
     rows = service.select(
         "companies", {"select": "kind", "source": f"eq.{found.source}", "board": f"eq.{found.board}"}
     )
@@ -496,9 +486,6 @@ def label_if_new(
     named = namer(client, settings.discovery_model, [FoundBoard(found.source, found.board, [found.name])], usage)
     if (found.source, found.board) in named:
         record_kinds(service, {(found.source, found.board): named[(found.source, found.board)].kind})
-    record_careers_pages(
-        service, client, settings, usage, careers, pages_for([(found.source, found.board, found.name, "lookup")], named)
-    )
 
 
 def rescore(
@@ -587,6 +574,7 @@ class ImportResult:
     added: list[str]
     existing: int
     not_found: list[str]
+    empty: list[str]
 
 
 def import_companies(
@@ -600,7 +588,6 @@ def import_companies(
     finder: Callable[[str], CompanyBoard] = find_company,
     fetcher: Callable[[str, str, str], list[Posting]] = fetch_board,
     namer: Callable[..., dict[tuple[str, str], CompanyName]] = name_companies,
-    careers: Callable[..., str | None] = find_careers_page,
 ) -> ImportResult:
     """
     Adds companies to the directory from careers page URLs or company names.
@@ -670,12 +657,13 @@ def import_companies(
             list(pool.map(fetch, new_urls))
 
     save_companies(service, boards, fetched)
+    removed = remove_duplicate_names(service) if boards else set()
+    existing |= {(source, board) for source, board, _, _ in boards if (source, board) in removed}
+    boards = [entry for entry in boards if (entry[0], entry[1]) not in removed]
     added = {(source, board) for source, board, _, _ in boards}
     record_kinds(service, {key: entry.kind for key, entry in named.items() if key in added})
-    if boards:
-        report(f"Finding careers pages for {len(boards)} {'company' if len(boards) == 1 else 'companies'}…")
-    record_careers_pages(service, client, settings, usage, careers, pages_for(boards, named))
-    return ImportResult(sorted(name for _, _, name, _ in boards), len(existing), not_found)
+    empty = sorted(name for source, board, name, _ in boards if not fetched.get(f"{source}/{board}"))
+    return ImportResult(sorted(name for _, _, name, _ in boards), len(existing), not_found, empty)
 
 
 def hiring_thread_postings(
@@ -714,78 +702,40 @@ def hiring_thread_postings(
     return saved + found
 
 
-# Careers pages looked up at once; each can make one web search.
-CAREERS_CONCURRENCY = 4
-NAMING_BATCH = 40
-Page = tuple[str, str, str, str | None]
-
-
-def pages_for(boards: list[Board], named: dict[tuple[str, str], CompanyName]) -> list[Page]:
-    """Each board's company name and the careers page its naming suggested, if any."""
-    return [
-        (source, board, name, named[(source, board)].careers_page if (source, board) in named else None)
-        for source, board, name, _ in boards
-    ]
-
-
-def record_careers_pages(
-    service: Rest,
-    client: Any,
-    settings: Settings,
-    usage: Usage,
-    careers: Callable[..., str | None],
-    pages: list[Page],
-) -> int:
+def remove_duplicate_names(service: Rest) -> set[tuple[str, str]]:
     """
-    Saves each company's careers page on its website, or that none was found,
-    so the company isn't looked up again. Returns how many were found.
+    Keeps one directory entry per company name, ignoring case: the board with
+    the most open jobs, or the older entry on a tie. Returns the removed boards.
     """
-    if not pages:
-        return 0
-    http = httpx.Client(timeout=10, headers={"User-Agent": "Mozilla/5.0 (compatible; job-finder)"})
-    spent = [Usage() for _ in pages]
+    rows = service.select("companies", {"select": "id,source,board,name,open_jobs,created_at"})
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        groups.setdefault(" ".join(row["name"].lower().split()), []).append(row)
 
-    def look_up(page: Page, page_usage: Usage) -> bool:
-        source, board, name, suggestion = page
-        url = careers(client, settings.discovery_model, name, suggestion, page_usage, http)
-        service.update(
-            "companies",
-            {"source": f"eq.{source}", "board": f"eq.{board}"},
-            {"careers_page_url": url, "careers_page_checked_at": datetime.now(UTC).isoformat()},
-        )
-        return url is not None
-
-    with ThreadPoolExecutor(max_workers=CAREERS_CONCURRENCY) as pool:
-        found = sum(pool.map(look_up, pages, spent))
-    for page_usage in spent:
-        usage.add(page_usage)
-    return found
+    removed: set[tuple[str, str]] = set()
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        _, *rest = sorted(group, key=lambda row: (-row["open_jobs"], row["created_at"]))
+        service.delete("companies", {"id": f"in.({','.join(row['id'] for row in rest)})"})
+        removed |= {(row["source"], row["board"]) for row in rest}
+    return removed
 
 
-def fill_careers_pages(
-    *,
-    client: Any,
-    settings: Settings,
-    service: Rest,
-    usage: Usage,
-    report: Callable[[str], None],
-    namer: Callable[..., dict[tuple[str, str], CompanyName]] = name_companies,
-    careers: Callable[..., str | None] = find_careers_page,
-) -> tuple[int, int]:
+# Short forms written out before titles are compared across sources.
+TITLE_ABBREVIATIONS = {"sr": "senior", "jr": "junior", "eng": "engineer", "engr": "engineer"}
+
+
+def one_per_job(postings: list[Posting]) -> list[Posting]:
     """
-    Looks up careers pages for directory companies that never had one looked
-    up: naming calls suggest them NAMING_BATCH at a time, then each is checked
-    or searched for. Returns how many were found and how many were checked.
+    One posting per job across sources: the same company name and title
+    ('Sr Software Engineer, Full-Stack' and 'Senior Software Engineer, Full Stack')
+    count as one job. A company board's posting is kept over a Hacker News one.
     """
-    rows = service.select("companies", {"select": "source,board,name", "careers_page_checked_at": "is.null"})
-    if not rows:
-        return 0, 0
-    report(f"Finding careers pages for {len(rows)} companies…")
-    named: dict[tuple[str, str], CompanyName] = {}
-    for i in range(0, len(rows), NAMING_BATCH):
-        batch = rows[i : i + NAMING_BATCH]
-        named |= namer(
-            client, settings.discovery_model, [FoundBoard(r["source"], r["board"], [r["name"]]) for r in batch], usage
-        )
-    boards: list[Board] = [(r["source"], r["board"], r["name"], "") for r in rows]
-    return record_careers_pages(service, client, settings, usage, careers, pages_for(boards, named)), len(rows)
+    chosen: dict[tuple[str, str], Posting] = {}
+    for p in postings:
+        words = re.findall(r"[a-z0-9]+", p.title.lower())
+        key = (compact(p.company), " ".join(TITLE_ABBREVIATIONS.get(word, word) for word in words))
+        if key not in chosen or (chosen[key].source == "hackernews" and p.source != "hackernews"):
+            chosen[key] = p
+    return list(chosen.values())

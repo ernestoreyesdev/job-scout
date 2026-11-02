@@ -113,8 +113,6 @@ export type CompanyRow = {
   found_by: CompanyOriginRow;
   checked_at: string;
   careers_url: string | null;
-  careers_page_url: string | null;
-  careers_page_checked_at: string | null;
   kind: CompanyKindRow | null;
   created_at: string;
 };

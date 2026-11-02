@@ -77,13 +77,6 @@ class CompanyName(BaseModel):
             "companies (recruitment, contract staffing, talent placement). aggregator: reposts other companies' jobs."
         )
     )
-    careers_page: str | None = Field(
-        default=None,
-        description=(
-            "The company's own careers page on its website, e.g. 'https://www.boeing.com/careers'; never a job "
-            "board or applicant tracking system page. Null when you don't know it."
-        ),
-    )
 
 
 class CompanyNames(BaseModel):
@@ -110,10 +103,3 @@ class HiringJob(BaseModel):
 
 class HiringJobs(BaseModel):
     jobs: list[HiringJob]
-
-
-class CareersPageRequest(BaseModel):
-    """A careers page address the user entered for a directory company."""
-
-    url: str = Field(max_length=500, pattern=r"^https?://\S+$")
-

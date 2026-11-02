@@ -205,19 +205,3 @@ export async function importCompanies(formData: FormData): Promise<ActionResult>
     await callAgent("/runs/import", { method: "POST", body: { entries } });
   });
 }
-
-/** Starts a run that looks up careers pages for directory companies that never had one looked up. */
-export async function findCareersPages(): Promise<ActionResult> {
-  return run("/companies", async () => {
-    await callAgent("/runs/careers-pages", { method: "POST" });
-  });
-}
-
-/** Saves the careers page the user entered for a directory company. */
-export async function setCareersPage(companyId: string, formData: FormData): Promise<ActionResult> {
-  return run("/companies", async () => {
-    const url = text(formData.get("url"));
-    if (!/^https?:\/\/\S+$/.test(url) || url.length > 500) throw new Error("Enter a link starting with http:// or https://.");
-    await callAgent(`/companies/${encodeURIComponent(companyId)}/careers-page`, { method: "PUT", body: { url } });
-  });
-}

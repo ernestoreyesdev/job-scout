@@ -2,7 +2,6 @@ import Link from "next/link";
 import { Suspense } from "react";
 
 import { CompanyRow } from "@/components/company-row";
-import { FindCareersPages } from "@/components/find-careers-pages";
 import { ImportCompanies } from "@/components/import-companies";
 import { Pager } from "@/components/pager";
 import { RunStatus } from "@/components/run-status";
@@ -32,18 +31,17 @@ async function CompaniesData({ searchParams }: Pick<PageProps<"/companies">, "se
   const params = await searchParams;
   const search = (Array.isArray(params.q) ? params.q[0] : params.q)?.trim().slice(0, 100) ?? "";
   const { repository } = await getSignedInSource();
-  const [companies, runs, withoutCareersPage] = await Promise.all([
+  const [companies, runs] = await Promise.all([
     repository.listCompanies(Number(params.page) || 1, search),
     repository.listRuns(1),
-    repository.countCompaniesWithoutCareersPage(),
   ]);
-  const companyRun = runs[0]?.kind === "import" || runs[0]?.kind === "careers_pages" ? runs[0] : null;
+  const importRun = runs[0]?.kind === "import" ? runs[0] : null;
 
   if (companies.total === 0 && !search) {
     return (
       <>
         <ImportCompanies />
-        {companyRun && <RunStatus run={companyRun} />}
+        {importRun && <RunStatus run={importRun} />}
         <p className="mt-8 text-sm text-muted-foreground">
           No companies yet. Add some above, or run a search with no company and the app finds some.
         </p>
@@ -54,7 +52,7 @@ async function CompaniesData({ searchParams }: Pick<PageProps<"/companies">, "se
   return (
     <>
       <ImportCompanies />
-      {companyRun && <RunStatus run={companyRun} />}
+      {importRun && <RunStatus run={importRun} />}
       <section className="mt-8">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <form method="get" action="/companies" className="flex flex-wrap items-center gap-3 text-sm">
@@ -68,8 +66,7 @@ async function CompaniesData({ searchParams }: Pick<PageProps<"/companies">, "se
               </Link>
             )}
           </form>
-          {withoutCareersPage > 0 && <FindCareersPages count={withoutCareersPage} />}
-        </div>
+          </div>
         {companies.total === 0 && <p className="text-sm text-muted-foreground">No companies match “{search}”.</p>}
         <Table>
           <TableHeader>

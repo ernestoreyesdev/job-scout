@@ -11,10 +11,11 @@ from app.agents.hiring_threads.agent import HiringPost
 from app.agents.orchestrator import (
     MAX_MISSED_CHECKS,
     MIN_DIRECTORY,
-    fill_careers_pages,
     hiring_thread_postings,
     import_companies,
+    remove_duplicate_names,
     keyword_set,
+    one_per_job,
     run_search,
 )
 from app.agents.schemas import CompanyName, FitScore, SearchRule, Usage
@@ -152,7 +153,6 @@ def run(
         triage=overrides.pop("triage", newest_first),
         namer=overrides.pop("namer", lambda client, model, boards, usage: {}),
         read_posts=overrides.pop("read_posts", lambda: []),
-        careers=overrides.pop("careers", lambda *args: None),
         **overrides,
     )
     return result, messages, user, service, progress, usage
@@ -355,6 +355,8 @@ def company(board: str) -> dict[str, str]:
         "found_by": "lookup",
         "missed_checks": 0,
         "kind": None,
+        "open_jobs": 1,
+        "created_at": "2026-10-01T00:00:00+00:00",
     }
 
 
@@ -874,7 +876,7 @@ def test_import_adds_names_and_urls_and_reports_the_rest():
             ),
         }
 
-    service = FakeRest(companies=[{"source": "lever", "board": "globex"}])
+    service = FakeRest(companies=[company("globex") | {"source": "lever"}])
     result = import_companies(
         entries=[
             "Acme",
@@ -891,10 +893,9 @@ def test_import_adds_names_and_urls_and_reports_the_rest():
         finder=finder,
         fetcher=fetcher,
         namer=namer,
-        careers=lambda client, model, name, suggestion, usage, http: suggestion,
     )
 
-    assert result.added == ["Acme", "CVS Health"] and result.existing == 1
+    assert result.added == ["Acme", "CVS Health"] and result.existing == 1 and result.empty == []
     assert sorted(result.not_found) == ["Nowhere Inc", "https://example.com/careers"]
     assert fetched == [("workday", "cvshealth.wd1/cvs_health_careers", "CVS Health")]
     [boards] = namer_calls
@@ -943,22 +944,53 @@ def test_an_unreachable_hacker_news_is_skipped():
     assert progress == ["Couldn't reach Hacker News; skipped its hiring posts this time."]
 
 
-def test_careers_pages_are_saved_found_or_not():
-    service = FakeRest(companies=[{"source": "greenhouse", "board": "acme", "name": "Acme"}, {"source": "lever", "board": "globex", "name": "Globex"}])
-    asked: list[tuple[str, str | None]] = []
+def test_duplicate_names_keep_the_board_with_the_most_jobs():
+    empty = company("boeing") | {"id": "old", "source": "workable", "open_jobs": 0}
+    real = company("boeing.wd1/external_careers") | {
+        "id": "new",
+        "source": "workday",
+        "name": "boeing",
+        "open_jobs": 674,
+        "created_at": "2026-11-02T00:00:00+00:00",
+    }
+    service = FakeRest(companies=[empty, real, company("acme")])
 
-    def namer(client: Any, model: str, boards: list[FoundBoard], usage: Usage) -> dict[tuple[str, str], CompanyName]:
-        return {("greenhouse", "acme"): CompanyName(board="greenhouse/acme", name="Acme", kind="employer", careers_page="https://acme.com/careers")}
+    removed = remove_duplicate_names(service)
 
-    def careers(client: Any, model: str, name: str, suggestion: str | None, usage: Usage, http: Any) -> str | None:
-        asked.append((name, suggestion))
-        return suggestion
+    assert removed == {("workable", "boeing")}
+    assert service.deletes == [("companies", {"id": "in.(old)"})]
 
-    found, checked = fill_careers_pages(
-        client=None, settings=SETTINGS, service=service, usage=Usage(), report=lambda m: None, namer=namer, careers=careers
+
+def test_an_import_that_duplicates_a_bigger_entry_counts_as_existing():
+    service = FakeRest(companies=[company("acme") | {"source": "greenhouse", "board": "acme-careers", "open_jobs": 40}])
+    stored = service.select
+
+    def select(table: str, params: dict[str, str]) -> list[dict[str, Any]]:
+        saved = [
+            {**row, "id": f"id-{row['board']}", "created_at": "2026-11-02T00:00:00+00:00"}
+            for rows in service.inserted("companies")
+            for row in rows
+        ]
+        return stored(table, params) + (saved if table == "companies" else [])
+
+    service.select = select
+    result = import_companies(
+        entries=["Acme"],
+        client=None,
+        settings=SETTINGS,
+        service=service,
+        usage=Usage(),
+        report=lambda message: None,
+        finder=lambda name: CompanyBoard("workable", "acme", "Acme", []),
+        namer=lambda client, model, boards, usage: {},
     )
 
-    assert (found, checked) == (1, 2)
-    assert sorted(asked) == [("Acme", "https://acme.com/careers"), ("Globex", None)]
-    saved = {filters["board"]: patch["careers_page_url"] for table, filters, patch in service.updates if table == "companies"}
-    assert saved == {"eq.acme": "https://acme.com/careers", "eq.globex": None}
+    assert (result.added, result.existing) == ([], 1)
+
+
+def test_the_same_job_from_two_sources_is_scored_once_from_its_board():
+    from_thread = posting("50338728-1", "Sr Software Engineer, Full-Stack", source="hackernews", board="curai", company="Curai")
+    from_board = posting("lever-9", "Senior Software Engineer, Full Stack", source="lever", board="curai", company="Curai")
+    other = posting("lever-10", "Senior Software Engineer, Full Stack", source="lever", board="acme", company="Acme")
+
+    assert one_per_job([from_thread, other, from_board]) == [from_board, other]

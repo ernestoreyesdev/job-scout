@@ -256,14 +256,4 @@ export class JobFinderRepository {
     if (error) throw error;
     return count ?? 0;
   }
-
-  /** Directory companies whose careers page has never been looked up. */
-  async countCompaniesWithoutCareersPage(): Promise<number> {
-    const { count, error } = await this.client
-      .from("companies")
-      .select("id", { count: "exact", head: true })
-      .is("careers_page_checked_at", null);
-    if (error) throw error;
-    return count ?? 0;
-  }
 }
