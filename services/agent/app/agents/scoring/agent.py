@@ -3,9 +3,10 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
-from app.agents.schemas import FitScore, Usage
+from app.agents.schemas import FitScore, JobDetails, Usage
 from app.agents.scoring.prompts import FIT_SYSTEM, fit_blocks
 from app.db import Rest
 from app.sources.base import Posting
@@ -53,13 +54,15 @@ def score_and_save(
     resume_text: str,
     user_id: str,
     user: Rest,
+    service: Rest,
     usage: Usage,
     report: Callable[[str], None],
 ) -> ScoringResult:
     """
     Scores each (posting id, posting) pair and saves it to the user's tracker as
-    soon as it's scored. The first job is scored alone so the cached resume
-    prefix exists before the parallel calls start.
+    soon as it's scored, along with the facts read from the posting. The first
+    job is scored alone so the cached resume prefix exists before the parallel
+    calls start.
     """
     lock = threading.Lock()
     done = {"scored": 0, "failed": 0}
@@ -80,6 +83,7 @@ def score_and_save(
             },
             on_conflict="user_id,posting_id",
         )
+        service.update("postings", {"id": f"eq.{posting_id}"}, posting_details(fit.details, posting))
         with lock:
             usage.add(call_usage)
             scores[posting_id] = fit.score
@@ -101,3 +105,12 @@ def score_and_save(
                     done["failed"] += 1
 
     return ScoringResult(done["scored"], done["failed"], scores)
+
+
+def posting_details(details: JobDetails, posting: Posting) -> dict[str, Any]:
+    """Columns saved on the posting; the source's own workplace type wins over the one read from the text."""
+    columns = details.model_dump(exclude={"workplace_type"})
+    columns["details_extracted_at"] = datetime.now(UTC).isoformat()
+    if posting.workplace_type is None and details.workplace_type is not None:
+        columns["workplace_type"] = details.workplace_type
+    return columns

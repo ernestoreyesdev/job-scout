@@ -15,9 +15,10 @@ function first(value: string | string[] | undefined): string {
 }
 
 /**
- * Reads `?sort=`, `?status=`, `?company=`, `?open=1` and `?page=`, ignoring
- * unknown values. `params` holds the recognized settings other than the page,
- * for links that keep them.
+ * Reads `?sort=`, `?status=`, `?company=`, `?open=1`, `?noclearance=1`,
+ * `?salary=` (a yearly minimum) and `?page=`, ignoring unknown values.
+ * `params` holds the recognized settings other than the page, for links that
+ * keep them.
  */
 export function parseJobQuery(searchParams: SearchParams): JobQuery {
   const sortValue = first(searchParams.sort);
@@ -28,14 +29,24 @@ export function parseJobQuery(searchParams: SearchParams): JobQuery {
     : undefined;
   const company = first(searchParams.company) || undefined;
   const hideClosed = first(searchParams.open) === "1";
+  const hideClearance = first(searchParams.noclearance) === "1";
+  const salary = Number(first(searchParams.salary));
+  const minSalary = Number.isFinite(salary) && salary > 0 ? Math.round(salary) : undefined;
 
   const params: Record<string, string> = {};
   if (sort !== "desc") params.sort = sort;
   if (status) params.status = status;
   if (company) params.company = company;
   if (hideClosed) params.open = "1";
+  if (hideClearance) params.noclearance = "1";
+  if (minSalary) params.salary = String(minSalary);
 
-  return { sort, filters: { status, company, hideClosed }, page: Number(first(searchParams.page)) || 1, params };
+  return {
+    sort,
+    filters: { status, company, hideClosed, hideClearance, minSalary },
+    page: Number(first(searchParams.page)) || 1,
+    params,
+  };
 }
 
 /** A list URL with the given settings, leaving out empty ones. */

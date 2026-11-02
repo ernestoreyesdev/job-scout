@@ -7,7 +7,7 @@ from fastapi import BackgroundTasks, HTTPException
 
 from app import main
 from app.agents.orchestrator import ImportResult, SearchResult
-from app.agents.schemas import SearchRule
+from app.agents.schemas import FollowUpDraft, GapAnalysis, GapItem, SearchRule
 from app.sources.base import CompanyNotFound
 
 
@@ -104,3 +104,95 @@ def test_import_summary_names_companies_with_no_open_jobs():
     assert main.summarize_import(result) == (
         "Added 2 companies, Boeing has no open jobs listed, 1 already in the directory, couldn't find Nowhere."
     )
+
+
+class JobRest(FakeRest):
+    """Answers selects for one application, the user's key and primary resume."""
+
+    def __init__(self, application: dict[str, Any] | None):
+        super().__init__()
+        self.application = application
+
+    def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
+        if table == "applications":
+            return [self.application] if self.application else []
+        if table == "api_credentials":
+            return [{"ciphertext": "secret"}]
+        return [{"text": "Python developer, 8 years."}]
+
+
+def call_job_endpoint(monkeypatch: pytest.MonkeyPatch, endpoint: Any, db: JobRest, **fakes: Any) -> dict[str, Any]:
+    monkeypatch.setattr(main, "user_db", lambda settings, token: db)
+    monkeypatch.setattr(main, "service_db", lambda settings: db)
+    monkeypatch.setattr(main, "decrypt", lambda ciphertext, key: "key")
+    monkeypatch.setattr(main, "make_client", lambda key: None)
+    for name, fake in fakes.items():
+        monkeypatch.setattr(main, name, fake)
+    settings = SimpleNamespace(agent_encryption_key="k", analysis_model="claude-haiku-5-5")
+    return endpoint("app-1", SimpleNamespace(id="u", access_token="t"), settings)
+
+
+POSTING = {
+    "source": "lever",
+    "board": "acme",
+    "external_id": "1",
+    "title": "Backend Engineer",
+    "company": "Acme",
+    "location": "Remote",
+    "url": "https://example.com/1",
+    "description": "Python and Postgres.",
+    "posted_at": None,
+}
+
+
+def test_gap_analysis_is_saved_on_the_application(monkeypatch: pytest.MonkeyPatch):
+    analysis = GapAnalysis(
+        covered=[GapItem(requirement="Python", evidence="8 years of Python", suggestion="Lead with it.")],
+        weak=[],
+        missing=[GapItem(requirement="Postgres", evidence="", suggestion="Mention SQL work the resume shows.")],
+    )
+    db = JobRest({"id": "app-1", "posting": POSTING})
+
+    result = call_job_endpoint(
+        monkeypatch, main.post_gap_analysis, db, analyze_gaps=lambda client, model, resume, posting, usage: analysis
+    )
+
+    assert result["gap_analysis"] == analysis.model_dump()
+    [(table, filters, patch)] = db.updates
+    assert (table, filters) == ("applications", {"id": "eq.app-1"})
+    assert patch["gap_analysis"] == analysis.model_dump() and patch["gap_analyzed_at"]
+
+
+def test_gap_analysis_of_someone_elses_job_is_not_found(monkeypatch: pytest.MonkeyPatch):
+    with pytest.raises(HTTPException) as missing:
+        call_job_endpoint(monkeypatch, main.post_gap_analysis, JobRest(None))
+
+    assert missing.value.status_code == 404
+
+
+def test_follow_up_uses_the_latest_applied_date(monkeypatch: pytest.MonkeyPatch):
+    seen: list[str] = []
+
+    def draft(client: Any, model: str, resume: str, title: str, company: str, applied_on: str, usage: Any) -> FollowUpDraft:
+        seen.append(applied_on)
+        return FollowUpDraft(subject="Following up", body="Hi team")
+
+    events = [
+        {"status": "saved", "changed_at": "2026-10-01T10:00:00+00:00"},
+        {"status": "applied", "changed_at": "2026-10-03T10:00:00+00:00"},
+        {"status": "applied", "changed_at": "2026-10-20T10:00:00+00:00"},
+    ]
+    db = JobRest({"id": "app-1", "posting": {"title": "Backend Engineer", "company": "Acme"}, "events": events})
+
+    result = call_job_endpoint(monkeypatch, main.post_follow_up, db, draft_follow_up=draft)
+
+    assert seen == ["2026-10-20"] and (result["subject"], result["body"]) == ("Following up", "Hi team")
+
+
+def test_follow_up_needs_an_applied_job(monkeypatch: pytest.MonkeyPatch):
+    db = JobRest({"id": "app-1", "posting": {"title": "T", "company": "C"}, "events": [{"status": "saved", "changed_at": "x"}]})
+
+    with pytest.raises(HTTPException) as refused:
+        call_job_endpoint(monkeypatch, main.post_follow_up, db)
+
+    assert refused.value.status_code == 400

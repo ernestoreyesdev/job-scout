@@ -7,26 +7,48 @@ import type {
   ApplicationStatusRow,
   CompanyRow,
   Database,
+  FitLabelRow,
   JobSort,
   PostingRow,
   ProfileRow,
   ResumeRow,
 } from "./schema";
-import { SKIPPED_COMPANY_KINDS } from "./schema";
+import { FOLLOW_UP_DAYS, GHOST_JOB_DAYS, SKIPPED_COMPANY_KINDS } from "./schema";
+import type { FunnelJob, ScoredJob } from "../insights";
 
 export type JobFinderClient = SupabaseClient<Database>;
 
-export type TrackedJob = ApplicationRow & {
+type TrackedJobRow = ApplicationRow & {
   posting: PostingRow;
   events: Pick<ApplicationEventRow, "status" | "changed_at">[];
 };
 
+/**
+ * Signals that depend on today's date: days since the posting went up (while it's listed), whether the same
+ * company listed the same title before under another posting, and days since the job was marked applied.
+ */
+export type JobSignals = { openDays: number | null; reposted: boolean; daysSinceApplied: number | null };
+
+export type TrackedJob = TrackedJobRow & { signals: JobSignals };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function sameTitle(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 /** Narrows the Tracker or Jobs list; every field is optional. */
-export type JobFilters = { status?: ApplicationStatusRow; company?: string; hideClosed?: boolean };
+export type JobFilters = {
+  status?: ApplicationStatusRow;
+  company?: string;
+  hideClosed?: boolean;
+  hideClearance?: boolean;
+  minSalary?: number;
+};
 
 export type DirectoryCompany = CompanyRow & { hidden: boolean };
 
-export type ApplicationPatch = { status?: ApplicationStatusRow; notes?: string | null };
+export type ApplicationPatch = { status?: ApplicationStatusRow; notes?: string | null; fit_label?: FitLabelRow | null };
 
 /** One page of a list: its rows, the page number shown and how many pages there are. */
 export type Page<T> = { items: T[]; page: number; pageCount: number; total: number };
@@ -103,7 +125,7 @@ export class JobFinderRepository {
     page = 1,
     filters: JobFilters = {},
   ): Promise<Page<TrackedJob>> {
-    return this.paged(page, (from, to) => {
+    const result = await this.paged<TrackedJobRow>(page, (from, to) => {
       let query = this.client
         .from("applications")
         .select("*, posting:postings!inner(*), events:application_events(status, changed_at)", { count: "exact" });
@@ -111,6 +133,10 @@ export class JobFinderRepository {
       if (filters.status) query = query.eq("status", filters.status);
       if (filters.company) query = query.eq("posting.company", filters.company);
       if (filters.hideClosed) query = query.is("posting.closed_at", null);
+      if (filters.hideClearance) query = query.is("posting.clearance", null);
+      if (filters.minSalary) {
+        query = query.eq("posting.salary_period", "year").gte("posting.salary_max", filters.minSalary);
+      }
       const ordered =
         sort === "posted"
           ? query.order("posting(posted_at)", { ascending: false, nullsFirst: false })
@@ -118,6 +144,35 @@ export class JobFinderRepository {
             ? query.order("created_at", { ascending: false })
             : query.order("fit_score", { ascending: sort === "asc", nullsFirst: false });
       return ordered.order("id").order("changed_at", { referencedTable: "events" }).range(from, to);
+    });
+    return { ...result, items: await this.withSignals(result.items) };
+  }
+
+  /** Adds each job's date-based signals; reposts are found among other postings from the same companies. */
+  private async withSignals(jobs: TrackedJobRow[]): Promise<TrackedJob[]> {
+    const companies = [...new Set(jobs.map((job) => job.posting.company))];
+    const { data: others, error } = companies.length
+      ? await this.client.from("postings").select("id, company, title, created_at").in("company", companies)
+      : { data: [], error: null };
+    if (error) throw error;
+    const now = Date.now();
+    const days = (date: string) => Math.floor((now - new Date(date).getTime()) / DAY_MS);
+    return jobs.map((job) => {
+      const applied = job.events.filter((event) => event.status === "applied").at(-1);
+      return {
+        ...job,
+        signals: {
+          openDays: job.posting.closed_at ? null : days(job.posting.posted_at ?? job.posting.created_at),
+          reposted: others.some(
+            (other) =>
+              other.id !== job.posting.id &&
+              other.company === job.posting.company &&
+              sameTitle(other.title) === sameTitle(job.posting.title) &&
+              other.created_at < job.posting.created_at,
+          ),
+          daysSinceApplied: job.status === "applied" && applied ? days(applied.changed_at) : null,
+        },
+      };
     });
   }
 
@@ -255,5 +310,74 @@ export class JobFinderRepository {
       .eq("in_tracker", true);
     if (error) throw error;
     return count ?? 0;
+  }
+
+  /** Every job scored for the user with its score, thumbs, status and source, for Insights. */
+  async listScoredJobs(): Promise<ScoredJob[]> {
+    const { data, error } = await this.client
+      .from("applications")
+      .select("fit_score, fit_label, status, posting:postings!inner(source)")
+      .not("fit_score", "is", null)
+      .range(0, 9999);
+    if (error) throw error;
+    return data.map(({ posting, ...job }) => ({ ...job, source: posting.source }));
+  }
+
+  /** The user's runs from the last `days` days, newest first. */
+  async listRecentRuns(days: number): Promise<AgentRunRow[]> {
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const { data, error } = await this.client
+      .from("agent_runs")
+      .select("*")
+      .gte("created_at", since.toISOString())
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return data;
+  }
+
+  /** Jobs past "new" with their status history, source and scoring resume's file name, for the funnel. */
+  async listFunnelJobs(): Promise<FunnelJob[]> {
+    const { data, error } = await this.client
+      .from("applications")
+      .select("status, posting:postings!inner(source), resume:resumes(file_name), events:application_events(status)")
+      .neq("status", "new")
+      .range(0, 9999);
+    if (error) throw error;
+    return data.map((job) => ({
+      statuses: [job.status, ...job.events.map((event) => event.status)],
+      source: job.posting.source,
+      resume: job.resume?.file_name ?? "Unknown resume",
+    }));
+  }
+
+  /** Jobs still "applied" FOLLOW_UP_DAYS or more after being marked so, longest waiting first. */
+  async listFollowUpsDue(): Promise<{ id: string; title: string; company: string; days: number }[]> {
+    const { data, error } = await this.client
+      .from("applications")
+      .select("id, posting:postings!inner(title, company), events:application_events(status, changed_at)")
+      .eq("status", "applied");
+    if (error) throw error;
+    const now = Date.now();
+    return data
+      .map((job) => {
+        const applied = job.events.filter((event) => event.status === "applied").map((event) => event.changed_at).sort().at(-1);
+        const days = applied ? Math.floor((now - new Date(applied).getTime()) / DAY_MS) : 0;
+        return { id: job.id, title: job.posting.title, company: job.posting.company, days };
+      })
+      .filter((job) => job.days >= FOLLOW_UP_DAYS)
+      .sort((a, b) => b.days - a.days);
+  }
+
+  /** The user's tracked jobs whose posting is still listed GHOST_JOB_DAYS or more after it went up. */
+  async countAgingJobs(): Promise<number> {
+    const { data, error } = await this.client
+      .from("applications")
+      .select("posting:postings!inner(posted_at, created_at, closed_at)")
+      .or("in_tracker.eq.true,status.neq.new")
+      .is("posting.closed_at", null)
+      .range(0, 9999);
+    if (error) throw error;
+    const cutoff = Date.now() - GHOST_JOB_DAYS * DAY_MS;
+    return data.filter((job) => new Date(job.posting.posted_at ?? job.posting.created_at).getTime() <= cutoff).length;
   }
 }

@@ -168,6 +168,7 @@ def run_search(
         resume_text=resume_text,
         user_id=user_id,
         user=user,
+        service=service,
         usage=usage,
         report=report,
     )
@@ -528,6 +529,7 @@ def rescore(
         resume_text=resume_text,
         user_id=user_id,
         user=user,
+        service=service,
         usage=usage,
         report=report,
     )

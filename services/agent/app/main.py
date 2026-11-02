@@ -18,12 +18,14 @@ from app.agents.orchestrator import (
     rescore as orchestrate_rescore,
     run_search as orchestrate_search,
 )
+from app.agents.follow_up.agent import FollowUpError, draft_follow_up
+from app.agents.gap_analysis.agent import GapAnalysisError, analyze_gaps
 from app.agents.schemas import AnthropicKeyRequest, CompanyImport, SearchRule, Usage
 from app.auth import CurrentUser, current_user
 from app.config import Settings, get_settings
 from app.crypto import decrypt, encrypt, key_hint
 from app.db import Rest, service_db, user_db
-from app.sources.base import CompanyNotFound
+from app.sources.base import CompanyNotFound, Posting
 
 logger = logging.getLogger("agent")
 
@@ -365,3 +367,63 @@ def summarize_import(result: ImportResult) -> str:
     if result.not_found:
         parts.append(f"couldn't find {', '.join(result.not_found)}")
     return ", ".join(parts) + "."
+
+
+def claude_and_resume(user: CurrentUser, settings: Settings) -> tuple[Any, str]:
+    """The user's Claude client and primary resume text, or a 400 saying which one is missing."""
+    credentials = service_db(settings).select(
+        "api_credentials", {"user_id": f"eq.{user.id}", "provider": "eq.anthropic", "select": "ciphertext"}
+    )
+    if not credentials:
+        raise HTTPException(400, "Add your Anthropic API key in Settings first.")
+    resumes = user_db(settings, user.access_token).select("resumes", {"is_primary": "eq.true", "select": "text"})
+    if not resumes or not resumes[0]["text"]:
+        raise HTTPException(400, "Upload a resume first.")
+    return make_client(decrypt(credentials[0]["ciphertext"], settings.agent_encryption_key)), resumes[0]["text"]
+
+
+@app.post("/applications/{application_id}/gap-analysis")
+def post_gap_analysis(application_id: str, user: User, settings: Config) -> dict[str, Any]:
+    db = user_db(settings, user.access_token)
+    rows = db.select("applications", {"id": f"eq.{application_id}", "select": "id,posting:postings(*)"})
+    if not rows:
+        raise HTTPException(404, "Job not found.")
+    client, resume_text = claude_and_resume(user, settings)
+    usage = Usage()
+    try:
+        analysis = analyze_gaps(client, settings.analysis_model, resume_text, Posting.model_validate(rows[0]["posting"]), usage)
+    except (GapAnalysisError, anthropic.APIError) as error:
+        raise HTTPException(502, f"Couldn't analyze this job: {error}")
+    db.update(
+        "applications",
+        {"id": f"eq.{application_id}"},
+        {"gap_analysis": analysis.model_dump(), "gap_analyzed_at": datetime.now(UTC).isoformat()},
+    )
+    return {"gap_analysis": analysis.model_dump(), "usage": usage.model_dump()}
+
+
+@app.post("/applications/{application_id}/follow-up")
+def post_follow_up(application_id: str, user: User, settings: Config) -> dict[str, Any]:
+    db = user_db(settings, user.access_token)
+    rows = db.select(
+        "applications",
+        {
+            "id": f"eq.{application_id}",
+            "select": "id,posting:postings(title,company),events:application_events(status,changed_at)",
+        },
+    )
+    if not rows:
+        raise HTTPException(404, "Job not found.")
+    applied = sorted(event["changed_at"] for event in rows[0]["events"] if event["status"] == "applied")
+    if not applied:
+        raise HTTPException(400, "This job was never marked applied.")
+    client, resume_text = claude_and_resume(user, settings)
+    usage = Usage()
+    posting = rows[0]["posting"]
+    try:
+        draft = draft_follow_up(
+            client, settings.analysis_model, resume_text, posting["title"], posting["company"], applied[-1][:10], usage
+        )
+    except (FollowUpError, anthropic.APIError) as error:
+        raise HTTPException(502, f"Couldn't draft a follow-up: {error}")
+    return {**draft.model_dump(), "usage": usage.model_dump()}

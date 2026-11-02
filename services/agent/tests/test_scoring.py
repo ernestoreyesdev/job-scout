@@ -17,3 +17,12 @@ def test_trim_keeps_a_heading_near_the_start():
 
 def test_trim_keeps_text_without_boilerplate():
     assert trim_description(ROLE) == ROLE
+
+
+def test_trim_keeps_pay_lines_from_the_text_it_drops():
+    description = ROLE + "Benefits\n- Health insurance\n\nPay Transparency\nThe base salary range is $150,000 - $190,000 USD.\n"
+
+    assert trim_description(description) == (
+        ROLE.rstrip() + "\n\nPay stated later in the posting:\nThe base salary range is $150,000 - $190,000 USD."
+    )
+

@@ -21,7 +21,25 @@ export type JobSourceRow =
   | "jobvite"
   | "hackernews";
 
-export const APPLICATION_STATUSES = ["new", "saved", "tailored", "applied", "interviewing", "rejected"] as const;
+export const APPLICATION_STATUSES = [
+  "new",
+  "saved",
+  "tailored",
+  "applied",
+  "screening",
+  "interviewing",
+  "offer",
+  "rejected",
+] as const;
+
+/** Funnel stages after applying, in order; reaching one counts every stage before it too. */
+export const FUNNEL_STAGES = ["applied", "screening", "interviewing", "offer"] as const;
+
+/** A still-listed posting this many days old is flagged as a possible ghost job. */
+export const GHOST_JOB_DAYS = 60;
+
+/** An application still "applied" this many days after it was marked so gets a follow-up reminder. */
+export const FOLLOW_UP_DAYS = 7;
 
 export type ApplicationStatusRow = (typeof APPLICATION_STATUSES)[number];
 
@@ -76,6 +94,15 @@ export type PostingRow = {
   posted_at: string | null;
   workplace_type: WorkplaceTypeRow | null;
   closed_at: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  salary_currency: string | null;
+  salary_period: SalaryPeriodRow | null;
+  clearance: string | null;
+  visa_sponsorship: "yes" | "no" | null;
+  years_experience: number | null;
+  tech_stack: string[];
+  details_extracted_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -92,9 +119,17 @@ export type ApplicationRow = {
   status: ApplicationStatusRow;
   notes: string | null;
   in_tracker: boolean;
+  fit_label: FitLabelRow | null;
+  gap_analysis: GapAnalysis | null;
+  gap_analyzed_at: string | null;
   created_at: string;
   updated_at: string;
 };
+
+export type GapItem = { requirement: string; evidence: string; suggestion: string };
+
+/** A job's requirements sorted against the resume, with how to talk about each. */
+export type GapAnalysis = { covered: GapItem[]; weak: GapItem[]; missing: GapItem[] };
 
 export type RunUsage = {
   input_tokens: number;
@@ -139,6 +174,12 @@ export type ApplicationEventRow = {
 
 /** Ways the Tracker and Jobs can be sorted: by score either way, newest posting, or most recently added. */
 export const JOB_SORTS = ["desc", "asc", "posted", "added"] as const;
+
+export const FIT_LABELS = ["good", "bad"] as const;
+
+export type FitLabelRow = (typeof FIT_LABELS)[number];
+
+export type SalaryPeriodRow = "year" | "month" | "week" | "day" | "hour";
 
 export type JobSort = (typeof JOB_SORTS)[number];
 
@@ -197,6 +238,13 @@ export type Database = {
             columns: ["posting_id"];
             isOneToOne: false;
             referencedRelation: "postings";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "applications_resume_id_fkey";
+            columns: ["resume_id"];
+            isOneToOne: false;
+            referencedRelation: "resumes";
             referencedColumns: ["id"];
           },
         ];

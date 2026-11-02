@@ -18,3 +18,6 @@ __pycache__/
 # Supabase local state
 supabase/.branches/
 supabase/.temp/
+
+# Extraction eval inputs, read from the local database
+services/agent/evals/extraction/postings.local.json

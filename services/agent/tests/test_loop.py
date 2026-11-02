@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from app.agents.schemas import FitScore, Usage
+from app.agents.schemas import FitScore, JobDetails, Usage
 from app.agents.tool_loop.loop import MAX_TURNS, AgentError, run_search_agent
 from app.agents.tool_loop.tools import SearchTools
 from app.sources.base import Posting
@@ -75,7 +75,23 @@ def posting(external_id: str, title: str) -> Posting:
     )
 
 
-FIT = FitScore(score=72, summary="Solid match.", strengths=["Python"], gaps=["Kubernetes"])
+FIT = FitScore(
+    score=72,
+    summary="Solid match.",
+    strengths=["Python"],
+    gaps=["Kubernetes"],
+    details=JobDetails(
+        salary_min=None,
+        salary_max=None,
+        salary_currency=None,
+        salary_period=None,
+        clearance=None,
+        visa_sponsorship=None,
+        years_experience=None,
+        tech_stack=[],
+        workplace_type=None,
+    ),
+)
 
 
 def make_tools(client: FakeClient, user: FakeRest, service: FakeRest, max_results: int = 10) -> SearchTools:

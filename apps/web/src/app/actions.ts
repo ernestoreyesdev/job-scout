@@ -5,11 +5,13 @@ import { unstable_rethrow } from "next/navigation";
 
 import {
   APPLICATION_STATUSES,
+  FIT_LABELS,
   MAX_COMPANY_IMPORT,
   MAX_JOBS_PER_SEARCH,
   POSTED_WITHIN_DAYS,
   WORKPLACE_TYPES,
   type ApplicationStatusRow,
+  type FitLabelRow,
   type SearchRuleInput,
   type WorkplaceTypeRow,
 } from "@/lib/db";
@@ -120,14 +122,19 @@ export async function updateApplication(id: string, formData: FormData): Promise
   return run(["/tracker", "/jobs"], async () => {
     const status = formData.get("status");
     const notes = formData.get("notes");
+    const fitLabel = formData.get("fitLabel");
     if (status !== null && !APPLICATION_STATUSES.includes(status as ApplicationStatusRow)) {
       throw new Error("Unknown status.");
+    }
+    if (fitLabel !== null && fitLabel !== "" && !FIT_LABELS.includes(fitLabel as FitLabelRow)) {
+      throw new Error("Unknown fit label.");
     }
 
     const { repository } = await getSignedInSource();
     await repository.updateApplication(id, {
       ...(status !== null && { status: status as ApplicationStatusRow }),
       ...(notes !== null && { notes: text(notes) || null }),
+      ...(fitLabel !== null && { fit_label: (fitLabel || null) as FitLabelRow | null }),
     });
   });
 }
@@ -204,4 +211,27 @@ export async function importCompanies(formData: FormData): Promise<ActionResult>
     if (entries.some((entry) => entry.length > 300)) throw new Error("Each entry must be under 300 characters.");
     await callAgent("/runs/import", { method: "POST", body: { entries } });
   });
+}
+
+/** Sorts a job's requirements into covered, weak and missing against the primary resume, and saves it. */
+export async function analyzeGaps(id: string): Promise<ActionResult> {
+  return run(["/tracker", "/jobs"], async () => {
+    await callAgent(`/applications/${encodeURIComponent(id)}/gap-analysis`, { method: "POST" });
+  });
+}
+
+export type FollowUpResult = ActionResult & { subject?: string; body?: string };
+
+/** Drafts a follow-up email for an application with no response; nothing is sent. */
+export async function draftFollowUp(id: string): Promise<FollowUpResult> {
+  try {
+    const draft = await callAgent<{ subject: string; body: string }>(
+      `/applications/${encodeURIComponent(id)}/follow-up`,
+      { method: "POST" },
+    );
+    return { ok: true, subject: draft.subject, body: draft.body };
+  } catch (error) {
+    unstable_rethrow(error);
+    return { ok: false, error: error instanceof Error ? error.message : "Could not draft a follow-up." };
+  }
 }

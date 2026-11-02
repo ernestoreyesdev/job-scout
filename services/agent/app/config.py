@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     scoring_model: str = "claude-haiku-5-5"
     scoring_effort: str = "low"
     discovery_model: str = "claude-haiku-5-5"
+    analysis_model: str = "claude-haiku-5-5"
 
 
 @lru_cache

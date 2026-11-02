@@ -5,11 +5,41 @@ from pydantic import BaseModel, Field, field_validator
 from app.sources.base import WorkplaceType
 
 
+class JobDetails(BaseModel):
+    """Facts the posting states outright; null (or empty) for anything it doesn't say."""
+
+    salary_min: float | None = Field(description="Lowest base pay stated, as a plain number: '$150K' is 150000.")
+    salary_max: float | None = Field(description="Highest base pay stated; equal to salary_min for a single figure.")
+    salary_currency: str | None = Field(description="ISO code of the pay, e.g. 'USD'; a bare '$' is USD.")
+    salary_period: Literal["year", "month", "week", "day", "hour"] | None = Field(description="What the pay is per.")
+    clearance: str | None = Field(
+        description=(
+            "Only the level of security clearance the job requires or prefers: 'Secret', 'Top Secret', 'TS/SCI', "
+            "'Public Trust'; the lowest one when several are named; 'Required' when one is required with no level "
+            "named. Null when not mentioned or not needed."
+        )
+    )
+    visa_sponsorship: Literal["yes", "no"] | None = Field(
+        description="'yes' if it sponsors visas; 'no' if it won't or requires existing work authorization or citizenship."
+    )
+    years_experience: int | None = Field(
+        description="Minimum years of professional experience required: '5-7' and '5+' are 5; fractions round down."
+    )
+    tech_stack: list[str] = Field(
+        description=(
+            "Languages, frameworks, databases, clouds and major tools the team uses or the job requires, most important "
+            "first, at most 15. Leave out tools named only as examples, nice-to-haves or company background."
+        )
+    )
+    workplace_type: WorkplaceType | None = Field(description="onsite, hybrid or remote when the posting says so.")
+
+
 class FitScore(BaseModel):
     score: int = Field(ge=0, le=100, description="0-100 fit of the resume for this job.")
     summary: str = Field(description="Two or three sentences explaining the score.")
     strengths: list[str] = Field(description="Resume evidence that matches the job's requirements.")
     gaps: list[str] = Field(description="Job requirements the resume does not show.")
+    details: JobDetails = Field(description="Facts from the job posting itself, independent of the resume.")
 
 
 class SearchRule(BaseModel):
@@ -103,3 +133,25 @@ class HiringJob(BaseModel):
 
 class HiringJobs(BaseModel):
     jobs: list[HiringJob]
+
+
+class GapItem(BaseModel):
+    requirement: str = Field(description="One requirement from the job posting, in a few words.")
+    evidence: str = Field(description="What the resume shows for it, quoted or closely paraphrased; empty when nothing.")
+    suggestion: str = Field(
+        description=(
+            "How to talk about it in an application or interview using only what the resume shows; for a missing "
+            "requirement, how to address it honestly. Never claim experience the resume doesn't state."
+        )
+    )
+
+
+class GapAnalysis(BaseModel):
+    covered: list[GapItem] = Field(description="Requirements the resume clearly meets.")
+    weak: list[GapItem] = Field(description="Requirements the resume only partly or indirectly shows.")
+    missing: list[GapItem] = Field(description="Requirements the resume doesn't show at all.")
+
+
+class FollowUpDraft(BaseModel):
+    subject: str = Field(description="Email subject line.")
+    body: str = Field(description="Short, polite email body, signed with the candidate's name from the resume.")

@@ -18,12 +18,28 @@ from app.agents.orchestrator import (
     one_per_job,
     run_search,
 )
-from app.agents.schemas import CompanyName, FitScore, SearchRule, Usage
+from app.agents.schemas import CompanyName, FitScore, JobDetails, SearchRule, Usage
 from app.agents.scoring.agent import ScoringError
 from app.config import Settings
 from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, Posting
 
-FIT = FitScore(score=72, summary="Solid match.", strengths=["Python"], gaps=["Kubernetes"])
+FIT = FitScore(
+    score=72,
+    summary="Solid match.",
+    strengths=["Python"],
+    gaps=["Kubernetes"],
+    details=JobDetails(
+        salary_min=150000,
+        salary_max=190000,
+        salary_currency="USD",
+        salary_period="year",
+        clearance=None,
+        visa_sponsorship=None,
+        years_experience=5,
+        tech_stack=["Python"],
+        workplace_type="remote",
+    ),
+)
 SETTINGS = Settings(
     supabase_url="http://db",
     supabase_anon_key="anon",
@@ -994,3 +1010,12 @@ def test_the_same_job_from_two_sources_is_scored_once_from_its_board():
     other = posting("lever-10", "Senior Software Engineer, Full Stack", source="lever", board="acme", company="Acme")
 
     assert one_per_job([from_thread, other, from_board]) == [from_board, other]
+
+
+def test_scoring_saves_the_facts_read_from_each_posting():
+    _, _, _, service, _, _ = run(jobs=[posting("1", "Software Engineer, Backend")])
+
+    [(table, filters, patch)] = [update for update in service.updates if update[0] == "postings"]
+    assert filters == {"id": "eq.posting-1"}
+    assert (patch["salary_min"], patch["salary_max"], patch["years_experience"]) == (150000, 190000, 5)
+    assert patch["tech_stack"] == ["Python"] and patch["workplace_type"] == "remote" and patch["details_extracted_at"]
