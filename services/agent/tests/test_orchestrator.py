@@ -752,7 +752,7 @@ def test_a_company_found_by_name_is_labeled_once():
     assert calls == []
 
 
-def test_rescore_updates_only_jobs_scored_against_another_resume():
+def test_rescore_updates_only_jobs_unscored_or_scored_against_another_resume():
     selects: list[dict[str, str]] = []
 
     class StaleRest(FakeRest):
@@ -775,12 +775,12 @@ def test_rescore_updates_only_jobs_scored_against_another_resume():
 
     assert count == 1
     [params] = selects
-    assert params["resume_id"] == "neq.resume-2" and params["or"] == "(in_tracker.eq.true,status.neq.new)"
+    assert params["and"] == "(or(resume_id.is.null,resume_id.neq.resume-2),or(in_tracker.eq.true,status.neq.new))"
     [saved] = user.inserted("applications")
     assert (saved["posting_id"], saved["resume_id"]) == ("posting-1", "resume-2")
     assert "status" not in saved and "in_tracker" not in saved
     assert "Updated resume." in messages.calls[0]["messages"][0]["content"][0]["text"]
-    assert progress[0] == "Re-scoring 1 job with your current resume…"
+    assert progress[0] == "Scoring 1 job with your current resume…"
 
 
 def test_rescore_with_nothing_stale_scores_nothing():

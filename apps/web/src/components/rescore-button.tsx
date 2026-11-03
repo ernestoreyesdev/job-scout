@@ -6,7 +6,7 @@ import { useState, useTransition } from "react";
 import { rescoreJobs } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 
-/** Starts a run that re-scores the jobs scored against an older resume. */
+/** Starts a run that scores the jobs scored against an older resume or not scored yet. */
 export function RescoreButton({ count }: { count: number }) {
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -14,7 +14,7 @@ export function RescoreButton({ count }: { count: number }) {
   function rescore() {
     startTransition(async () => {
       const result = await rescoreJobs();
-      setMessage(result.ok ? "Re-scoring started. Progress shows on the Tracker." : (result.error ?? "Could not start."));
+      setMessage(result.ok ? "Scoring started. Progress shows on the Tracker." : (result.error ?? "Could not start."));
     });
   }
 
@@ -23,7 +23,7 @@ export function RescoreButton({ count }: { count: number }) {
       {message && <span className="text-muted-foreground">{message}</span>}
       <Button variant="outline" size="sm" onClick={rescore} disabled={pending}>
         <RefreshCw />
-        {pending ? "Starting…" : `Re-score ${count} with current resume`}
+        {pending ? "Starting…" : `Score ${count} with current resume`}
       </Button>
     </div>
   );

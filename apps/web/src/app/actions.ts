@@ -113,6 +113,7 @@ export async function startSearch(formData: FormData): Promise<ActionResult> {
       web_lookup: false,
       exclude,
       posted_within_days: postedWithinDays as SearchRuleInput["posted_within_days"],
+      score: formData.get("score") === "on",
     };
     await callAgent("/runs/search", { method: "POST", body: rule });
   });
@@ -159,6 +160,7 @@ export async function rerunSearch(runId: string, webLookup = false): Promise<Act
       web_lookup: webLookup || (input.web_lookup ?? false),
       exclude: input.exclude ?? [],
       posted_within_days: input.posted_within_days ?? null,
+      score: input.score ?? true,
     };
     await callAgent("/runs/search", { method: "POST", body: rule });
   });

@@ -18,11 +18,11 @@ function first(value: string | string[] | undefined): string {
  * Reads `?sort=`, `?status=`, `?company=`, `?open=1`, `?noclearance=1`,
  * `?salary=` (a yearly minimum) and `?page=`, ignoring unknown values.
  * `params` holds the recognized settings other than the page, for links that
- * keep them.
+ * keep them; a sort equal to `defaultSort` is left out.
  */
-export function parseJobQuery(searchParams: SearchParams): JobQuery {
+export function parseJobQuery(searchParams: SearchParams, defaultSort: JobSort = "desc"): JobQuery {
   const sortValue = first(searchParams.sort);
-  const sort = (JOB_SORTS as readonly string[]).includes(sortValue) ? (sortValue as JobSort) : "desc";
+  const sort = (JOB_SORTS as readonly string[]).includes(sortValue) ? (sortValue as JobSort) : defaultSort;
   const statusValue = first(searchParams.status);
   const status = (APPLICATION_STATUSES as readonly string[]).includes(statusValue)
     ? (statusValue as ApplicationStatusRow)
@@ -34,7 +34,7 @@ export function parseJobQuery(searchParams: SearchParams): JobQuery {
   const minSalary = Number.isFinite(salary) && salary > 0 ? Math.round(salary) : undefined;
 
   const params: Record<string, string> = {};
-  if (sort !== "desc") params.sort = sort;
+  if (sort !== defaultSort) params.sort = sort;
   if (status) params.status = status;
   if (company) params.company = company;
   if (hideClosed) params.open = "1";

@@ -162,6 +162,7 @@ export type SearchRuleInput = {
   web_lookup: boolean;
   exclude: string[];
   posted_within_days: (typeof POSTED_WITHIN_DAYS)[number] | null;
+  score: boolean;
 };
 
 export type ApplicationEventRow = {

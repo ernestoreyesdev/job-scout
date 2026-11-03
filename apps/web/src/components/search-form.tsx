@@ -11,8 +11,11 @@ import { MAX_JOBS_PER_SEARCH, POSTED_WITHIN_DAYS, WORKPLACE_TYPES } from "@/lib/
 
 const WORKPLACE_LABELS = { onsite: "On-site", hybrid: "Hybrid", remote: "Remote" } as const;
 
-/** Starts a background search run on one company, or every company in the directory when none is given. */
-export function SearchForm() {
+/**
+ * Starts a background search run on one company, or every company in the directory when none is given. Scoring
+ * against the resume is on by default and only available once one is uploaded.
+ */
+export function SearchForm({ hasResume }: { hasResume: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -34,6 +37,19 @@ export function SearchForm() {
           <Label htmlFor="company">Company (optional)</Label>
           <Input id="company" name="company" placeholder="All companies" className="w-48" />
         </div>
+        <label
+          className="flex h-9 items-center gap-1.5 text-sm"
+          title={hasResume ? undefined : "Upload a resume to score jobs"}
+        >
+          <input
+            type="checkbox"
+            name="score"
+            defaultChecked={hasResume}
+            disabled={!hasResume}
+            className="size-4 accent-primary"
+          />
+          Score with my resume
+        </label>
         <Button type="submit" disabled={pending}>
           {pending ? "Starting…" : "Run search"}
         </Button>

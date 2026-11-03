@@ -38,7 +38,7 @@ export function JobsTable({
           <TableHead className="w-10">#</TableHead>
           <TableHead className="w-20">
             <Link
-              href={jobListHref(basePath, { ...params, sort: ascending ? "" : "asc" })}
+              href={jobListHref(basePath, { ...params, sort: ascending ? "desc" : "asc" })}
               className="inline-flex items-center gap-1 hover:text-foreground"
               aria-label={ascending ? "Sort by score, highest first" : "Sort by score, lowest first"}
             >

@@ -295,7 +295,7 @@ export class JobFinderRepository {
     const { count, error } = await this.client
       .from("applications")
       .select("id", { count: "exact", head: true })
-      .neq("resume_id", resumeId)
+      .or(`resume_id.is.null,resume_id.neq.${resumeId}`)
       .or("in_tracker.eq.true,status.neq.new");
     if (error) throw error;
     return count ?? 0;

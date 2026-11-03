@@ -17,12 +17,14 @@ export default function TrackerPage({ searchParams }: PageProps<"/tracker">) {
     <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10">
       <h1 className="text-2xl font-semibold tracking-tight">Tracker</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Search by keyword at one company, or leave Company empty to search every company the app has found, and score
-        each match against your resume. Jobs you save, apply to or hear back from also appear under Jobs. You always
-        submit applications yourself.
+        Search by keyword at one company, or leave Company empty to search every company the app has found. With a
+        resume, each match is scored against it; without one, the newest matches are added. Jobs you save, apply to or
+        hear back from also appear under Jobs. You always submit applications yourself.
       </p>
       <div className="mt-6">
-        <SearchForm />
+        <Suspense fallback={<SearchForm hasResume={false} />}>
+          <SearchFormData />
+        </Suspense>
       </div>
       <Suspense fallback={<p className="mt-8 text-sm text-muted-foreground">Loading…</p>}>
         <TrackerData searchParams={searchParams} />
@@ -32,12 +34,12 @@ export default function TrackerPage({ searchParams }: PageProps<"/tracker">) {
 }
 
 async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "searchParams">) {
-  const query = parseJobQuery(await searchParams);
   const { repository } = await getSignedInSource();
-  const [runs, jobs, resume, companies, trackerTotal] = await Promise.all([
+  const resume = await repository.getPrimaryResume();
+  const query = parseJobQuery(await searchParams, resume?.text ? "desc" : "posted");
+  const [runs, jobs, companies, trackerTotal] = await Promise.all([
     repository.listRuns(10),
     repository.listTrackedJobs("tracker", query.sort, query.page, query.filters),
-    repository.getPrimaryResume(),
     repository.listTrackedCompanies("tracker"),
     repository.countTrackerJobs(),
   ]);
@@ -82,4 +84,10 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
       </section>
     </>
   );
+}
+
+async function SearchFormData() {
+  const { repository } = await getSignedInSource();
+  const resume = await repository.getPrimaryResume();
+  return <SearchForm hasResume={Boolean(resume?.text)} />;
 }

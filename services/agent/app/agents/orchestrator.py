@@ -78,8 +78,8 @@ def run_search(
     rule: SearchRule,
     client: Any,
     settings: Settings,
-    resume_id: str,
-    resume_text: str,
+    resume_id: str | None,
+    resume_text: str | None,
     user_id: str,
     user: Rest,
     service: Rest,
@@ -98,7 +98,8 @@ def run_search(
     """
     One search run: gathers open jobs from one company, or from the whole
     directory plus recent Hacker News hiring posts, filters them in code, then has the scoring agent score the newest ones the
-    user hasn't tracked yet, up to the rule's limit.
+    user hasn't tracked yet, up to the rule's limit. Without rule.score, the newest
+    of those are added unscored instead.
     """
     unreachable = 0
     if rule.company:
@@ -146,14 +147,30 @@ def run_search(
     ids = {(row["source"], row["external_id"]): row["id"] for row in rows}
     tracked = {row["posting_id"] for row in user.select("applications", {"select": "posting_id"})}
     fresh = [(ids[(p.source, p.external_id)], p) for p in matched if ids[(p.source, p.external_id)] not in tracked]
-    pool_size = rule.limit * POOL_FACTOR
     per_company = None if rule.company else MAX_PER_COMPANY
+    already_tracked = len(matched) - len(fresh)
+    if not rule.score:
+        newest = pick(fresh, rule.limit, per_company)
+        report(
+            f"Found {len(everything)} open jobs, {len(matched)} match, {already_tracked} already tracked. "
+            f"Adding the newest {len(newest)}."
+        )
+        if newest:
+            user.insert(
+                "applications",
+                [{"user_id": user_id, "posting_id": posting_id} for posting_id, _ in newest],
+                on_conflict="user_id,posting_id",
+            )
+        return SearchResult(
+            companies, len(everything), len(matched), already_tracked, 0, 0, unreachable, kept=len(newest)
+        )
+
+    pool_size = rule.limit * POOL_FACTOR
     if len(fresh) > pool_size:
         report(f"Shortlisting {min(len(fresh), MAX_TRIAGE * MAX_TRIAGE_BATCHES)} of {len(fresh)} matches by title…")
         fresh = by_title_fit(fresh, pool_size, client, settings, resume_text, usage, triage)
     pool = pick(fresh, pool_size, per_company)
     todo = with_descriptions(pool, service, describer)
-    already_tracked = len(matched) - len(fresh)
     report(
         f"Found {len(everything)} open jobs, {len(matched)} match, {already_tracked} already tracked. "
         f"Scoring {len(todo)} to keep the best {min(rule.limit, len(todo))}."
@@ -503,23 +520,22 @@ def rescore(
     describer: Callable[[Posting], str] = describe,
 ) -> int:
     """
-    Re-scores the jobs on the user's Tracker or Jobs that were scored against
-    another resume. Their status, notes and place on the Tracker stay as they
+    Scores the jobs on the user's Tracker or Jobs that were scored against
+    another resume or not scored at all. Their status, notes and place on the Tracker stay as they
     are. Returns how many were re-scored.
     """
     rows = user.select(
         "applications",
         {
             "select": "posting_id,posting:postings(*)",
-            "resume_id": f"neq.{resume_id}",
-            "or": "(in_tracker.eq.true,status.neq.new)",
+            "and": f"(or(resume_id.is.null,resume_id.neq.{resume_id}),or(in_tracker.eq.true,status.neq.new))",
         },
     )
     todo = [(row["posting_id"], Posting.model_validate(row["posting"])) for row in rows]
     if not todo:
         report("Every job is already scored with your current resume.")
         return 0
-    report(f"Re-scoring {len(todo)} {'job' if len(todo) == 1 else 'jobs'} with your current resume…")
+    report(f"Scoring {len(todo)} {'job' if len(todo) == 1 else 'jobs'} with your current resume…")
     scoring = score_and_save(
         client=client,
         model=settings.scoring_model,

@@ -139,16 +139,19 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
         if not api_key:
             raise RuntimeError("Add your Anthropic API key in Settings first.")
 
-        resumes = db.select("resumes", {"is_primary": "eq.true", "select": "id,text"})
-        if not resumes or not resumes[0]["text"]:
-            raise RuntimeError("Upload a resume first.")
+        resume = None
+        if body.score:
+            resumes = db.select("resumes", {"is_primary": "eq.true", "select": "id,text"})
+            if not resumes or not resumes[0]["text"]:
+                raise RuntimeError("Upload a resume first, or search without scoring.")
+            resume = resumes[0]
 
         result = orchestrate_search(
             rule=body,
             client=make_client(api_key),
             settings=settings,
-            resume_id=resumes[0]["id"],
-            resume_text=resumes[0]["text"],
+            resume_id=resume["id"] if resume else None,
+            resume_text=resume["text"] if resume else None,
             user_id=user.id,
             user=db,
             service=service,
@@ -192,7 +195,9 @@ def summarize(result: SearchResult) -> str:
     unreachable = f" Couldn't reach {result.unreachable} more." if result.unreachable else ""
     if result.matched == 0:
         return f"Found {result.found} open jobs at {companies}, none match.{unreachable}"
-    if result.kept < result.scored:
+    if result.scored == 0 and result.kept:
+        parts = [f"Added the {result.kept} newest jobs from {companies}"]
+    elif result.kept < result.scored:
         parts = [f"Scored {result.scored} jobs from {companies} and kept the top {result.kept}"]
     else:
         parts = [f"Scored and saved {result.scored} jobs from {companies}"]
@@ -261,7 +266,7 @@ def run_rescore(run_id: str, user: CurrentUser, settings: Settings) -> None:
         )
         status, error = "done", None
         progress = (
-            f"Re-scored {count} {'job' if count == 1 else 'jobs'} with your current resume."
+            f"Scored {count} {'job' if count == 1 else 'jobs'} with your current resume."
             if count
             else "Every job is already scored with your current resume."
         )

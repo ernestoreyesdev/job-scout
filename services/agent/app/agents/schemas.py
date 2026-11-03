@@ -48,6 +48,7 @@ class SearchRule(BaseModel):
     directory. With web_lookup, a company no board spelling matches is looked
     up with a web search. Exclude drops jobs whose title has any of its words;
     posted_within_days keeps jobs posted in that many days (undated ones pass).
+    Without score, the newest matches are added unscored.
     """
 
     keywords: list[str] = Field(min_length=1)
@@ -58,6 +59,7 @@ class SearchRule(BaseModel):
     web_lookup: bool = False
     exclude: list[str] = []
     posted_within_days: Literal[1, 3, 7, 14, 30] | None = None
+    score: bool = True
 
     @field_validator("keywords")
     @classmethod
