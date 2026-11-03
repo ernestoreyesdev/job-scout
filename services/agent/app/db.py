@@ -12,10 +12,10 @@ class Rest:
     key it bypasses RLS, so callers must filter by the verified user id.
     """
 
-    def __init__(self, settings: Settings, bearer: str, http: httpx.Client | None = None):
+    def __init__(self, settings: Settings, apikey: str, bearer: str, http: httpx.Client | None = None):
         self._http = http or httpx.Client(timeout=30)
         self._base = settings.supabase_url.rstrip("/")
-        self._headers = {"apikey": settings.supabase_anon_key, "Authorization": f"Bearer {bearer}"}
+        self._headers = {"apikey": apikey, "Authorization": f"Bearer {bearer}"}
 
     def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
         res = self._http.get(f"{self._base}/rest/v1/{table}", params=params, headers=self._headers)
@@ -58,8 +58,8 @@ class Rest:
 
 
 def user_db(settings: Settings, access_token: str) -> Rest:
-    return Rest(settings, access_token)
+    return Rest(settings, settings.supabase_anon_key, access_token)
 
 
 def service_db(settings: Settings) -> Rest:
-    return Rest(settings, settings.supabase_service_role_key)
+    return Rest(settings, settings.supabase_service_role_key, settings.supabase_service_role_key)

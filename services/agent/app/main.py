@@ -1,7 +1,5 @@
 import io
 import logging
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
@@ -33,14 +31,7 @@ RUN_TIME_LIMIT = timedelta(minutes=10)
 UNFINISHED = "in.(queued,running)"
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    """Searches run inside this process, so any still unfinished at startup were cut off by a restart."""
-    fail_runs(service_db(get_settings()), {"status": UNFINISHED}, "Stopped when the agent restarted. Re-run it.")
-    yield
-
-
-app = FastAPI(title="job-finder agent", lifespan=lifespan)
+app = FastAPI(title="job-finder agent")
 
 User = Annotated[CurrentUser, Depends(current_user)]
 Config = Annotated[Settings, Depends(get_settings)]
