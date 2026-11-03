@@ -135,11 +135,8 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
 
     progress = None
     try:
-        credentials = service.select(
-            "api_credentials",
-            {"user_id": f"eq.{user.id}", "provider": "eq.anthropic", "select": "ciphertext"},
-        )
-        if not credentials:
+        api_key = anthropic_key(service, user.id, settings)
+        if not api_key:
             raise RuntimeError("Add your Anthropic API key in Settings first.")
 
         resumes = db.select("resumes", {"is_primary": "eq.true", "select": "id,text"})
@@ -148,7 +145,7 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
 
         result = orchestrate_search(
             rule=body,
-            client=make_client(decrypt(credentials[0]["ciphertext"], settings.agent_encryption_key)),
+            client=make_client(api_key),
             settings=settings,
             resume_id=resumes[0]["id"],
             resume_text=resumes[0]["text"],
@@ -243,11 +240,8 @@ def run_rescore(run_id: str, user: CurrentUser, settings: Settings) -> None:
 
     progress = None
     try:
-        credentials = service.select(
-            "api_credentials",
-            {"user_id": f"eq.{user.id}", "provider": "eq.anthropic", "select": "ciphertext"},
-        )
-        if not credentials:
+        api_key = anthropic_key(service, user.id, settings)
+        if not api_key:
             raise RuntimeError("Add your Anthropic API key in Settings first.")
 
         resumes = db.select("resumes", {"is_primary": "eq.true", "select": "id,text"})
@@ -255,7 +249,7 @@ def run_rescore(run_id: str, user: CurrentUser, settings: Settings) -> None:
             raise RuntimeError("Upload a resume first.")
 
         count = orchestrate_rescore(
-            client=make_client(decrypt(credentials[0]["ciphertext"], settings.agent_encryption_key)),
+            client=make_client(api_key),
             settings=settings,
             resume_id=resumes[0]["id"],
             resume_text=resumes[0]["text"],
@@ -314,16 +308,13 @@ def run_import(run_id: str, body: CompanyImport, user: CurrentUser, settings: Se
 
     progress = None
     try:
-        credentials = service.select(
-            "api_credentials",
-            {"user_id": f"eq.{user.id}", "provider": "eq.anthropic", "select": "ciphertext"},
-        )
-        if not credentials:
+        api_key = anthropic_key(service, user.id, settings)
+        if not api_key:
             raise RuntimeError("Add your Anthropic API key in Settings first.")
 
         result = import_companies(
             entries=body.entries,
-            client=make_client(decrypt(credentials[0]["ciphertext"], settings.agent_encryption_key)),
+            client=make_client(api_key),
             settings=settings,
             service=service,
             usage=usage,
@@ -362,15 +353,13 @@ def summarize_import(result: ImportResult) -> str:
 
 def claude_and_resume(user: CurrentUser, settings: Settings) -> tuple[Any, str]:
     """The user's Claude client and primary resume text, or a 400 saying which one is missing."""
-    credentials = service_db(settings).select(
-        "api_credentials", {"user_id": f"eq.{user.id}", "provider": "eq.anthropic", "select": "ciphertext"}
-    )
-    if not credentials:
+    api_key = anthropic_key(service_db(settings), user.id, settings)
+    if not api_key:
         raise HTTPException(400, "Add your Anthropic API key in Settings first.")
     resumes = user_db(settings, user.access_token).select("resumes", {"is_primary": "eq.true", "select": "text"})
     if not resumes or not resumes[0]["text"]:
         raise HTTPException(400, "Upload a resume first.")
-    return make_client(decrypt(credentials[0]["ciphertext"], settings.agent_encryption_key)), resumes[0]["text"]
+    return make_client(api_key), resumes[0]["text"]
 
 
 @app.post("/applications/{application_id}/gap-analysis")
@@ -418,3 +407,13 @@ def post_follow_up(application_id: str, user: User, settings: Config) -> dict[st
     except (FollowUpError, anthropic.APIError) as error:
         raise HTTPException(502, f"Couldn't draft a follow-up: {error}")
     return {**draft.model_dump(), "usage": usage.model_dump()}
+
+
+def anthropic_key(service: Rest, user_id: str, settings: Settings) -> str | None:
+    """The user's saved Anthropic key, else the shared ANTHROPIC_API_KEY, else None."""
+    credentials = service.select(
+        "api_credentials", {"user_id": f"eq.{user_id}", "provider": "eq.anthropic", "select": "ciphertext"}
+    )
+    if credentials:
+        return decrypt(credentials[0]["ciphertext"], settings.agent_encryption_key)
+    return settings.anthropic_api_key

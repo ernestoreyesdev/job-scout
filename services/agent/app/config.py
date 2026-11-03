@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     supabase_service_role_key: str
     # Fernet key that encrypts users' API keys at rest.
     agent_encryption_key: str
+    anthropic_api_key: str | None = None
     scoring_model: str = "claude-haiku-5-5"
     scoring_effort: str = "low"
     discovery_model: str = "claude-haiku-5-5"
