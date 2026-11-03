@@ -6,6 +6,7 @@ import type {
   ApplicationRow,
   ApplicationStatusRow,
   CompanyRow,
+  CompanySort,
   Database,
   FitLabelRow,
   JobSort,
@@ -226,14 +227,20 @@ export class JobFinderRepository {
   }
 
   /** The shared directory, most open jobs first, flagged with whether this user hid each company. */
-  async listCompanies(page = 1, search = ""): Promise<Page<DirectoryCompany>> {
+  async listCompanies(
+    page = 1,
+    search = "",
+    sort: CompanySort = "jobs",
+    ascending = false,
+  ): Promise<Page<DirectoryCompany>> {
+    const column = { name: "name", jobs: "open_jobs", checked: "checked_at" } as const satisfies Record<CompanySort, string>;
     const [companies, hidden] = await Promise.all([
       this.paged(
         page,
         (from, to) => {
           const query = this.client.from("companies").select("*", { count: "exact" });
           return (search ? query.ilike("name", `%${search.replace(/[\\%_]/g, "\\$&")}%`) : query)
-            .order("open_jobs", { ascending: false })
+            .order(column[sort], { ascending })
             .order("id")
             .range(from, to);
         },

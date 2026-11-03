@@ -153,7 +153,7 @@ async function InsightsData() {
                 <TableHead className="text-right">Average score</TableHead>
                 <TableHead className="text-right">Good</TableHead>
                 <TableHead className="text-right">Bad</TableHead>
-                <TableHead className="text-right">Saved or further</TableHead>
+                <TableHead className="text-right">Saved</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

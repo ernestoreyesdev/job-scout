@@ -175,6 +175,11 @@ export type ApplicationEventRow = {
 /** Ways the Tracker and Jobs can be sorted: by score either way, newest posting, or most recently added. */
 export const JOB_SORTS = ["desc", "asc", "posted", "added"] as const;
 
+/** Companies page columns that sort, each with the direction it starts in. */
+export const COMPANY_SORTS = { name: "asc", jobs: "desc", checked: "desc" } as const;
+
+export type CompanySort = keyof typeof COMPANY_SORTS;
+
 export const FIT_LABELS = ["good", "bad"] as const;
 
 export type FitLabelRow = (typeof FIT_LABELS)[number];
