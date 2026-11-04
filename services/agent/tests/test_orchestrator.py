@@ -169,6 +169,7 @@ def run(
         triage=overrides.pop("triage", newest_first),
         namer=overrides.pop("namer", lambda client, model, boards, usage: {}),
         read_posts=overrides.pop("read_posts", lambda: []),
+        expander=overrides.pop("expander", lambda client, model, keywords, usage: []),
         **overrides,
     )
     return result, messages, user, service, progress, usage
@@ -1019,3 +1020,35 @@ def test_scoring_saves_the_facts_read_from_each_posting():
     assert filters == {"id": "eq.posting-1"}
     assert (patch["salary_min"], patch["salary_max"], patch["years_experience"]) == (150000, 190000, 5)
     assert patch["tech_stack"] == ["Python"] and patch["workplace_type"] == "remote" and patch["details_extracted_at"]
+
+
+def test_related_titles_match_jobs_the_keywords_alone_miss():
+    jobs = [posting("1", "Senior Program Manager"), posting("2", "Program Management Lead"), posting("3", "Designer")]
+    asked: list[list[str]] = []
+
+    def expander(client: Any, model: str, keywords: list[str], usage: Usage) -> list[str]:
+        asked.append(keywords)
+        return ["Program Manager", "Technical Program Manager"]
+
+    result, _, user, _, progress, _ = run(
+        rule=SearchRule(company="Acme", keywords=["program management"], score=False), jobs=jobs, expander=expander
+    )
+
+    assert asked == [["program management"]]
+    [rows] = user.inserted("applications")
+    assert result.matched == 2 and sorted(row["posting_id"] for row in rows) == ["posting-1", "posting-2"]
+    assert "Matching titles like Program Manager, Technical Program Manager…" in progress
+
+
+def test_related_titles_are_not_asked_for_when_there_are_no_jobs():
+    calls: list[int] = []
+
+    result, *_ = run(
+        rule=SearchRule(keywords=["program management"], score=False),
+        jobs=[],
+        expander=lambda *args: calls.append(1) or [],
+        discover=lambda *args, **kwargs: [],
+        service=FakeRest(discoveries=[{"keywords": ["program management"]}]),
+    )
+
+    assert calls == [] and result.matched == 0

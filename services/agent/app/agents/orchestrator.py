@@ -13,6 +13,7 @@ from typing import Any
 from app.agents.discovery.agent import FoundBoard, discover_boards, find_company_boards, name_companies
 from app.agents.hiring_threads.agent import HiringPost, extract_jobs, recent_posts
 from app.agents.triage.agent import shortlist
+from app.agents.titles.agent import related_titles
 from app.agents.schemas import CompanyName, SearchRule, Usage
 from app.agents.scoring.agent import score_and_save
 from app.config import Settings
@@ -94,10 +95,12 @@ def run_search(
     triage: Callable[..., list[int]] = shortlist,
     read_posts: Callable[[], list[HiringPost]] = recent_posts,
     extractor: Callable[..., list[Posting]] = extract_jobs,
+    expander: Callable[..., list[str]] = related_titles,
 ) -> SearchResult:
     """
     One search run: gathers open jobs from one company, or from the whole
-    directory plus recent Hacker News hiring posts, filters them in code, then has the scoring agent score the newest ones the
+    directory plus recent Hacker News hiring posts, filters them in code against
+    the keywords and the related titles Claude lists for them, then has the scoring agent score the newest ones the
     user hasn't tracked yet, up to the rule's limit. Without rule.score, the newest
     of those are added unscored instead.
     """
@@ -128,10 +131,14 @@ def run_search(
         )
         everything += hiring_thread_postings(client, settings, service, usage, report, read_posts, extractor)
 
+    titles = expander(client, settings.discovery_model, rule.keywords, usage) if everything else []
+    if titles:
+        report(f"Matching titles like {', '.join(titles[:6])}…")
+    keywords = [*rule.keywords, *titles]
     matched = [
         p
         for p in everything
-        if matches_keywords(p, rule.keywords)
+        if matches_keywords(p, keywords)
         and matches_exclusions(p, rule.exclude)
         and matches_workplace(p, rule.workplace_types)
         and matches_location(p, rule.location)
