@@ -24,11 +24,11 @@ export default function JobsPage({ searchParams }: PageProps<"/jobs">) {
 }
 
 async function JobsData({ searchParams }: Pick<PageProps<"/jobs">, "searchParams">) {
-  const query = parseJobQuery(await searchParams);
   const { repository } = await getSignedInSource();
-  const [jobs, resume, companies] = await Promise.all([
+  const resume = await repository.getPrimaryResume();
+  const query = parseJobQuery(await searchParams, resume?.text ? "desc" : "posted");
+  const [jobs, companies] = await Promise.all([
     repository.listTrackedJobs("jobs", query.sort, query.page, query.filters),
-    repository.getPrimaryResume(),
     repository.listTrackedCompanies("jobs"),
   ]);
   const stale = resume ? await repository.countStaleJobs(resume.id) : 0;

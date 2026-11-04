@@ -134,9 +134,14 @@ export class JobFinderRepository {
       if (filters.status) query = query.eq("status", filters.status);
       if (filters.company) query = query.eq("posting.company", filters.company);
       if (filters.hideClosed) query = query.is("posting.closed_at", null);
-      if (filters.hideClearance) query = query.is("posting.clearance", null);
+      if (filters.hideClearance) {
+        query = query.or("details_extracted_at.is.null,clearance.is.null", { referencedTable: "posting" });
+      }
       if (filters.minSalary) {
-        query = query.eq("posting.salary_period", "year").gte("posting.salary_max", filters.minSalary);
+        query = query.or(
+          `details_extracted_at.is.null,and(salary_period.eq.year,salary_max.gte.${filters.minSalary})`,
+          { referencedTable: "posting" },
+        );
       }
       const ordered =
         sort === "posted"

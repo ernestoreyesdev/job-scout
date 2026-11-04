@@ -15,7 +15,8 @@ const SELECT = "h-9 rounded-md border border-input bg-transparent px-3 text-sm s
 
 /**
  * Status, company, closed-job, clearance, salary and sort controls for the Tracker or Jobs; submits as a plain GET
- * to the page. The salary minimum only keeps jobs that state a yearly salary reaching it.
+ * to the page. The salary minimum keeps jobs that state a yearly salary reaching it; jobs whose details were never
+ * read pass both the salary and clearance filters.
  */
 export function JobListFilters({
   basePath,
