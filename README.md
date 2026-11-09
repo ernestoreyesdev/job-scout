@@ -5,7 +5,7 @@ Finds jobs that match a user's resume, scores the fit, and tracks applications. 
 ## Structure
 
 - `apps/web`: Next.js 16 (App Router, Tailwind v4, shadcn), to be deployed on Vercel
-- `services/agent`: Python 3.12 FastAPI service that runs the Claude tool-use loop (uv)
+- `services/agent`: Python 3.12 FastAPI service that runs job searches, scoring and the other Claude calls (uv)
 - `supabase`: Postgres schema, row-level security and storage policies (`migrations/`), plus local stack config
 
 The browser only talks to Next.js. Server actions call the agent with the user's Supabase access token; the agent verifies it with Supabase Auth and queries as that user, so row-level security applies.

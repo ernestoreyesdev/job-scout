@@ -107,6 +107,7 @@ class FakeRest:
         self.hidden = hidden or []
         self.discoveries = discoveries or []
         self.tracked_postings: list[dict[str, Any]] = []
+        self.labeled: list[dict[str, Any]] = []
         self.inserts: list[tuple[str, Any]] = []
         self.updates: list[tuple[str, dict[str, str], dict[str, Any]]] = []
         self.deletes: list[tuple[str, dict[str, str]]] = []
@@ -119,6 +120,8 @@ class FakeRest:
             return [{"company_id": company_id, "hidden": True} for company_id in self.hidden]
         if table == "directory_discoveries":
             return self.discoveries
+        if "fit_label" in params:
+            return [row for row in self.labeled if params["fit_label"] == f"eq.{row['fit_label']}"]
         if "posting:" in params.get("select", ""):
             return self.tracked_postings
         return [{"posting_id": posting_id} for posting_id in self.tracked]
@@ -758,6 +761,8 @@ def test_rescore_updates_only_jobs_unscored_or_scored_against_another_resume():
 
     class StaleRest(FakeRest):
         def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
+            if "fit_label" in params:
+                return []
             selects.append(params)
             return [{"posting_id": "posting-1", "posting": {**JOBS[0].model_dump(mode="json"), "id": "posting-1"}}]
 
@@ -1052,3 +1057,48 @@ def test_related_titles_are_not_asked_for_when_there_are_no_jobs():
     )
 
     assert calls == [] and result.matched == 0
+
+
+def labeled_row(label: str, n: int, **posting: Any) -> dict[str, Any]:
+    facts = {"title": f"Role {n}", "company": "Acme", "location": None, "workplace_type": None, "years_experience": None, "tech_stack": []}
+    return {"fit_label": label, "posting": {**facts, **posting}}
+
+
+def test_scoring_sees_the_users_labeled_jobs_once_each_label_has_enough():
+    user = FakeRest()
+    user.labeled = [
+        labeled_row("good", 1, title="Backend Engineer", location="Austin, TX", workplace_type="hybrid", years_experience=5, tech_stack=["Python", "AWS"]),
+        *[labeled_row("good", n) for n in (2, 3)],
+        *[labeled_row("bad", n) for n in (4, 5, 6)],
+    ]
+
+    _, messages, *_ = run(user=user, jobs=[posting("1", "Software Engineer, Backend")])
+
+    cached = messages.calls[0]["messages"][0]["content"][0]
+    assert cached["cache_control"] == {"type": "ephemeral"}
+    assert "<labeled_jobs>\ngood: Backend Engineer | Acme | Austin, TX (hybrid) | 5+ years | Python, AWS\n" in cached["text"]
+    assert "bad: Role 6 | Acme\n</labeled_jobs>" in cached["text"]
+
+
+def test_labeled_jobs_are_left_out_until_each_label_has_enough():
+    user = FakeRest()
+    user.labeled = [*[labeled_row("good", n) for n in range(5)], *[labeled_row("bad", n) for n in (5, 6)]]
+
+    _, messages, *_ = run(user=user, jobs=[posting("1", "Software Engineer, Backend")])
+
+    assert "<labeled_jobs>" not in messages.calls[0]["messages"][0]["content"][0]["text"]
+
+
+def test_labeled_jobs_are_the_most_recent_of_each_label():
+    queries: list[dict[str, str]] = []
+
+    class LabelRest(FakeRest):
+        def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
+            queries.append(params)
+            return []
+
+    assert orchestrator.labeled_examples(LabelRest()) == []
+    assert [(q["fit_label"], q["order"], q["limit"]) for q in queries] == [
+        ("eq.good", "updated_at.desc", "15"),
+        ("eq.bad", "updated_at.desc", "15"),
+    ]

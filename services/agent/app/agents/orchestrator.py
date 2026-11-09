@@ -16,6 +16,7 @@ from app.agents.triage.agent import shortlist
 from app.agents.titles.agent import related_titles
 from app.agents.schemas import CompanyName, SearchRule, Usage
 from app.agents.scoring.agent import score_and_save
+from app.agents.scoring.prompts import LabeledJob
 from app.config import Settings
 from app.db import Rest
 from app.sources import (
@@ -57,6 +58,9 @@ FETCH_CONCURRENCY = 8
 FETCH_RETRY_SECONDS = 2.0
 # Consecutive searches that find a board gone before it leaves the directory.
 MAX_MISSED_CHECKS = 3
+# Most recent jobs per label shown to scoring, and how many of each label it takes before any are shown.
+MAX_EXAMPLES = 15
+MIN_EXAMPLES = 3
 
 Board = tuple[str, str, str, str]
 
@@ -195,6 +199,7 @@ def run_search(
         service=service,
         usage=usage,
         report=report,
+        examples=labeled_examples(user),
     )
     kept = keep_best(user, todo, scoring.scores, rule.limit)
     return SearchResult(
@@ -555,6 +560,7 @@ def rescore(
         service=service,
         usage=usage,
         report=report,
+        examples=labeled_examples(user),
     )
     return scoring.scored
 
@@ -764,3 +770,38 @@ def one_per_job(postings: list[Posting]) -> list[Posting]:
         if key not in chosen or (chosen[key].source == "hackernews" and p.source != "hackernews"):
             chosen[key] = p
     return list(chosen.values())
+
+
+def labeled_examples(user: Rest) -> list[LabeledJob]:
+    """
+    The user's most recently updated jobs marked good and bad, up to
+    MAX_EXAMPLES of each, or none until both labels have MIN_EXAMPLES.
+    """
+    by_label: dict[str, list[LabeledJob]] = {}
+    for label in ("good", "bad"):
+        rows = user.select(
+            "applications",
+            {
+                "select": "posting:postings(title,company,location,workplace_type,years_experience,tech_stack)",
+                "fit_label": f"eq.{label}",
+                "order": "updated_at.desc",
+                "limit": str(MAX_EXAMPLES),
+            },
+        )
+        by_label[label] = [labeled_job(label, row["posting"]) for row in rows]
+    if any(len(jobs) < MIN_EXAMPLES for jobs in by_label.values()):
+        return []
+    return [*by_label["good"], *by_label["bad"]]
+
+
+def labeled_job(label: str, posting: dict[str, Any]) -> LabeledJob:
+    """A labeled example from a postings row."""
+    return LabeledJob(
+        label=label,
+        title=posting["title"],
+        company=posting["company"],
+        location=posting["location"],
+        workplace_type=posting["workplace_type"],
+        years_experience=posting["years_experience"],
+        tech_stack=tuple(posting["tech_stack"] or ()),
+    )

@@ -1,13 +1,13 @@
 import logging
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 from app.agents.schemas import FitScore, JobDetails, Usage
-from app.agents.scoring.prompts import FIT_SYSTEM, fit_blocks
+from app.agents.scoring.prompts import FIT_SYSTEM, LabeledJob, fit_blocks
 from app.db import Rest
 from app.sources.base import Posting
 
@@ -29,14 +29,19 @@ class ScoringResult:
     scores: dict[str, int] = field(default_factory=dict)
 
 
-def score_posting(client: Any, model: str, effort: str, resume_text: str, posting: Posting) -> tuple[FitScore, Any]:
-    """One Claude call: the resume and one job in, a structured fit score out. Returns the score and its usage."""
+def score_posting(
+    client: Any, model: str, effort: str, resume_text: str, posting: Posting, examples: Sequence[LabeledJob] = ()
+) -> tuple[FitScore, Any]:
+    """
+    One Claude call: the resume, the user's labeled examples and one job in, a
+    structured fit score out. Returns the score and its usage.
+    """
     response = client.beta.messages.parse(
         model=model,
         max_tokens=16000,
         output_config={"effort": effort},
         system=FIT_SYSTEM,
-        messages=[{"role": "user", "content": fit_blocks(resume_text, posting)}],
+        messages=[{"role": "user", "content": fit_blocks(resume_text, posting, examples)}],
         output_format=FitScore,
     )
     if response.stop_reason == "refusal" or response.parsed_output is None:
@@ -57,6 +62,7 @@ def score_and_save(
     service: Rest,
     usage: Usage,
     report: Callable[[str], None],
+    examples: Sequence[LabeledJob] = (),
 ) -> ScoringResult:
     """
     Scores each (posting id, posting) pair and saves it to the user's tracker as
@@ -69,7 +75,7 @@ def score_and_save(
     scores: dict[str, int] = {}
 
     def score_one(posting_id: str, posting: Posting) -> None:
-        fit, call_usage = score_posting(client, model, effort, resume_text, posting)
+        fit, call_usage = score_posting(client, model, effort, resume_text, posting, examples)
         user.insert(
             "applications",
             {
