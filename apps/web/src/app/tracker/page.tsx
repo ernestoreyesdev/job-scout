@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { ClearTracker } from "@/components/clear-tracker";
@@ -9,8 +10,11 @@ import { RecentRuns } from "@/components/recent-runs";
 import { RescoreButton } from "@/components/rescore-button";
 import { RunStatus } from "@/components/run-status";
 import { SearchForm } from "@/components/search-form";
+import { PageReady } from "@/components/web-vitals";
 import { parseJobQuery } from "@/lib/job-query";
 import { getSignedInSource } from "@/lib/repository";
+
+export const metadata: Metadata = { title: "Tracker" };
 
 export default function TrackerPage({ searchParams }: PageProps<"/tracker">) {
   return (
@@ -46,6 +50,7 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
 
   return (
     <>
+      <PageReady />
       {runs[0] && <RunStatus run={runs[0]} />}
       <RecentRuns runs={runs} />
       <section className="mt-8">

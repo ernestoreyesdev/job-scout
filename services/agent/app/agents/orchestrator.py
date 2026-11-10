@@ -19,6 +19,8 @@ from app.agents.scoring.prompts import LabeledJob
 from app.config import Settings
 from app.db import Rest
 from app.sources import (
+    CACHE_SECONDS,
+    describes_separately,
     board_from_url,
     careers_url,
     default_name,
@@ -54,7 +56,7 @@ SKIPPED_KINDS = frozenset({"staffing", "aggregator"})
 MAX_PER_COMPANY = 3
 # A search scores this many times its job limit and keeps the best-scoring ones.
 POOL_FACTOR = 2
-FETCH_CONCURRENCY = 8
+FETCH_CONCURRENCY = 16
 FETCH_RETRY_SECONDS = 2.0
 # Consecutive searches that find a board gone before it leaves the directory.
 MAX_MISSED_CHECKS = 3
@@ -253,15 +255,17 @@ def directory_postings(
     fetcher: Callable[[str, str, str], list[Posting]],
     discover: Callable[..., list[FoundBoard]],
     namer: Callable[..., dict[tuple[str, str], CompanyName]],
-) -> tuple[list[Posting], int, int]:
+) -> tuple[list[Posting], int, list[str], list[dict[str, Any]]]:
     """
     Open jobs at every directory company the user hasn't hidden, topping the
     directory up from the web while it's small or once a week. Staffing agencies
-    and aggregators count as hidden unless the user chose to show them. Returns
+    and aggregators count as hidden unless the user chose to show them. The
+    biggest boards start first; boards whose systems list jobs without
+    descriptions reuse a snapshot from the last CACHE_SECONDS. Returns
     the jobs, the companies checked, the boards ("source/board") that couldn't
     be reached, and how long each board's fetch took and how it ended.
     """
-    directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,kind"})
+    directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,kind,open_jobs"})
     choices = {row["company_id"]: row["hidden"] for row in user.select("hidden_companies", {"select": "company_id,hidden"})}
     known = {(c["source"], c["board"]) for c in directory}
     boards: list[Board] = [
@@ -293,12 +297,16 @@ def directory_postings(
             {"keywords": rule.keywords, "boards_found": len(found), "boards_added": len(new)},
         )
 
+    sizes = {(c["source"], c["board"]): c.get("open_jobs") or 0 for c in directory}
+    boards.sort(key=lambda entry: sizes.get((entry[0], entry[1]), 0), reverse=True)
+    snapshots = fresh_snapshots(service)
     report("Gathering open jobs…")
     lock = threading.Lock()
     fetched: dict[str, list[Posting]] = {}
     gone: list[str] = []
     unreachable: list[str] = []
     fetches: list[dict[str, Any]] = []
+    from_snapshot: set[str] = set()
 
     def fetch(entry: Board) -> None:
         source, board, name, _ = entry
@@ -309,6 +317,13 @@ def directory_postings(
             ms = round((time.monotonic() - started) * 1000)
             fetches.append({"board": key, "source": source, "ms": ms, "jobs": jobs, "outcome": outcome})
 
+        if key in snapshots:
+            with lock:
+                fetched[key] = snapshots[key]
+                from_snapshot.add(key)
+                record("cached", len(snapshots[key]))
+                report("Gathering open jobs…")
+            return
         for attempt in range(2):
             try:
                 postings = fetcher(source, board, name)
@@ -327,6 +342,8 @@ def directory_postings(
                 unreachable.append(key)
                 record("unreachable")
             return
+        if describes_separately(source):
+            save_snapshot(service, source, board, postings)
         with lock:
             fetched[key] = postings
             record("ok", len(postings))
@@ -336,7 +353,7 @@ def directory_postings(
         list(pool.map(fetch, boards))
 
     live = [entry for entry in boards if f"{entry[0]}/{entry[1]}" in fetched]
-    save_companies(service, live, fetched)
+    save_companies(service, [entry for entry in live if f"{entry[0]}/{entry[1]}" not in from_snapshot], fetched)
     if any(entry[3] == "discovery" and (entry[0], entry[1]) not in known for entry in live):
         remove_duplicate_names(service)
     if kinds:
@@ -848,3 +865,27 @@ def labeled_job(label: str, posting: dict[str, Any]) -> LabeledJob:
         years_experience=posting["years_experience"],
         tech_stack=tuple(posting["tech_stack"] or ()),
     )
+
+
+def fresh_snapshots(service: Rest) -> dict[str, list[Posting]]:
+    """Board snapshots saved within CACHE_SECONDS, by "source/board"."""
+    since = (datetime.now(UTC) - timedelta(seconds=CACHE_SECONDS)).isoformat()
+    rows = service.select("board_snapshots", {"select": "source,board,postings", "fetched_at": f"gte.{since}"})
+    return {f"{row['source']}/{row['board']}": [Posting.model_validate(p) for p in row["postings"]] for row in rows}
+
+
+def save_snapshot(service: Rest, source: str, board: str, postings: list[Posting]) -> None:
+    """Saves a board's job list for later searches; a failure is logged so it never fails the search."""
+    try:
+        service.insert(
+            "board_snapshots",
+            {
+                "source": source,
+                "board": board,
+                "postings": [p.model_dump(mode="json") for p in postings],
+                "fetched_at": datetime.now(UTC).isoformat(),
+            },
+            on_conflict="source,board",
+        )
+    except Exception as error:
+        logger.warning("saving the %s/%s snapshot failed: %s", source, board, error, extra={"board": f"{source}/{board}"})

@@ -607,7 +607,7 @@ def call_stats(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def vital_stats(vitals: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Page load measurements by page and metric: count, median and 75th percentile; most measured pages first."""
+    """Page speed measurements by page title and metric: count, median and 75th percentile; most measured pages first."""
     groups: dict[tuple[str, str], list[float]] = {}
     for row in vitals:
         groups.setdefault((row["page"], row["metric"]), []).append(row["value"])
@@ -623,8 +623,10 @@ def vital_stats(vitals: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "p75": values[min(len(values) - 1, int(len(values) * 0.75))],
             }
         )
-    loads = {page: count for page, metric, count in ((r["page"], r["metric"], r["count"]) for r in stats) if metric == "TTFB"}
-    return sorted(stats, key=lambda row: (-loads.get(row["page"], 0), row["page"], row["metric"]))
+    loads: dict[str, int] = {}
+    for row in stats:
+        loads[row["page"]] = max(loads.get(row["page"], 0), row["count"])
+    return sorted(stats, key=lambda row: (-loads[row["page"]], row["page"], row["metric"]))
 
 
 # Boards listed on the admin page, slowest first.
@@ -641,7 +643,8 @@ def board_stats(fetches: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]
         times = sorted(row["ms"] for row in rows)
         return {
             "fetches": len(rows),
-            "failures": sum(1 for row in rows if row["outcome"] != "ok"),
+            "failures": sum(1 for row in rows if row["outcome"] not in ("ok", "cached")),
+            "cached": sum(1 for row in rows if row["outcome"] == "cached"),
             "median_ms": times[len(times) // 2],
             "max_ms": times[-1],
             "jobs": max(row["jobs"] for row in rows),

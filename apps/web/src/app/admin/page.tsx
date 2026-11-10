@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { AccuracyTable } from "@/components/accuracy-table";
@@ -5,6 +6,7 @@ import { KeyForm } from "@/components/key-form";
 import { SectionCard } from "@/components/section-card";
 import { StatTile } from "@/components/stat-tile";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PageReady } from "@/components/web-vitals";
 import { callAgent } from "@/lib/agent";
 import type { AgentRunRow, ApplicationStatusRow, CompanyKindRow, FitLabelRow, RunUsage, WEB_VITALS } from "@/lib/db";
 import { MIN_LABELED, accuracyByCut, runCost, summarizeCosts } from "@/lib/insights";
@@ -38,7 +40,7 @@ const STEP_LABELS: Record<string, string> = {
   other: "Other",
 };
 
-type BoardFetches = { fetches: number; failures: number; median_ms: number; max_ms: number; jobs: number };
+type BoardFetches = { fetches: number; failures: number; cached: number; median_ms: number; max_ms: number; jobs: number };
 
 type AdminStats = {
   generated_at: string;
@@ -58,6 +60,8 @@ type AdminStats = {
   labels: { fit_score: number | null; fit_label: FitLabelRow | null }[];
   applications: { user_id: string; status: ApplicationStatusRow }[];
 };
+
+export const metadata: Metadata = { title: "Admin" };
 
 export default function AdminPage() {
   return (
@@ -113,6 +117,7 @@ async function AdminData() {
 
   return (
     <div className="mt-8 space-y-6">
+      <PageReady />
       <SectionCard
         title="Shared Anthropic key"
         description="Runs use a user's own key when they saved one before, otherwise this key, otherwise the ANTHROPIC_API_KEY setting. Anthropic checks a new key before it's saved."
@@ -374,13 +379,20 @@ function HealthSection({ stats }: { stats: AdminStats }) {
   );
 }
 
-/** Core Web Vitals thresholds: at or under the first is good, over the second is poor. */
-const VITAL_THRESHOLDS = { TTFB: [800, 1800], FCP: [1800, 3000], LCP: [2500, 4000], INP: [200, 500], CLS: [0.1, 0.25] } as const;
+/** Core Web Vitals thresholds: at or under the first is good, over the second is poor. READY borrows LCP's, since both mean the content is visible. */
+const VITAL_THRESHOLDS = {
+  TTFB: [800, 1800],
+  FCP: [1800, 3000],
+  LCP: [2500, 4000],
+  INP: [200, 500],
+  CLS: [0.1, 0.25],
+  READY: [2500, 4000],
+} as const;
 const VITAL_COLUMNS = [
+  { metric: "READY", label: "Data shown", stat: "median" },
+  { metric: "READY", label: "Data shown (75%)", stat: "p75" },
   { metric: "TTFB", label: "First byte", stat: "p75" },
-  { metric: "FCP", label: "First paint", stat: "p75" },
-  { metric: "LCP", label: "Main content", stat: "median" },
-  { metric: "LCP", label: "Main content (75%)", stat: "p75" },
+  { metric: "LCP", label: "Main content", stat: "p75" },
   { metric: "INP", label: "Response to input", stat: "p75" },
   { metric: "CLS", label: "Layout shift", stat: "p75" },
 ] as const;
@@ -393,7 +405,7 @@ function PageSpeedSection({ vitals, days }: { vitals: AdminStats["vitals"]; days
   return (
     <SectionCard
       title="Page speed"
-      description={`What signed-in users' browsers measured over the last ${days} days, including moving between pages. 75% means three in four loads were at least this fast. Green is good, amber needs work and red is poor.`}
+      description={`What signed-in users' browsers measured over the last ${days} days. Data shown is from opening a page, by a click or a full load, until its data is on screen; the other columns only cover full loads in most browsers. 75% means three in four were at least this fast. Green is good, amber needs work and red is poor.`}
     >
       {pages.length === 0 ? (
         <p className="text-sm text-muted-foreground">No measurements yet. Browsers report them from now on.</p>
@@ -413,8 +425,8 @@ function PageSpeedSection({ vitals, days }: { vitals: AdminStats["vitals"]; days
           <TableBody>
             {pages.map((page) => (
               <TableRow key={page}>
-                <TableCell className="font-mono text-xs">{page}</TableCell>
-                <TableCell className="text-right tabular-nums">{find(page, "TTFB")?.count ?? find(page, "LCP")?.count ?? "–"}</TableCell>
+                <TableCell>{page}</TableCell>
+                <TableCell className="text-right tabular-nums">{find(page, "READY")?.count ?? find(page, "TTFB")?.count ?? "–"}</TableCell>
                 {VITAL_COLUMNS.map((column) => {
                   const row = find(page, column.metric);
                   const value = row?.[column.stat];
@@ -452,7 +464,7 @@ function BoardSection({ boards, companies, days }: { boards: AdminStats["boards"
   return (
     <SectionCard
       title="Board fetches"
-      description={`Every board searches downloaded over the last ${days} days, timed from the first request to the last page, retry included.`}
+      description={`Every board searches checked over the last ${days} days, timed from the first request to the last page, retry included. Workday-type boards reuse a job list saved within the last 6 hours when there is one.`}
     >
       {boards.sources.length === 0 ? (
         <p className="text-sm text-muted-foreground">No board fetches recorded yet. Searches across all companies record them from now on.</p>
@@ -464,6 +476,7 @@ function BoardSection({ boards, companies, days }: { boards: AdminStats["boards"
               <TableRow>
                 <TableHead>Job system</TableHead>
                 <TableHead className="text-right">Fetches</TableHead>
+                <TableHead className="text-right">From cache</TableHead>
                 <TableHead className="text-right">Failed</TableHead>
                 <TableHead className="text-right">Median</TableHead>
                 <TableHead className="text-right">Slowest</TableHead>
@@ -475,6 +488,7 @@ function BoardSection({ boards, companies, days }: { boards: AdminStats["boards"
                 <TableRow key={row.source}>
                   <TableCell className="font-mono text-xs">{row.source}</TableCell>
                   <TableCell className="text-right tabular-nums">{row.fetches}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.cached}</TableCell>
                   <TableCell className={cn("text-right tabular-nums", row.failures > 0 && "text-destructive")}>{row.failures}</TableCell>
                   <TableCell className="text-right tabular-nums">{seconds(row.median_ms)}</TableCell>
                   <TableCell className="text-right tabular-nums">{seconds(row.max_ms)}</TableCell>

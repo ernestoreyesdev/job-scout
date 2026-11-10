@@ -8,6 +8,7 @@ import { ThemeSync } from "@/components/theme-sync";
 import { UserMenu } from "@/components/user-menu";
 import { WebVitals } from "@/components/web-vitals";
 import { THEME_BOOT_SCRIPT } from "@/lib/theme";
+import { TITLE_SUFFIX } from "@/lib/titles";
 
 import "./globals.css";
 
@@ -22,7 +23,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Job Finder",
+  title: { default: "Job Finder", template: `%s${TITLE_SUFFIX}` },
   description: "Find jobs that match your resume, score the fit and track your applications.",
 };
 

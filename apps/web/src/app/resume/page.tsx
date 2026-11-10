@@ -1,9 +1,13 @@
+import type { Metadata } from "next";
 import { FileText } from "lucide-react";
 import { Suspense } from "react";
 
 import { ResumeUpload } from "@/components/resume-upload";
 import { SectionCard } from "@/components/section-card";
+import { PageReady } from "@/components/web-vitals";
 import { getSignedInSource } from "@/lib/repository";
+
+export const metadata: Metadata = { title: "Resume" };
 
 export default function ResumePage() {
   return (
@@ -25,25 +29,28 @@ export default function ResumePage() {
 async function PrimaryResume() {
   const { repository } = await getSignedInSource();
   const resume = await repository.getPrimaryResume();
-  if (!resume) return null;
+  if (!resume) return <PageReady />;
 
   return (
-    <SectionCard
-      title="Current resume"
-      description={
-        <span className="inline-flex items-center gap-1.5">
-          <FileText className="size-4" />
-          {resume.file_name} · uploaded {resume.created_at.slice(0, 10)}
-        </span>
-      }
-    >
-      {resume.text ? (
-        <pre className="max-h-[32rem] overflow-auto rounded-lg bg-muted/50 p-4 font-sans text-sm whitespace-pre-wrap">
-          {resume.text}
-        </pre>
-      ) : (
-        <p className="text-sm text-muted-foreground">Text hasn&apos;t been extracted yet.</p>
-      )}
-    </SectionCard>
+    <>
+      <PageReady />
+      <SectionCard
+        title="Current resume"
+        description={
+          <span className="inline-flex items-center gap-1.5">
+            <FileText className="size-4" />
+            {resume.file_name} · uploaded {resume.created_at.slice(0, 10)}
+          </span>
+        }
+      >
+        {resume.text ? (
+          <pre className="max-h-[32rem] overflow-auto rounded-lg bg-muted/50 p-4 font-sans text-sm whitespace-pre-wrap">
+            {resume.text}
+          </pre>
+        ) : (
+          <p className="text-sm text-muted-foreground">Text hasn&apos;t been extracted yet.</p>
+        )}
+      </SectionCard>
+    </>
   );
 }

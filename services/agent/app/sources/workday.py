@@ -10,7 +10,7 @@ HOST = "myworkdayjobs.com"
 PAGE_SIZE = 20
 # Workday serves at most this many jobs per query; later offsets repeat the first page.
 MAX_JOBS = 2000
-PAGE_CONCURRENCY = 8
+PAGE_CONCURRENCY = 16
 BOARD = re.compile(r"^(?P<tenant>[a-z0-9-]+)\.(?P<server>wd\d+)/(?P<site>[a-z0-9_-]+)$")
 LOCALE = re.compile(r"^[a-z]{2}-[a-z]{2}$")
 DAYS_AGO = re.compile(r"(\d+)\+? Days? Ago")

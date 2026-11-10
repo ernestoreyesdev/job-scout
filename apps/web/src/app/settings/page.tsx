@@ -1,8 +1,12 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { SectionCard } from "@/components/section-card";
 import { ThemeForm } from "@/components/theme-form";
+import { PageReady } from "@/components/web-vitals";
 import { getSignedInSource } from "@/lib/repository";
+
+export const metadata: Metadata = { title: "Settings" };
 
 export default function SettingsPage() {
   return (
@@ -23,5 +27,10 @@ async function ThemeSection() {
   const { repository } = await getSignedInSource();
   const profile = await repository.getProfile();
   const theme = profile?.theme ?? "light";
-  return <ThemeForm key={theme} theme={theme} />;
+  return (
+    <>
+      <PageReady />
+      <ThemeForm key={theme} theme={theme} />
+    </>
+  );
 }

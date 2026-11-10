@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { ArrowDown, ArrowUp, Search } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
@@ -9,11 +10,14 @@ import { RunStatus } from "@/components/run-status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PageReady } from "@/components/web-vitals";
 import { COMPANY_SORTS, type CompanySort } from "@/lib/db";
 import { jobListHref } from "@/lib/job-query";
 import { getSignedInSource } from "@/lib/repository";
 
 const CHECKED = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+
+export const metadata: Metadata = { title: "Companies" };
 
 export default function CompaniesPage({ searchParams }: PageProps<"/companies">) {
   return (
@@ -52,6 +56,7 @@ async function CompaniesData({ searchParams }: Pick<PageProps<"/companies">, "se
   if (companies.total === 0 && !search) {
     return (
       <>
+        <PageReady />
         <ImportCompanies />
         {importRun && <RunStatus run={importRun} />}
         <div className="mt-8 rounded-xl border border-dashed px-6 py-12 text-center">
@@ -66,6 +71,7 @@ async function CompaniesData({ searchParams }: Pick<PageProps<"/companies">, "se
 
   return (
     <>
+      <PageReady />
       <ImportCompanies />
       {importRun && <RunStatus run={importRun} />}
       <section className="mt-6">

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { JobListFilters } from "@/components/job-filters";
@@ -5,9 +6,12 @@ import { JobListSkeleton } from "@/components/job-list-skeleton";
 import { JobsTable } from "@/components/jobs-table";
 import { Pager } from "@/components/pager";
 import { RescoreButton } from "@/components/rescore-button";
+import { PageReady } from "@/components/web-vitals";
 import { APPLICATION_STATUSES } from "@/lib/db";
 import { parseJobQuery } from "@/lib/job-query";
 import { getSignedInSource } from "@/lib/repository";
+
+export const metadata: Metadata = { title: "Jobs" };
 
 export default function JobsPage({ searchParams }: PageProps<"/jobs">) {
   return (
@@ -36,6 +40,7 @@ async function JobsData({ searchParams }: Pick<PageProps<"/jobs">, "searchParams
 
   return (
     <section className="mt-8">
+      <PageReady />
       {companies.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           No jobs yet. Change a job&apos;s status on the Tracker and it shows up here.

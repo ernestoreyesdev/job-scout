@@ -198,7 +198,8 @@ export type SalaryPeriodRow = "year" | "month" | "week" | "day" | "hour";
 
 export type JobSort = (typeof JOB_SORTS)[number];
 
-export const WEB_VITALS = ["TTFB", "FCP", "LCP", "CLS", "INP"] as const;
+/** Core Web Vitals plus READY, the time until a page's data is on screen. */
+export const WEB_VITALS = ["TTFB", "FCP", "LCP", "CLS", "INP", "READY"] as const;
 
 /** One page load measurement a browser reported. */
 export type WebVitalRow = {

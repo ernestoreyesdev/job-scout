@@ -14,7 +14,7 @@ from app.sources.base import Posting
 
 logger = logging.getLogger("agent")
 
-SCORE_CONCURRENCY = 4
+SCORE_CONCURRENCY = 8
 
 
 class ScoringError(Exception):

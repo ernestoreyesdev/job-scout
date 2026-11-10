@@ -1,9 +1,11 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { AccuracyTable } from "@/components/accuracy-table";
 import { SectionCard } from "@/components/section-card";
 import { StatTile } from "@/components/stat-tile";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PageReady } from "@/components/web-vitals";
 import { FUNNEL_STAGES, FOLLOW_UP_DAYS, GHOST_JOB_DAYS } from "@/lib/db";
 import { MIN_LABELED, accuracyByCut, funnel, statsBySource, type FunnelRow } from "@/lib/insights";
 import { getSignedInSource } from "@/lib/repository";
@@ -23,6 +25,8 @@ const SOURCE_LABELS: Record<string, string> = {
   jobvite: "Jobvite",
   hackernews: "Hacker News",
 };
+
+export const metadata: Metadata = { title: "Insights" };
 
 export default function InsightsPage() {
   return (
@@ -53,6 +57,7 @@ async function InsightsData() {
 
   return (
     <div className="mt-8 space-y-6">
+      <PageReady />
       <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile label="Jobs scored" value={jobs.length} />
         <StatTile label="Marked good or bad" value={marked.length} note={`${good} good, ${marked.length - good} bad`} />

@@ -134,3 +134,8 @@ def is_complete(source: str, postings: list[Posting], sources: tuple[JobSource, 
     """False when a fetch hit the system's limit, so jobs missing from it may still be open."""
     limit = source_named(source, sources).max_jobs
     return limit is None or len(postings) < limit
+
+
+def describes_separately(source: str, sources: tuple[JobSource, ...] | None = None) -> bool:
+    """True when a system's job list leaves descriptions out and describe() fetches them per job."""
+    return type(source_named(source, sources)).describe is not JobSource.describe

@@ -101,11 +101,14 @@ class FakeRest:
         companies: list[dict[str, str]] | None = None,
         hidden: list[str] | None = None,
         discoveries: list[dict[str, str]] | None = None,
+        snapshots: list[dict[str, Any]] | None = None,
     ):
         self.tracked = tracked or []
         self.companies = companies or []
         self.hidden = hidden or []
         self.discoveries = discoveries or []
+        self.snapshots = snapshots or []
+        self.snapshot_params: list[dict[str, str]] = []
         self.tracked_postings: list[dict[str, Any]] = []
         self.labeled: list[dict[str, Any]] = []
         self.inserts: list[tuple[str, Any]] = []
@@ -120,6 +123,9 @@ class FakeRest:
             return [{"company_id": company_id, "hidden": True} for company_id in self.hidden]
         if table == "directory_discoveries":
             return self.discoveries
+        if table == "board_snapshots":
+            self.snapshot_params.append(params)
+            return self.snapshots
         if "fit_label" in params:
             return [row for row in self.labeled if params["fit_label"] == f"eq.{row['fit_label']}"]
         if "posting:" in params.get("select", ""):
@@ -326,6 +332,7 @@ def directory_run(
     recent_discovery: bool = False,
     names: dict[tuple[str, str], str] | None = None,
     kinds: dict[tuple[str, str], str] | None = None,
+    snapshots: list[dict[str, Any]] | None = None,
 ):
     fetched: list[tuple[str, str, str]] = []
     discover_calls: list[tuple[Any, ...]] = []
@@ -352,7 +359,11 @@ def directory_run(
             for key, name in (names or {}).items()
         }
 
-    service = FakeRest(companies=companies, discoveries=[{"id": "recent", "keywords": ["software engineer"]}] if recent_discovery else [])
+    service = FakeRest(
+        companies=companies,
+        discoveries=[{"id": "recent", "keywords": ["software engineer"]}] if recent_discovery else [],
+        snapshots=snapshots,
+    )
     outcome = run(
         rule=SearchRule(keywords=["software engineer"], workplace_types=["remote"]),
         service=service,
@@ -1137,3 +1148,45 @@ def test_a_search_records_how_long_each_step_took():
     run(timings=timings)
 
     assert {"companies", "titles", "scoring"} <= set(timings) and all(ms >= 0 for ms in timings.values())
+
+
+
+def workday_company(board: str, open_jobs: int = 0) -> dict[str, Any]:
+    return {**company(board), "source": "workday", "open_jobs": open_jobs}
+
+
+def test_a_fresh_workday_snapshot_is_used_instead_of_downloading_the_board():
+    snapshot = {"source": "workday", "board": "acme", "postings": [REMOTE_JOB.model_dump(mode="json")]}
+
+    (result, _, _, service, _, _), fetched, _ = directory_run(
+        [*full_directory(), workday_company("acme")], [], {}, snapshots=[snapshot]
+    )
+
+    assert not any(board == "acme" for _, board, _ in fetched)
+    [fetch] = [f for f in result.board_fetches if f["board"] == "workday/acme"]
+    assert (fetch["outcome"], fetch["jobs"]) == ("cached", 1)
+    [params] = service.snapshot_params
+    assert params["fetched_at"].startswith("gte.")
+    saved = [row for rows in service.inserted("companies") for row in rows]
+    assert not any(row["board"] == "acme" for row in saved)
+
+
+def test_a_live_workday_fetch_saves_a_snapshot_and_other_systems_do_not():
+    (_, _, _, service, _, _), _, _ = directory_run(
+        [*full_directory("beta"), workday_company("acme.wd1/careers")],
+        [],
+        {"acme.wd1/careers": [REMOTE_JOB], "beta": [REMOTE_JOB]},
+    )
+
+    [snapshot] = service.inserted("board_snapshots")
+    assert (snapshot["source"], snapshot["board"], len(snapshot["postings"])) == ("workday", "acme.wd1/careers", 1)
+
+
+def test_the_biggest_boards_are_fetched_first(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(orchestrator, "FETCH_CONCURRENCY", 1)
+    directory = [*full_directory(), {**company("small"), "open_jobs": 5}, {**company("big"), "open_jobs": 2000}]
+
+    _, fetched, _ = directory_run(directory, [], {"small": [REMOTE_JOB], "big": [REMOTE_JOB]})
+
+    order = [board for _, board, _ in fetched]
+    assert order.index("big") < order.index("small")
