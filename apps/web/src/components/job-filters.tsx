@@ -1,7 +1,8 @@
-import Link from "next/link";
-import type { ReactNode } from "react";
+"use client";
 
-import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import type { ChangeEvent, ReactNode } from "react";
+
 import { APPLICATION_STATUSES, type ApplicationStatusRow } from "@/lib/db";
 import type { JobQuery } from "@/lib/job-query";
 
@@ -16,7 +17,7 @@ const PILL = "h-8 rounded-full border border-input bg-transparent px-3 text-sm s
 
 /**
  * Job count plus status, company, sort, salary, closed-job and clearance controls for the Tracker or Jobs, with the
- * page's own `actions` at the end; the controls submit as a plain GET to the page. The salary minimum keeps jobs that
+ * page's own `actions` at the end; each control submits the form as a plain GET to the page as soon as it changes. The salary minimum keeps jobs that
  * state a yearly salary reaching it; jobs whose details were never read pass both the salary and clearance filters.
  */
 export function JobListFilters({
@@ -42,14 +43,14 @@ export function JobListFilters({
         <span className="mr-auto pl-1 font-medium">
           {total} {total === 1 ? "job" : "jobs"}
         </span>
-        <select name="sort" defaultValue={query.sort} aria-label="Sort" className={PILL}>
+        <select name="sort" defaultValue={query.sort} aria-label="Sort" onChange={apply} className={PILL}>
           {Object.entries(SORT_LABELS).map(([value, label]) => (
             <option key={value} value={value}>
               {label}
             </option>
           ))}
         </select>
-        <select name="status" defaultValue={query.filters.status ?? ""} aria-label="Status" className={PILL}>
+        <select name="status" defaultValue={query.filters.status ?? ""} aria-label="Status" onChange={apply} className={PILL}>
           <option value="">Any status</option>
           {statuses.map((status) => (
             <option key={status} value={status}>
@@ -57,7 +58,7 @@ export function JobListFilters({
             </option>
           ))}
         </select>
-        <select name="company" defaultValue={query.filters.company ?? ""} aria-label="Company" className={`${PILL} max-w-48`}>
+        <select name="company" defaultValue={query.filters.company ?? ""} aria-label="Company" onChange={apply} className={`${PILL} max-w-48`}>
           <option value="">Any company</option>
           {companies.map((company) => (
             <option key={company} value={company}>
@@ -73,10 +74,14 @@ export function JobListFilters({
           defaultValue={query.filters.minSalary ?? ""}
           placeholder="Min salary"
           aria-label="Min yearly salary"
+          onBlur={(event) => {
+            const changed = event.currentTarget.value !== String(query.filters.minSalary ?? "");
+            if (changed) event.currentTarget.form?.requestSubmit();
+          }}
           className={`${PILL} w-32`}
         />
         <label className="flex h-8 items-center gap-1.5 text-muted-foreground">
-          <input type="checkbox" name="open" value="1" defaultChecked={query.filters.hideClosed} className="size-4 accent-primary" />
+          <input type="checkbox" name="open" value="1" defaultChecked={query.filters.hideClosed} onChange={apply} className="size-4 accent-primary" />
           Hide closed
         </label>
         <label className="flex h-8 items-center gap-1.5 text-muted-foreground">
@@ -85,13 +90,14 @@ export function JobListFilters({
             name="noclearance"
             value="1"
             defaultChecked={query.filters.hideClearance}
+            onChange={apply}
             className="size-4 accent-primary"
           />
           Hide clearance
         </label>
-        <Button type="submit" size="sm" variant="outline" className="rounded-full">
-          Apply
-        </Button>
+        <button type="submit" className="sr-only">
+          Apply filters
+        </button>
         {active && (
           <Link href={basePath} className="text-muted-foreground hover:text-foreground">
             Reset
@@ -101,4 +107,8 @@ export function JobListFilters({
       {actions}
     </div>
   );
+}
+
+function apply(event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) {
+  event.currentTarget.form?.requestSubmit();
 }

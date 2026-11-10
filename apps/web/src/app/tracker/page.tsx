@@ -9,6 +9,7 @@ import { RecentRuns } from "@/components/recent-runs";
 import { RescoreButton } from "@/components/rescore-button";
 import { RunStatus } from "@/components/run-status";
 import { SearchForm } from "@/components/search-form";
+import type { SearchRuleInput } from "@/lib/db";
 import { parseJobQuery } from "@/lib/job-query";
 import { getSignedInSource } from "@/lib/repository";
 
@@ -21,7 +22,7 @@ export default function TrackerPage({ searchParams }: PageProps<"/tracker">) {
         apply yourself.
       </p>
       <div className="mt-6">
-        <Suspense fallback={<SearchForm hasResume={false} />}>
+        <Suspense fallback={<SearchForm hasResume={false} last={null} />}>
           <SearchFormData />
         </Suspense>
       </div>
@@ -95,6 +96,13 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
 
 async function SearchFormData() {
   const { repository } = await getSignedInSource();
-  const resume = await repository.getPrimaryResume();
-  return <SearchForm hasResume={Boolean(resume?.text)} />;
+  const [resume, runs] = await Promise.all([repository.getPrimaryResume(), repository.listRuns(10)]);
+  const last = runs.find((run) => run.kind === "search");
+  return (
+    <SearchForm
+      key={last?.id ?? "none"}
+      hasResume={Boolean(resume?.text)}
+      last={last ? (last.input as Partial<SearchRuleInput>) : null}
+    />
+  );
 }

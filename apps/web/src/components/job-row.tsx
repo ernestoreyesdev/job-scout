@@ -108,7 +108,12 @@ export function JobRow({
   }
 
   return (
-    <li className="flex flex-wrap gap-x-4 gap-y-3 rounded-xl border bg-card p-4 text-card-foreground shadow-xs transition-colors hover:border-foreground/20">
+    <li
+      className={cn(
+        "flex flex-wrap gap-x-4 gap-y-3 rounded-xl border border-l-4 bg-card p-4 text-card-foreground shadow-xs transition-shadow hover:shadow-md",
+        fitLook(job.fit_score).accent,
+      )}
+    >
       <ScoreBadge score={job.fit_score} />
       <div className="min-w-0 flex-1 basis-56">
         <a
@@ -121,7 +126,7 @@ export function JobRow({
           <ExternalLink className="size-3.5 shrink-0 self-center text-muted-foreground group-hover/link:text-foreground" />
         </a>
         <p className="text-sm text-muted-foreground">
-          {[tidyCase(job.posting.company), job.posting.location && tidyCase(job.posting.location), posted]
+          {[tidyCase(job.posting.company), job.posting.location && shortLocation(tidyCase(job.posting.location)), posted]
             .filter(Boolean)
             .join(" · ")}
         </p>
@@ -347,24 +352,37 @@ function GapList({ title, items }: { title: string; items: GapItem[] }) {
   );
 }
 
-/** The fit score in a circle with its label: green from 70, amber from 50, gray below and when unscored. */
+/** The fit score in a circle with its label. */
 function ScoreBadge({ score }: { score: number | null }) {
-  const [tone, label] =
-    score === null
-      ? ["bg-muted text-muted-foreground", "Not scored"]
-      : score >= 70
-        ? ["bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300", "Strong fit"]
-        : score >= 50
-          ? ["bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300", "Possible fit"]
-          : ["bg-muted text-muted-foreground", "Weak fit"];
+  const { badge, label } = fitLook(score);
   return (
     <div className="flex w-14 shrink-0 flex-col items-center gap-1" title={score === null ? undefined : `Fit score ${score} of 100`}>
-      <div className={cn("flex size-11 items-center justify-center rounded-full text-sm font-semibold tabular-nums", tone)}>
+      <div className={cn("flex size-11 items-center justify-center rounded-full text-sm font-semibold tabular-nums", badge)}>
         {score ?? "–"}
       </div>
       <span className="text-center text-[11px] leading-tight text-muted-foreground">{label}</span>
     </div>
   );
+}
+
+/** Colors and label for a fit score: green from 70, amber from 50, gray below and when unscored. */
+function fitLook(score: number | null): { badge: string; accent: string; label: string } {
+  if (score === null) return { badge: "bg-muted text-muted-foreground", accent: "border-l-border", label: "Not scored" };
+  if (score >= 70) {
+    return {
+      badge: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+      accent: "border-l-emerald-500",
+      label: "Strong fit",
+    };
+  }
+  if (score >= 50) {
+    return {
+      badge: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+      accent: "border-l-amber-400",
+      label: "Possible fit",
+    };
+  }
+  return { badge: "bg-muted text-muted-foreground", accent: "border-l-muted-foreground/30", label: "Weak fit" };
 }
 
 function postedAgo(days: number): string {
@@ -387,3 +405,8 @@ function tidyCase(text: string): string {
 }
 
 const SHORT_WORDS = new Set(["NEW", "THE", "AND", "FOR", "OF", "IN", "AT", "TO", "SAN", "LOS", "LAS", "ALL", "ANY"]);
+
+/** A location without a trailing country name for the US, which every search is limited to. */
+function shortLocation(location: string): string {
+  return location.replace(/,\s*(United States( of America)?|USA|US)$/i, "") || location;
+}

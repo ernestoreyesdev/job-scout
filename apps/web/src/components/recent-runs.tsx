@@ -1,3 +1,5 @@
+import { ChevronDown } from "lucide-react";
+
 import type { AgentRunRow } from "@/lib/db";
 import { describeRun } from "@/lib/runs";
 
@@ -8,9 +10,10 @@ export function RecentRuns({ runs }: { runs: AgentRunRow[] }) {
   if (runs.length === 0) return null;
 
   return (
-    <details className="group mt-3 text-sm">
-      <summary className="cursor-pointer list-none text-muted-foreground select-none hover:text-foreground">
+    <details className="group mt-1.5 text-sm">
+      <summary className="ml-auto block w-fit cursor-pointer list-none px-1 text-xs text-muted-foreground select-none hover:text-foreground">
         Recent searches ({runs.length})
+        <ChevronDown className="ml-1 inline size-3.5 align-[-2px] transition-transform group-open:rotate-180" />
       </summary>
       <ul className="mt-2 divide-y rounded-lg border">
         {runs.map((run) => {
