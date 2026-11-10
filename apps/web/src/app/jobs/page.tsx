@@ -4,7 +4,7 @@ import { JobListFilters } from "@/components/job-filters";
 import { JobsTable } from "@/components/jobs-table";
 import { Pager } from "@/components/pager";
 import { RescoreButton } from "@/components/rescore-button";
-import { APPLICATION_STATUSES, PAGE_SIZE } from "@/lib/db";
+import { APPLICATION_STATUSES } from "@/lib/db";
 import { parseJobQuery } from "@/lib/job-query";
 import { getSignedInSource } from "@/lib/repository";
 
@@ -41,30 +41,22 @@ async function JobsData({ searchParams }: Pick<PageProps<"/jobs">, "searchParams
         </p>
       ) : (
         <>
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <JobListFilters
-              basePath="/jobs"
-              query={query}
-              companies={companies}
-              statuses={APPLICATION_STATUSES.filter((status) => status !== "new")}
-            />
-            {stale > 0 && (
-              <div className="mb-3">
-                <RescoreButton count={stale} />
-              </div>
-            )}
-          </div>
-          {jobs.total === 0 && <p className="text-sm text-muted-foreground">No jobs match these filters.</p>}
-          <JobsTable
-            jobs={jobs.items}
+          <JobListFilters
             basePath="/jobs"
-            ascending={query.sort === "asc"}
-            params={query.params}
-            showNotes
-            canRemoveFromTracker={false}
-            offset={(jobs.page - 1) * PAGE_SIZE}
-            currentResumeId={resume?.id ?? null}
+            query={query}
+            companies={companies}
+            total={jobs.total}
+            statuses={APPLICATION_STATUSES.filter((status) => status !== "new")}
           />
+          {stale > 0 && (
+            <div className="mt-2 flex justify-end">
+              <RescoreButton count={stale} />
+            </div>
+          )}
+          {jobs.total === 0 && <p className="mt-4 text-sm text-muted-foreground">No jobs match these filters.</p>}
+          <div className="mt-3">
+            <JobsTable jobs={jobs.items} showNotes canRemoveFromTracker={false} currentResumeId={resume?.id ?? null} />
+          </div>
           <Pager
             basePath="/jobs"
             page={jobs.page}

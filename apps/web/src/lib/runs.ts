@@ -1,4 +1,4 @@
-import type { AgentRunRow, SearchRuleInput } from "@/lib/db";
+import type { AgentRunRow, SearchRuleInput, WorkplaceTypeRow } from "@/lib/db";
 
 /** One-line description of what a run did: the search rule, the re-score or the import. */
 export function describeRun(run: AgentRunRow): { title: string; detail: string } {
@@ -10,9 +10,7 @@ export function describeRun(run: AgentRunRow): { title: string; detail: string }
   const input = run.input as Partial<SearchRuleInput>;
   const parts = [
     input.keywords?.join(", "),
-    input.workplace_types?.length
-      ? input.workplace_types.map((type, i) => (i ? WORKPLACE_LABELS[type].toLowerCase() : WORKPLACE_LABELS[type])).join(" or ")
-      : null,
+    input.workplace_types?.length ? workplaces(input.workplace_types) : null,
     input.location,
     input.exclude?.length ? `excluding ${input.exclude.join(", ")}` : null,
     input.posted_within_days
@@ -24,3 +22,9 @@ export function describeRun(run: AgentRunRow): { title: string; detail: string }
 }
 
 const WORKPLACE_LABELS = { onsite: "On-site", hybrid: "Hybrid", remote: "Remote" } as const;
+
+/** "Hybrid", "Hybrid or remote", "On-site, hybrid or remote". */
+function workplaces(types: WorkplaceTypeRow[]): string {
+  const labels = types.map((type, i) => (i ? WORKPLACE_LABELS[type].toLowerCase() : WORKPLACE_LABELS[type]));
+  return labels.length > 1 ? `${labels.slice(0, -1).join(", ")} or ${labels.at(-1)}` : labels[0];
+}

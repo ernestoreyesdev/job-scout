@@ -1,12 +1,11 @@
 "use client";
 
-import { ChevronDown, EyeOff, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
+import { ChevronDown, ExternalLink, EyeOff, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
 import { useState, useTransition } from "react";
 
 import { analyzeGaps, deleteApplication, draftFollowUp, removeFromTracker, updateApplication } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { TableCell, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import {
   APPLICATION_STATUSES,
@@ -27,15 +26,21 @@ const GAP_SECTIONS = [
   ["missing", "Missing"],
 ] as const;
 
+/** Stack items shown as chips before the rest collapse into "+N". */
+const STACK_CHIPS = 4;
+
+const CHIP = "inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-foreground/80";
+const WARNING_CHIP =
+  "inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300";
+
 /**
- * One tracked job: position, score, posting link, facts read from the posting, ghost-job and follow-up notes,
- * status select, optional notes saved on blur, and actions. Thumbs up or down records whether the user agrees it
- * fits; clicking the active one clears it. Details shows the timeline, strengths and gaps, and an on-demand gap
- * analysis. Delete removes the job everywhere; remove (Tracker only, jobs past "new") keeps it under Jobs.
+ * One tracked job as a card: score badge, posting link, facts as chips, warnings, a two-line fit summary, status
+ * select and actions. Thumbs up or down records whether the user agrees it fits; clicking the active one clears it.
+ * "Show more" opens the full summary, notes, timeline, strengths and gaps, and an on-demand gap analysis. Delete
+ * removes the job everywhere; remove (Tracker only, jobs past "new") keeps it under Jobs.
  */
 export function JobRow({
   job,
-  position,
   showNotes,
   canRemoveFromTracker,
   staleResume,
@@ -43,7 +48,6 @@ export function JobRow({
   timeline,
 }: {
   job: TrackedJob;
-  position: number;
   showNotes: boolean;
   canRemoveFromTracker: boolean;
   staleResume: boolean;
@@ -51,16 +55,17 @@ export function JobRow({
   timeline: string[];
 }) {
   const [error, setError] = useState<string | null>(null);
-  const [showDetails, setShowDetails] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [followUp, setFollowUp] = useState<{ subject: string; body: string } | null>(null);
   const [pending, startTransition] = useTransition();
   const { openDays, reposted, daysSinceApplied } = job.signals;
   const ghost = [
-    openDays !== null && openDays >= GHOST_JOB_DAYS && `open ${openDays} days`,
-    reposted && "reposted",
-  ].filter(Boolean);
-
+    openDays !== null && openDays >= GHOST_JOB_DAYS && `Open ${openDays} days`,
+    reposted && "Reposted",
+  ].filter((label): label is string => Boolean(label));
   const facts = postingFacts(job.posting);
+  const stack = job.posting.tech_stack;
+  const posted = job.posting.posted_at && openDays !== null ? postedAgo(openDays) : null;
 
   function save(field: "status" | "notes" | "fitLabel", value: string) {
     const formData = new FormData();
@@ -103,27 +108,57 @@ export function JobRow({
   }
 
   return (
-    <TableRow className="align-top">
-      <TableCell className="text-muted-foreground tabular-nums">{position}</TableCell>
-      <TableCell className="text-lg font-semibold tabular-nums">{job.fit_score ?? "–"}</TableCell>
-      <TableCell className="whitespace-normal">
-        <a href={job.posting.url} target="_blank" rel="noreferrer" className="font-medium hover:underline">
+    <li className="flex gap-4 rounded-xl border bg-card p-4 text-card-foreground shadow-xs transition-colors hover:border-foreground/20">
+      <ScoreBadge score={job.fit_score} />
+      <div className="min-w-0 flex-1">
+        <a
+          href={job.posting.url}
+          target="_blank"
+          rel="noreferrer"
+          className="group/link inline-flex items-baseline gap-1.5 font-medium hover:underline"
+        >
           {job.posting.title}
+          <ExternalLink className="size-3.5 shrink-0 self-center text-muted-foreground group-hover/link:text-foreground" />
         </a>
-        <div className="text-xs text-muted-foreground">
-          {job.posting.company}
-          {job.posting.location ? ` · ${job.posting.location}` : ""}
-        </div>
-        {facts.length > 0 && <div className="mt-1 text-xs text-muted-foreground">{facts.join(" · ")}</div>}
-        {closedOn && (
-          <p className="mt-1 text-xs font-medium text-destructive">Closed: no longer listed since {closedOn}</p>
+        <p className="text-sm text-muted-foreground">
+          {[job.posting.company, job.posting.location, posted].filter(Boolean).join(" · ")}
+        </p>
+        {(facts.length > 0 || stack.length > 0 || ghost.length > 0 || staleResume || closedOn) && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {closedOn && (
+              <span className="inline-flex items-center rounded-full bg-destructive/10 px-2 py-0.5 text-xs text-destructive">
+                Closed since {closedOn}
+              </span>
+            )}
+            {facts.map((fact) => (
+              <span key={fact} className={CHIP}>
+                {fact}
+              </span>
+            ))}
+            {stack.slice(0, STACK_CHIPS).map((tool) => (
+              <span key={tool} className={CHIP}>
+                {tool}
+              </span>
+            ))}
+            {stack.length > STACK_CHIPS && (
+              <span className="px-1 py-0.5 text-xs text-muted-foreground" title={stack.slice(STACK_CHIPS).join(", ")}>
+                +{stack.length - STACK_CHIPS}
+              </span>
+            )}
+            {ghost.map((label) => (
+              <span key={label} className={WARNING_CHIP} title="A common sign of a ghost job">
+                {label}
+              </span>
+            ))}
+            {staleResume && <span className={WARNING_CHIP}>Scored with an older resume</span>}
+          </div>
         )}
-        {job.fit_summary && <p className="mt-1 text-sm text-muted-foreground">{job.fit_summary}</p>}
-        {staleResume && <p className="mt-1 text-xs text-amber-600">Scored with an older resume</p>}
-        {ghost.length > 0 && <p className="mt-1 text-xs text-amber-600">Possible ghost job: {ghost.join(", ")}</p>}
+        {job.fit_summary && (
+          <p className={cn("mt-2 text-sm text-muted-foreground", !expanded && "line-clamp-2")}>{job.fit_summary}</p>
+        )}
         {daysSinceApplied !== null && daysSinceApplied >= FOLLOW_UP_DAYS && (
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-            <span className="font-medium text-amber-600">No response in {daysSinceApplied} days</span>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+            <span className={WARNING_CHIP}>No response in {daysSinceApplied} days</span>
             {!followUp && (
               <button type="button" onClick={draft} disabled={pending} className="underline hover:text-foreground">
                 {pending ? "Drafting…" : "Draft follow-up"}
@@ -132,7 +167,7 @@ export function JobRow({
           </div>
         )}
         {followUp && (
-          <div className="mt-2 space-y-1 rounded-md border p-2 text-sm">
+          <div className="mt-2 space-y-1 rounded-lg border p-3 text-sm">
             <p className="font-medium">{followUp.subject}</p>
             <Textarea readOnly value={followUp.body} rows={6} />
             <div className="flex gap-3 text-xs">
@@ -151,83 +186,75 @@ export function JobRow({
         )}
         <button
           type="button"
-          onClick={() => setShowDetails(!showDetails)}
-          className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-          aria-expanded={showDetails}
+          onClick={() => setExpanded(!expanded)}
+          className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+          aria-expanded={expanded}
         >
-          {showDetails ? "Hide details" : "Details"}
-          <ChevronDown className={cn("size-3.5 transition-transform", showDetails && "rotate-180")} />
+          {expanded ? "Show less" : "Show more"}
+          <ChevronDown className={cn("size-3.5 transition-transform", expanded && "rotate-180")} />
         </button>
-        {showDetails && timeline.length > 0 && (
-          <p className="mt-2 text-xs text-muted-foreground">{timeline.join(" · ")}</p>
-        )}
-        {showDetails && (job.strengths.length > 0 || job.gaps.length > 0) && (
-          <div className="mt-2 grid gap-3 text-sm sm:grid-cols-2">
-            <div>
-              <p className="font-medium">Strengths</p>
-              <ul className="mt-1 list-disc space-y-1 pl-4 text-muted-foreground">
-                {job.strengths.map((item) => (
-                  <li key={item}>{item}</li>
+        {expanded && (
+          <div className="mt-3 space-y-3 border-t pt-3">
+            {showNotes && (
+              <Textarea
+                defaultValue={job.notes ?? ""}
+                placeholder="Notes, like a recruiter's name"
+                rows={2}
+                onBlur={(event) => {
+                  if (event.target.value !== (job.notes ?? "")) save("notes", event.target.value);
+                }}
+              />
+            )}
+            {timeline.length > 0 && <p className="text-xs text-muted-foreground">{timeline.join(" · ")}</p>}
+            {(job.strengths.length > 0 || job.gaps.length > 0) && (
+              <div className="grid gap-3 text-sm sm:grid-cols-2">
+                <div>
+                  <p className="font-medium">Strengths</p>
+                  <ul className="mt-1 list-disc space-y-1 pl-4 text-muted-foreground">
+                    {job.strengths.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <p className="font-medium">Gaps</p>
+                  <ul className="mt-1 list-disc space-y-1 pl-4 text-muted-foreground">
+                    {job.gaps.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+            {job.gap_analysis ? (
+              <div className="grid gap-3 text-sm sm:grid-cols-3">
+                {GAP_SECTIONS.map(([key, title]) => (
+                  <GapList key={key} title={title} items={job.gap_analysis![key]} />
                 ))}
-              </ul>
-            </div>
-            <div>
-              <p className="font-medium">Gaps</p>
-              <ul className="mt-1 list-disc space-y-1 pl-4 text-muted-foreground">
-                {job.gaps.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            </div>
+              </div>
+            ) : (
+              <Button variant="outline" size="sm" onClick={analyze} disabled={pending}>
+                {pending ? "Analyzing…" : "Analyze gaps"}
+              </Button>
+            )}
           </div>
         )}
-        {showDetails &&
-          (job.gap_analysis ? (
-            <div className="mt-3 grid gap-3 text-sm sm:grid-cols-3">
-              {GAP_SECTIONS.map(([key, title]) => (
-                <GapList key={key} title={title} items={job.gap_analysis![key]} />
-              ))}
-            </div>
-          ) : (
-            <Button variant="outline" size="sm" className="mt-3" onClick={analyze} disabled={pending}>
-              {pending ? "Analyzing…" : "Analyze gaps"}
-            </Button>
-          ))}
-        {error && <p className="mt-1 text-sm text-destructive">{error}</p>}
-      </TableCell>
-      <TableCell>
-        <Select
-          key={job.status}
-          defaultValue={job.status}
-          onValueChange={(value) => save("status", value)}
-          disabled={pending}
-        >
-          <SelectTrigger className="w-36">
+        {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-2">
+        <Select key={job.status} defaultValue={job.status} onValueChange={(value) => save("status", value)} disabled={pending}>
+          <SelectTrigger size="sm" className="w-32 rounded-full capitalize">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             {APPLICATION_STATUSES.map((status) => (
-              <SelectItem key={status} value={status}>
+              <SelectItem key={status} value={status} className="capitalize">
                 {status}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
-      </TableCell>
-      {showNotes && (
-        <TableCell>
-          <Textarea
-            defaultValue={job.notes ?? ""}
-            placeholder="Notes"
-            rows={2}
-            onBlur={(event) => {
-              if (event.target.value !== (job.notes ?? "")) save("notes", event.target.value);
-            }}
-          />
-        </TableCell>
-      )}
-      <TableCell>
-        <div className="flex justify-end gap-1">
+        <div className="flex gap-0.5">
           {(["good", "bad"] as const satisfies readonly FitLabelRow[]).map((label) => {
             const active = job.fit_label === label;
             const Icon = label === "good" ? ThumbsUp : ThumbsDown;
@@ -235,13 +262,13 @@ export function JobRow({
               <Button
                 key={label}
                 variant="ghost"
-                size="icon"
+                size="icon-sm"
                 onClick={() => save("fitLabel", active ? "" : label)}
                 disabled={pending}
                 aria-pressed={active}
                 title={label === "good" ? "Good fit" : "Bad fit"}
                 aria-label={`Mark ${job.posting.title} as a ${label} fit`}
-                className={cn(active && (label === "good" ? "text-emerald-600" : "text-destructive"))}
+                className={cn("text-muted-foreground", active && (label === "good" ? "text-emerald-600" : "text-destructive"))}
               >
                 <Icon className={cn(active && "fill-current")} />
               </Button>
@@ -250,32 +277,34 @@ export function JobRow({
           {canRemoveFromTracker && job.status !== "new" && (
             <Button
               variant="ghost"
-              size="icon"
+              size="icon-sm"
               onClick={hide}
               disabled={pending}
               title="Remove from Tracker (stays in Jobs)"
               aria-label={`Remove ${job.posting.title} from the Tracker, keeping it in Jobs`}
+              className="text-muted-foreground"
             >
               <EyeOff />
             </Button>
           )}
           <Button
             variant="ghost"
-            size="icon"
+            size="icon-sm"
             onClick={remove}
             disabled={pending}
             title="Delete from Tracker and Jobs"
             aria-label={`Delete ${job.posting.title} from the Tracker and Jobs`}
+            className="text-muted-foreground"
           >
             <Trash2 />
           </Button>
         </div>
-      </TableCell>
-    </TableRow>
+      </div>
+    </li>
   );
 }
 
-/** Short labels for the facts read from a posting: pay, clearance, visa sponsorship, experience and stack. */
+/** Short labels for the facts read from a posting: pay, clearance, visa sponsorship and experience. */
 function postingFacts(posting: PostingRow): string[] {
   const facts: string[] = [];
   if (posting.salary_min !== null || posting.salary_max !== null) {
@@ -293,7 +322,6 @@ function postingFacts(posting: PostingRow): string[] {
   if (posting.clearance) facts.push(`Clearance: ${posting.clearance}`);
   if (posting.visa_sponsorship) facts.push(posting.visa_sponsorship === "yes" ? "Sponsors visas" : "No visa sponsorship");
   if (posting.years_experience !== null) facts.push(`${posting.years_experience}+ yrs`);
-  if (posting.tech_stack.length > 0) facts.push(posting.tech_stack.slice(0, 6).join(", "));
   return facts;
 }
 
@@ -315,4 +343,32 @@ function GapList({ title, items }: { title: string; items: GapItem[] }) {
       </ul>
     </div>
   );
+}
+
+/** The fit score in a circle: green from 70, amber from 50, gray below and when unscored. */
+function ScoreBadge({ score }: { score: number | null }) {
+  const tone =
+    score === null
+      ? "bg-muted text-muted-foreground"
+      : score >= 70
+        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+        : score >= 50
+          ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+          : "bg-muted text-muted-foreground";
+  return (
+    <div
+      className={cn("flex size-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold tabular-nums", tone)}
+      title={score === null ? "Not scored" : `Fit score ${score} of 100`}
+    >
+      {score ?? "–"}
+    </div>
+  );
+}
+
+function postedAgo(days: number): string {
+  if (days === 0) return "posted today";
+  if (days === 1) return "posted yesterday";
+  if (days < 14) return `posted ${days} days ago`;
+  if (days < 60) return `posted ${Math.floor(days / 7)} weeks ago`;
+  return `posted ${Math.floor(days / 30)} months ago`;
 }

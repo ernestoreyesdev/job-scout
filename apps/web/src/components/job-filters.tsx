@@ -5,83 +5,77 @@ import { APPLICATION_STATUSES, type ApplicationStatusRow } from "@/lib/db";
 import type { JobQuery } from "@/lib/job-query";
 
 const SORT_LABELS = {
-  desc: "Score, highest first",
-  asc: "Score, lowest first",
+  desc: "Best match",
+  asc: "Lowest score",
   posted: "Newest posted",
   added: "Recently added",
 } as const;
 
-const SELECT = "h-9 rounded-md border border-input bg-transparent px-3 text-sm shadow-xs";
+const PILL = "h-8 rounded-full border border-input bg-transparent px-3 text-sm shadow-xs hover:border-foreground/30";
 
 /**
- * Status, company, closed-job, clearance, salary and sort controls for the Tracker or Jobs; submits as a plain GET
- * to the page. The salary minimum keeps jobs that state a yearly salary reaching it; jobs whose details were never
- * read pass both the salary and clearance filters.
+ * Job count plus status, company, sort, salary, closed-job and clearance controls for the Tracker or Jobs; submits
+ * as a plain GET to the page. The salary minimum keeps jobs that state a yearly salary reaching it; jobs whose
+ * details were never read pass both the salary and clearance filters.
  */
 export function JobListFilters({
   basePath,
   query,
   companies,
+  total,
   statuses = APPLICATION_STATUSES,
 }: {
   basePath: string;
   query: JobQuery;
   companies: string[];
+  total: number;
   statuses?: readonly ApplicationStatusRow[];
 }) {
   const active = Object.keys(query.params).length > 0;
 
   return (
-    <form method="get" action={basePath} className="mb-3 flex flex-wrap items-end gap-3 text-sm">
-      <label className="space-y-1">
-        <span className="block font-medium">Status</span>
-        <select name="status" defaultValue={query.filters.status ?? ""} className={SELECT}>
-          <option value="">Any</option>
-          {statuses.map((status) => (
-            <option key={status} value={status}>
-              {status}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="space-y-1">
-        <span className="block font-medium">Company</span>
-        <select name="company" defaultValue={query.filters.company ?? ""} className={`${SELECT} max-w-48`}>
-          <option value="">Any</option>
-          {companies.map((company) => (
-            <option key={company} value={company}>
-              {company}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="space-y-1">
-        <span className="block font-medium">Sort</span>
-        <select name="sort" defaultValue={query.sort} className={SELECT}>
-          {Object.entries(SORT_LABELS).map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="space-y-1">
-        <span className="block font-medium">Min yearly salary</span>
-        <input
-          type="number"
-          name="salary"
-          min={0}
-          step={5000}
-          defaultValue={query.filters.minSalary ?? ""}
-          placeholder="Any"
-          className={`${SELECT} w-32`}
-        />
-      </label>
-      <label className="flex h-9 items-center gap-1.5">
+    <form method="get" action={basePath} className="flex flex-wrap items-center gap-2 text-sm">
+      <span className="mr-auto font-medium">
+        {total} {total === 1 ? "job" : "jobs"}
+      </span>
+      <select name="sort" defaultValue={query.sort} aria-label="Sort" className={PILL}>
+        {Object.entries(SORT_LABELS).map(([value, label]) => (
+          <option key={value} value={value}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <select name="status" defaultValue={query.filters.status ?? ""} aria-label="Status" className={`${PILL} capitalize`}>
+        <option value="">Any status</option>
+        {statuses.map((status) => (
+          <option key={status} value={status}>
+            {status}
+          </option>
+        ))}
+      </select>
+      <select name="company" defaultValue={query.filters.company ?? ""} aria-label="Company" className={`${PILL} max-w-48`}>
+        <option value="">Any company</option>
+        {companies.map((company) => (
+          <option key={company} value={company}>
+            {company}
+          </option>
+        ))}
+      </select>
+      <input
+        type="number"
+        name="salary"
+        min={0}
+        step={5000}
+        defaultValue={query.filters.minSalary ?? ""}
+        placeholder="Min salary"
+        aria-label="Min yearly salary"
+        className={`${PILL} w-32`}
+      />
+      <label className="flex h-8 items-center gap-1.5 text-muted-foreground">
         <input type="checkbox" name="open" value="1" defaultChecked={query.filters.hideClosed} className="size-4 accent-primary" />
         Hide closed
       </label>
-      <label className="flex h-9 items-center gap-1.5">
+      <label className="flex h-8 items-center gap-1.5 text-muted-foreground">
         <input
           type="checkbox"
           name="noclearance"
@@ -89,9 +83,9 @@ export function JobListFilters({
           defaultChecked={query.filters.hideClearance}
           className="size-4 accent-primary"
         />
-        Hide clearance jobs
+        Hide clearance
       </label>
-      <Button type="submit" size="sm" variant="outline">
+      <Button type="submit" size="sm" variant="outline" className="rounded-full">
         Apply
       </Button>
       {active && (
