@@ -66,20 +66,21 @@ export function JobListFilters({
             </option>
           ))}
         </select>
-        <input
-          type="number"
-          name="salary"
-          min={0}
-          step={5000}
-          defaultValue={query.filters.minSalary ?? ""}
-          placeholder="Min salary"
-          aria-label="Min yearly salary"
-          onBlur={(event) => {
-            const changed = event.currentTarget.value !== String(query.filters.minSalary ?? "");
-            if (changed) event.currentTarget.form?.requestSubmit();
-          }}
-          className={`${PILL} w-32`}
-        />
+        <label className="flex items-center gap-1.5 text-muted-foreground">
+          Min salary
+          <input
+            type="number"
+            name="salary"
+            min={0}
+            step={5000}
+            defaultValue={query.filters.minSalary ?? ""}
+            onBlur={(event) => {
+              const changed = event.currentTarget.value !== String(query.filters.minSalary ?? "");
+              if (changed) event.currentTarget.form?.requestSubmit();
+            }}
+            className={`${PILL} w-28`}
+          />
+        </label>
         <label className="flex h-8 items-center gap-1.5 text-muted-foreground">
           <input type="checkbox" name="open" value="1" defaultChecked={query.filters.hideClosed} onChange={apply} className="size-4 accent-primary" />
           Hide closed
