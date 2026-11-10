@@ -38,7 +38,7 @@ export function SearchForm({ hasResume, last }: { hasResume: boolean; last: Part
   }
 
   return (
-    <form action={search} noValidate className="rounded-xl border bg-card p-4 shadow-xs">
+    <form action={search} noValidate autoComplete="off" className="rounded-xl border bg-card p-4 shadow-xs">
       <div className="flex flex-wrap items-start gap-2">
         <div className="min-w-64 flex-1">
           <div className="relative">

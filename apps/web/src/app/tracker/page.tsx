@@ -52,10 +52,24 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
       <section className="mt-8">
         {trackerTotal === 0 ? (
           <div className="rounded-xl border border-dashed px-6 py-12 text-center">
-            <p className="font-medium">Start your first search</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Enter a job title above and the matches show up here.
-            </p>
+            {runs[0]?.status === "queued" || runs[0]?.status === "running" ? (
+              <>
+                <p className="font-medium">Searching…</p>
+                <p className="mt-1 text-sm text-muted-foreground">Matches show up here as they&apos;re scored.</p>
+              </>
+            ) : runs.length > 0 ? (
+              <>
+                <p className="font-medium">Your Tracker is empty</p>
+                <p className="mt-1 text-sm text-muted-foreground">Run a search above to add new matches.</p>
+              </>
+            ) : (
+              <>
+                <p className="font-medium">Start your first search</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Enter a job title above and the matches show up here.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <>
