@@ -20,7 +20,7 @@ from app.agents.orchestrator import (
 from app.agents.follow_up.agent import FollowUpError, draft_follow_up
 from app.agents.gap_analysis.agent import GapAnalysisError, analyze_gaps
 from app.agents.schemas import AnthropicKeyRequest, CompanyImport, RunStopped, SearchRule, Usage
-from app.auth import CurrentUser, current_user
+from app.auth import CurrentUser, admin_user, current_user
 from app.config import Settings, get_settings
 from app.crypto import decrypt, encrypt, key_hint
 from app.db import Rest, service_db, user_db
@@ -30,11 +30,14 @@ logger = logging.getLogger("agent")
 
 RUN_TIME_LIMIT = timedelta(minutes=10)
 UNFINISHED = "in.(queued,running)"
+# Days of runs the admin page covers.
+STATS_DAYS = 30
 
 
 app = FastAPI(title="job-finder agent")
 
 User = Annotated[CurrentUser, Depends(current_user)]
+Admin = Annotated[CurrentUser, Depends(admin_user)]
 Config = Annotated[Settings, Depends(get_settings)]
 
 
@@ -59,15 +62,7 @@ def health() -> dict[str, str]:
 
 @app.put("/me/anthropic-key")
 def put_anthropic_key(body: AnthropicKeyRequest, user: User, settings: Config) -> dict[str, str]:
-    try:
-        make_client(body.api_key).models.retrieve(settings.scoring_model)
-    except anthropic.AuthenticationError:
-        raise HTTPException(400, "Anthropic rejected this key.")
-    except anthropic.PermissionDeniedError:
-        raise HTTPException(400, f"This key can't use {settings.scoring_model}.")
-    except anthropic.APIConnectionError:
-        raise HTTPException(502, "Couldn't reach Anthropic to validate the key.")
-
+    validate_anthropic_key(body.api_key, settings)
     hint = key_hint(body.api_key)
     service_db(settings).insert(
         "api_credentials",
@@ -181,12 +176,16 @@ def summarize(result: SearchResult) -> str:
     if result.matched == 0:
         return "No jobs match your search."
     if result.kept == 0:
+        if result.scored and result.min_score:
+            return f"No new jobs scored {result.min_score} or higher."
         if result.failed:
             return "Couldn't score the matching jobs. Try again."
         return "No new jobs: every match is already on your list."
     jobs = "job" if result.kept == 1 else "jobs"
     if result.scored == 0:
         return f"Added the {result.kept} newest {jobs}."
+    if result.min_score:
+        return f"Added {result.kept} {jobs} scoring {result.min_score} or higher."
     if result.kept < result.scored:
         return f"Added your {result.kept} best-matching {jobs}."
     return f"Added {result.kept} {jobs}."
@@ -372,10 +371,15 @@ def post_follow_up(application_id: str, user: User, settings: Config) -> dict[st
 
 
 def anthropic_key(service: Rest, user_id: str, settings: Settings) -> str | None:
-    """The user's saved Anthropic key, else the shared ANTHROPIC_API_KEY, else None."""
+    """
+    The user's saved Anthropic key, else the shared key an admin saved, else
+    the ANTHROPIC_API_KEY setting, else None.
+    """
     credentials = service.select(
         "api_credentials", {"user_id": f"eq.{user_id}", "provider": "eq.anthropic", "select": "ciphertext"}
     )
+    if not credentials:
+        credentials = service.select("shared_credentials", {"provider": "eq.anthropic", "select": "ciphertext"})
     if credentials:
         return decrypt(credentials[0]["ciphertext"], settings.agent_encryption_key)
     return settings.anthropic_api_key
@@ -416,3 +420,70 @@ def stop_run(run_id: str, user: User, settings: Config) -> dict[str, str]:
     if not stopped:
         raise HTTPException(409, "This search already finished.")
     return {"status": "stopped"}
+
+
+def validate_anthropic_key(api_key: str, settings: Settings) -> None:
+    """Raises a 400 or 502 unless Anthropic accepts the key for the scoring model."""
+    try:
+        make_client(api_key).models.retrieve(settings.scoring_model)
+    except anthropic.AuthenticationError:
+        raise HTTPException(400, "Anthropic rejected this key.")
+    except anthropic.PermissionDeniedError:
+        raise HTTPException(400, f"This key can't use {settings.scoring_model}.")
+    except anthropic.APIConnectionError:
+        raise HTTPException(502, "Couldn't reach Anthropic to validate the key.")
+
+
+@app.get("/admin/anthropic-key")
+def get_shared_key(admin: Admin, settings: Config) -> dict[str, Any]:
+    """The shared key's last four characters, and whether ANTHROPIC_API_KEY backs it up."""
+    rows = service_db(settings).select("shared_credentials", {"provider": "eq.anthropic", "select": "hint"})
+    return {"hint": rows[0]["hint"] if rows else None, "fallback": bool(settings.anthropic_api_key)}
+
+
+@app.put("/admin/anthropic-key")
+def put_shared_key(body: AnthropicKeyRequest, admin: Admin, settings: Config) -> dict[str, str]:
+    """Validates and saves the shared key runs use when a user has no key of their own."""
+    validate_anthropic_key(body.api_key, settings)
+    hint = key_hint(body.api_key)
+    service_db(settings).insert(
+        "shared_credentials",
+        {"provider": "anthropic", "ciphertext": encrypt(body.api_key, settings.agent_encryption_key), "hint": hint},
+        on_conflict="provider",
+    )
+    return {"hint": hint}
+
+
+@app.delete("/admin/anthropic-key", status_code=204)
+def delete_shared_key(admin: Admin, settings: Config) -> None:
+    service_db(settings).delete("shared_credentials", {"provider": "eq.anthropic"})
+
+
+@app.get("/admin/stats")
+def admin_stats(admin: Admin, settings: Config) -> dict[str, Any]:
+    """
+    App-wide data for the admin page: every user, the last STATS_DAYS of runs,
+    the company directory, every good or bad label, and jobs past "new".
+    """
+    service = service_db(settings)
+    since = (datetime.now(UTC) - timedelta(days=STATS_DAYS)).isoformat()
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "days": STATS_DAYS,
+        "users": [
+            {
+                "id": user["id"],
+                "email": user.get("email"),
+                "created_at": user.get("created_at"),
+                "last_sign_in_at": user.get("last_sign_in_at"),
+            }
+            for user in service.list_users()
+        ],
+        "runs": service.select(
+            "agent_runs",
+            {"select": "user_id,kind,status,created_at,usage", "created_at": f"gte.{since}", "order": "created_at.desc"},
+        ),
+        "companies": service.select("companies", {"select": "source,kind,open_jobs"}),
+        "labels": service.select("applications", {"select": "fit_score,fit_label", "fit_label": "not.is.null"}),
+        "applications": service.select("applications", {"select": "user_id,status", "status": "neq.new"}),
+    }

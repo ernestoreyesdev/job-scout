@@ -29,7 +29,7 @@ export function ThemeForm({ theme }: { theme: ThemeRow }) {
   }
 
   return (
-    <div className="mt-4">
+    <div>
       <div role="radiogroup" aria-label="Theme" className="grid max-w-sm grid-cols-2 gap-3">
         {OPTIONS.map(({ theme: option, label, Icon }) => (
           <button

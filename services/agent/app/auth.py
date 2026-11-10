@@ -9,8 +9,11 @@ from app.config import Settings, get_settings
 
 @dataclass(frozen=True)
 class CurrentUser:
+    """A verified user; admin comes from role "admin" in their app_metadata, which only the service role can set."""
+
     id: str
     access_token: str
+    admin: bool = False
 
 
 def current_user(
@@ -30,4 +33,12 @@ def current_user(
     if res.status_code != 200:
         raise HTTPException(401, "Invalid or expired session.")
 
-    return CurrentUser(id=res.json()["id"], access_token=token)
+    body = res.json()
+    return CurrentUser(id=body["id"], access_token=token, admin=(body.get("app_metadata") or {}).get("role") == "admin")
+
+
+def admin_user(user: Annotated[CurrentUser, Depends(current_user)]) -> CurrentUser:
+    """The current user when they're an admin; anyone else gets a 403."""
+    if not user.admin:
+        raise HTTPException(403, "Only admins can do this.")
+    return user

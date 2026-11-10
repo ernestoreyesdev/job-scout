@@ -7,7 +7,7 @@ import { startSearch } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MAX_JOBS_PER_SEARCH, POSTED_WITHIN_DAYS, WORKPLACE_TYPES, type SearchRuleInput } from "@/lib/db";
+import { MAX_JOBS_PER_SEARCH, MIN_SCORES, POSTED_WITHIN_DAYS, WORKPLACE_TYPES, type SearchRuleInput } from "@/lib/db";
 
 const WORKPLACE_LABELS = { onsite: "On-site", hybrid: "Hybrid", remote: "Remote" } as const;
 
@@ -23,7 +23,11 @@ export function SearchForm({ hasResume, last }: { hasResume: boolean; last: Part
   const [keywordError, setKeywordError] = useState(false);
   const [pending, startTransition] = useTransition();
   const filtered = Boolean(
-    last?.workplace_types?.length || last?.location || last?.exclude?.length || last?.posted_within_days,
+    last?.workplace_types?.length ||
+      last?.location ||
+      last?.exclude?.length ||
+      last?.posted_within_days ||
+      last?.min_score,
   );
 
   function search(formData: FormData) {
@@ -144,6 +148,23 @@ export function SearchForm({ hasResume, last }: { hasResume: boolean; last: Part
               {POSTED_WITHIN_DAYS.map((days) => (
                 <option key={days} value={days}>
                   {days === 1 ? "Last day" : `Last ${days} days`}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className={FIELD} title={hasResume ? "Used when Score with my resume is on" : "Upload a resume to score jobs"}>
+            <Label htmlFor="minScore">Min score</Label>
+            <select
+              id="minScore"
+              name="minScore"
+              defaultValue={last?.min_score ?? ""}
+              disabled={!hasResume}
+              className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm shadow-xs disabled:opacity-50"
+            >
+              <option value="">Any score</option>
+              {MIN_SCORES.map((score) => (
+                <option key={score} value={score}>
+                  {score}+ ({score >= 70 ? "strong fit" : "possible fit or better"})
                 </option>
               ))}
             </select>

@@ -336,18 +336,6 @@ export class JobFinderRepository {
     return data.map(({ posting, ...job }) => ({ ...job, source: posting.source }));
   }
 
-  /** The user's runs from the last `days` days, newest first. */
-  async listRecentRuns(days: number): Promise<AgentRunRow[]> {
-    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    const { data, error } = await this.client
-      .from("agent_runs")
-      .select("*")
-      .gte("created_at", since.toISOString())
-      .order("created_at", { ascending: false });
-    if (error) throw error;
-    return data;
-  }
-
   /** Jobs past "new" with their status history, source and scoring resume's file name, for the funnel. */
   async listFunnelJobs(): Promise<FunnelJob[]> {
     const { data, error } = await this.client

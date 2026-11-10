@@ -1114,3 +1114,15 @@ def test_a_stop_during_parallel_scoring_ends_the_run():
 
     with pytest.raises(RunStopped):
         run(rule=SearchRule(company="Acme", keywords=["software engineer"], limit=10), jobs=jobs, report=report)
+
+
+def test_jobs_below_the_min_score_leave_the_tracker_even_under_the_limit():
+    jobs = [posting(str(n), f"Software Engineer {n}") for n in range(1, 5)]
+    messages = FakeMessages(set(), scores={"Engineer 1": 82, "Engineer 2": 71, "Engineer 3": 65, "Engineer 4": 40})
+
+    result, _, user, _, _, _ = run(
+        rule=SearchRule(company="Acme", keywords=["software engineer"], limit=3, min_score=70), jobs=jobs, messages=messages
+    )
+
+    assert (result.scored, result.kept, result.min_score) == (4, 2, 70)
+    assert hidden_ids(user) == ["posting-3", "posting-4"]

@@ -76,6 +76,7 @@ class SearchResult:
     unreachable: int = 0
     company: str | None = None
     kept: int = 0
+    min_score: int | None = None
 
 
 def run_search(
@@ -195,7 +196,7 @@ def run_search(
         report=report,
         examples=labeled_examples(user),
     )
-    kept = keep_best(user, todo, scoring.scores, rule.limit)
+    kept = keep_best(user, todo, scoring.scores, rule.limit, rule.min_score)
     return SearchResult(
         companies,
         len(everything),
@@ -205,6 +206,7 @@ def run_search(
         scoring.failed,
         unreachable,
         kept=kept,
+        min_score=rule.min_score,
     )
 
 
@@ -435,16 +437,21 @@ def compact(text: str) -> str:
     return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
-def keep_best(user: Rest, todo: list[tuple[str, Posting]], scores: dict[str, int], limit: int) -> int:
+def keep_best(
+    user: Rest, todo: list[tuple[str, Posting]], scores: dict[str, int], limit: int, min_score: int | None = None
+) -> int:
     """
-    Keeps the `limit` highest-scoring jobs on the Tracker (ties go to the newer
-    job) and takes the rest off it. Their scores stay saved, so later searches
-    skip them instead of scoring them again. Returns how many were kept.
+    Keeps the `limit` highest-scoring jobs at or above `min_score` on the Tracker
+    (ties go to the newer job) and takes the rest off it. Their scores stay
+    saved, so later searches skip them instead of scoring them again. Returns
+    how many were kept.
     """
     undated = datetime.min.replace(tzinfo=UTC)
     posted = {posting_id: p.posted_at or undated for posting_id, p in todo}
     ranked = sorted(scores, key=lambda posting_id: (scores[posting_id], posted.get(posting_id, undated)), reverse=True)
-    rest = ranked[limit:]
+    eligible = [posting_id for posting_id in ranked if min_score is None or scores[posting_id] >= min_score]
+    kept = set(eligible[:limit])
+    rest = [posting_id for posting_id in ranked if posting_id not in kept]
     if rest:
         user.update("applications", {"posting_id": f"in.({','.join(rest)})"}, {"in_tracker": False})
     return len(ranked) - len(rest)

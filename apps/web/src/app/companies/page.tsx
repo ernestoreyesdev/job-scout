@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp, Search } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 
@@ -17,13 +17,13 @@ const CHECKED = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric
 
 export default function CompaniesPage({ searchParams }: PageProps<"/companies">) {
   return (
-    <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-10">
+    <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
       <h1 className="text-2xl font-semibold tracking-tight">Companies</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Every company the app has found. Searches with no company check all of them; hide one to leave it out of your
         searches. Jobs already in your Tracker stay there.
       </p>
-      <Suspense fallback={<p className="mt-8 text-sm text-muted-foreground">Loading…</p>}>
+      <Suspense fallback={<div className="mt-8 h-64 animate-pulse rounded-xl border bg-card" />}>
         <CompaniesData searchParams={searchParams} />
       </Suspense>
     </main>
@@ -54,9 +54,12 @@ async function CompaniesData({ searchParams }: Pick<PageProps<"/companies">, "se
       <>
         <ImportCompanies />
         {importRun && <RunStatus run={importRun} />}
-        <p className="mt-8 text-sm text-muted-foreground">
-          No companies yet. Add some above, or run a search with no company and the app finds some.
-        </p>
+        <div className="mt-8 rounded-xl border border-dashed px-6 py-12 text-center">
+          <p className="font-medium">No companies yet</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Add some above, or run a search with no company and the app finds some.
+          </p>
+        </div>
       </>
     );
   }
@@ -65,13 +68,25 @@ async function CompaniesData({ searchParams }: Pick<PageProps<"/companies">, "se
     <>
       <ImportCompanies />
       {importRun && <RunStatus run={importRun} />}
-      <section className="mt-8">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <form method="get" action="/companies" className="flex flex-wrap items-center gap-3 text-sm">
-            <Input name="q" defaultValue={search} placeholder="Search companies" aria-label="Search companies" className="w-64" />
+      <section className="mt-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-3 shadow-xs">
+          <span className="pl-1 text-sm font-medium">
+            {companies.total.toLocaleString()} {companies.total === 1 ? "company" : "companies"}
+          </span>
+          <form method="get" action="/companies" className="flex flex-wrap items-center gap-2 text-sm">
+            <div className="relative">
+              <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                name="q"
+                defaultValue={search}
+                placeholder="Search companies"
+                aria-label="Search companies"
+                className="h-8 w-64 rounded-full pl-9"
+              />
+            </div>
             {listParams.sort && <input type="hidden" name="sort" value={listParams.sort} />}
             {listParams.order && <input type="hidden" name="order" value={listParams.order} />}
-            <Button type="submit" size="sm" variant="outline">
+            <Button type="submit" size="sm" variant="outline" className="rounded-full">
               Search
             </Button>
             {search && (
@@ -80,31 +95,33 @@ async function CompaniesData({ searchParams }: Pick<PageProps<"/companies">, "se
               </Link>
             )}
           </form>
-          </div>
-        {companies.total === 0 && <p className="text-sm text-muted-foreground">No companies match “{search}”.</p>}
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>
-                <SortLink column="name" label="Company" sort={sort} order={order} params={listParams} />
-              </TableHead>
-              <TableHead className="w-28 text-right">
-                <SortLink column="jobs" label="Open jobs" sort={sort} order={order} params={listParams} />
-              </TableHead>
-              <TableHead className="w-36">
-                <SortLink column="checked" label="Last checked" sort={sort} order={order} params={listParams} />
-              </TableHead>
-              <TableHead className="w-24">
-                <span className="sr-only">Actions</span>
-              </TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {companies.items.map((company) => (
-              <CompanyRow key={company.id} company={company} checked={CHECKED.format(new Date(company.checked_at))} />
-            ))}
-          </TableBody>
-        </Table>
+        </div>
+        {companies.total === 0 && <p className="mt-4 text-sm text-muted-foreground">No companies match “{search}”.</p>}
+        <div className="mt-3 rounded-xl border bg-card px-2 shadow-xs">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>
+                  <SortLink column="name" label="Company" sort={sort} order={order} params={listParams} />
+                </TableHead>
+                <TableHead className="w-28 text-right">
+                  <SortLink column="jobs" label="Open jobs" sort={sort} order={order} params={listParams} />
+                </TableHead>
+                <TableHead className="w-36">
+                  <SortLink column="checked" label="Last checked" sort={sort} order={order} params={listParams} />
+                </TableHead>
+                <TableHead className="w-24">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {companies.items.map((company) => (
+                <CompanyRow key={company.id} company={company} checked={CHECKED.format(new Date(company.checked_at))} />
+              ))}
+            </TableBody>
+          </Table>
+        </div>
         <Pager
           basePath="/companies"
           page={companies.page}

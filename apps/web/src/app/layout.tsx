@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Suspense } from "react";
 
+import { AdminNavLink } from "@/components/admin-nav-link";
 import { NavLinks } from "@/components/nav-links";
 import { ThemeSync } from "@/components/theme-sync";
 import { UserMenu } from "@/components/user-menu";
@@ -40,7 +41,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         </Suspense>
         <header className="border-b">
           <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-            <NavLinks />
+            <NavLinks
+              extra={
+                <Suspense>
+                  <AdminNavLink />
+                </Suspense>
+              }
+            />
             <Suspense>
               <UserMenu />
             </Suspense>

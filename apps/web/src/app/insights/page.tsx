@@ -1,13 +1,14 @@
 import { Suspense } from "react";
 
+import { AccuracyTable } from "@/components/accuracy-table";
+import { SectionCard } from "@/components/section-card";
+import { StatTile } from "@/components/stat-tile";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FUNNEL_STAGES, FOLLOW_UP_DAYS, GHOST_JOB_DAYS } from "@/lib/db";
-import { DEFAULT_CUT, MIN_LABELED, accuracyByCut, funnel, statsBySource, summarizeCosts, type FunnelRow } from "@/lib/insights";
+import { MIN_LABELED, accuracyByCut, funnel, statsBySource, type FunnelRow } from "@/lib/insights";
 import { getSignedInSource } from "@/lib/repository";
-import { cn } from "@/lib/utils";
 
 const PERCENT = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 });
-const DOLLARS = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 3 });
 const SOURCE_LABELS: Record<string, string> = {
   greenhouse: "Greenhouse",
   lever: "Lever",
@@ -22,17 +23,15 @@ const SOURCE_LABELS: Record<string, string> = {
   jobvite: "Jobvite",
   hackernews: "Hacker News",
 };
-const COST_WINDOW_DAYS = 90;
 
 export default function InsightsPage() {
   return (
-    <main className="mx-auto w-full max-w-4xl flex-1 px-6 py-10">
+    <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
       <h1 className="text-2xl font-semibold tracking-tight">Insights</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        How well the scores match your own judgment, how your applications are going, where your jobs come from,
-        and what searches cost.
+        How well the scores match your own judgment, how your applications are going and where your jobs come from.
       </p>
-      <Suspense fallback={<p className="mt-8 text-sm text-muted-foreground">Loading…</p>}>
+      <Suspense fallback={<div className="mt-8 h-40 animate-pulse rounded-xl border bg-card" />}>
         <InsightsData />
       </Suspense>
     </main>
@@ -41,9 +40,8 @@ export default function InsightsPage() {
 
 async function InsightsData() {
   const { repository } = await getSignedInSource();
-  const [jobs, runs, funnelJobs, followUps, aging] = await Promise.all([
+  const [jobs, funnelJobs, followUps, aging] = await Promise.all([
     repository.listScoredJobs(),
-    repository.listRecentRuns(COST_WINDOW_DAYS),
     repository.listFunnelJobs(),
     repository.listFollowUpsDue(),
     repository.countAgingJobs(),
@@ -51,101 +49,83 @@ async function InsightsData() {
   const [overall] = funnel(funnelJobs);
   const marked = jobs.filter((job) => job.fit_label !== null);
   const good = marked.filter((job) => job.fit_label === "good").length;
-  const accuracy = accuracyByCut(jobs);
   const sources = statsBySource(jobs);
-  const costs = summarizeCosts(runs);
 
   return (
-    <>
-      <section className="mt-8">
-        <h2 className="text-lg font-semibold">Scoring accuracy</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          From the jobs you marked with thumbs up or down on the Tracker and Jobs: {marked.length} marked, {good} good,{" "}
-          {marked.length - good} bad. Precision is how often a job at or above the cut is one you marked good; recall
-          is how many of your good jobs reached it.
-        </p>
+    <div className="mt-8 space-y-6">
+      <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatTile label="Jobs scored" value={jobs.length} />
+        <StatTile label="Marked good or bad" value={marked.length} note={`${good} good, ${marked.length - good} bad`} />
+        <StatTile label="Applied" value={overall?.reached.applied ?? 0} />
+        <StatTile
+          label="Response rate"
+          value={overall?.responseRate == null ? "–" : PERCENT.format(overall.responseRate)}
+          note="Screening or further"
+        />
+      </dl>
+
+      <SectionCard
+        title="Scoring accuracy"
+        description="From the jobs you marked with thumbs up or down. Precision is how often a job at or above the cut is one you marked good; recall is how many of your good jobs reached it."
+      >
         {marked.length < MIN_LABELED && (
-          <p className="mt-2 text-sm">
+          <p className="mb-3 rounded-lg bg-muted/50 px-3 py-2 text-sm">
             Mark {MIN_LABELED - marked.length} more {MIN_LABELED - marked.length === 1 ? "job" : "jobs"}, good and bad,
             before these numbers mean much.
           </p>
         )}
-        <Table className="mt-3">
-          <TableHeader>
-            <TableRow>
-              <TableHead>Score at or above</TableHead>
-              <TableHead className="text-right">Precision</TableHead>
-              <TableHead className="text-right">Recall</TableHead>
-              <TableHead className="text-right">Good above</TableHead>
-              <TableHead className="text-right">Bad above</TableHead>
-              <TableHead className="text-right">Good below</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {accuracy.map((row) => (
-              <TableRow key={row.cut} className={cn(row.cut === DEFAULT_CUT && "bg-muted/50 font-medium")}>
-                <TableCell>{row.cut}</TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {row.precision === null ? "–" : PERCENT.format(row.precision)}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {row.recall === null ? "–" : PERCENT.format(row.recall)}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">{row.truePositives}</TableCell>
-                <TableCell className="text-right tabular-nums">{row.falsePositives}</TableCell>
-                <TableCell className="text-right tabular-nums">{row.falseNegatives}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-        <p className="mt-2 text-xs text-muted-foreground">
+        <AccuracyTable rows={accuracyByCut(jobs)} />
+        <p className="mt-3 text-xs text-muted-foreground">
           You can only mark jobs a search kept, and searches drop the lower-scored ones, so recall here counts good jobs
           among those you saw, not every good job that exists.
         </p>
-      </section>
+      </SectionCard>
 
-      <section className="mt-10">
-        <h2 className="text-lg font-semibold">Applications</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          How far your applications got, from the status history on Jobs. A job counts for every stage up to the
-          furthest it reached; the response rate is screening or further over applied.
-        </p>
+      <SectionCard
+        title="Applications"
+        description="How far your applications got, from the status history on Jobs. A job counts for every stage up to the furthest it reached."
+      >
         {overall ? (
           <>
-            <FunnelTable title="Overall" rows={[overall]} />
+            <FunnelBars row={overall} />
             <FunnelTable title="By source" rows={funnel(funnelJobs, (job) => SOURCE_LABELS[job.source] ?? job.source)} />
             <FunnelTable title="By resume" rows={funnel(funnelJobs, (job) => job.resume)} />
           </>
         ) : (
-          <p className="mt-3 text-sm text-muted-foreground">No applications yet. Set a job to applied on the Tracker or Jobs.</p>
+          <p className="text-sm text-muted-foreground">No applications yet. Set a job to applied on the Tracker or Jobs.</p>
         )}
-        <h3 className="mt-6 font-medium">Follow-ups due</h3>
-        {followUps.length === 0 ? (
-          <p className="mt-1 text-sm text-muted-foreground">
-            None. Jobs still applied {FOLLOW_UP_DAYS} or more days later show up here, with a draft email on Jobs.
-          </p>
-        ) : (
-          <ul className="mt-1 space-y-1 text-sm">
-            {followUps.map((job) => (
-              <li key={job.id}>
-                {job.title} at {job.company}: <span className="text-amber-600">{job.days} days with no response</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="mt-4 text-sm text-muted-foreground">
-          {aging} of your jobs {aging === 1 ? "has" : "have"} a posting still listed {GHOST_JOB_DAYS}+ days after it went up,
-          a common sign of a ghost job. They&apos;re flagged on the Tracker and Jobs, along with reposted ones.
-        </p>
-      </section>
+      </SectionCard>
 
-      <section className="mt-10">
-        <h2 className="text-lg font-semibold">Where your jobs come from</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Every job scored for you, by the system it came from.</p>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <SectionCard title="Follow-ups due" description={`Jobs still applied ${FOLLOW_UP_DAYS} or more days later, with a draft email on Jobs.`}>
+          {followUps.length === 0 ? (
+            <p className="text-sm text-muted-foreground">None right now.</p>
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {followUps.map((job) => (
+                <li key={job.id} className="flex items-baseline justify-between gap-3">
+                  <span className="min-w-0 truncate">
+                    {job.title} <span className="text-muted-foreground">at {job.company}</span>
+                  </span>
+                  <span className="shrink-0 text-amber-600 dark:text-amber-400">{job.days} days</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </SectionCard>
+        <SectionCard title="Possible ghost jobs" description={`Postings still listed ${GHOST_JOB_DAYS}+ days after they went up.`}>
+          <p className="text-3xl font-semibold tabular-nums">{aging}</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {aging === 1 ? "job is" : "jobs are"} flagged on the Tracker and Jobs, along with reposted ones.
+          </p>
+        </SectionCard>
+      </div>
+
+      <SectionCard title="Where your jobs come from" description="Every job scored for you, by the system it came from.">
         {sources.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">No scored jobs yet.</p>
+          <p className="text-sm text-muted-foreground">No scored jobs yet.</p>
         ) : (
-          <Table className="mt-3">
+          <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Source</TableHead>
@@ -172,36 +152,34 @@ async function InsightsData() {
             </TableBody>
           </Table>
         )}
-      </section>
+      </SectionCard>
+    </div>
+  );
+}
 
-      <section className="mt-10">
-        <h2 className="text-lg font-semibold">What searches cost</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Estimated from each run&apos;s token counts and web searches at Claude Haiku prices, over the last{" "}
-          {COST_WINDOW_DAYS} days. Your Anthropic console has the exact bill.
-        </p>
-        <dl className="mt-3 grid gap-3 sm:grid-cols-3">
-          {[
-            ["This month", DOLLARS.format(costs.thisMonth)],
-            ["Average search", costs.perSearch === null ? "–" : DOLLARS.format(costs.perSearch)],
-            [`${costs.runs} runs in ${COST_WINDOW_DAYS} days`, DOLLARS.format(costs.total)],
-          ].map(([label, value]) => (
-            <div key={label} className="rounded-lg border px-4 py-3">
-              <dt className="text-xs text-muted-foreground">{label}</dt>
-              <dd className="mt-1 text-xl font-semibold tabular-nums">{value}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-    </>
+/** The overall funnel as horizontal bars, each stage's width relative to the jobs applied to. */
+function FunnelBars({ row }: { row: FunnelRow }) {
+  const applied = Math.max(1, row.reached.applied);
+  return (
+    <ul className="space-y-2">
+      {FUNNEL_STAGES.map((stage) => (
+        <li key={stage} className="grid grid-cols-[6.5rem_1fr_2.5rem] items-center gap-3 text-sm">
+          <span className="capitalize text-muted-foreground">{stage}</span>
+          <div className="h-2.5 rounded-full bg-muted">
+            <div className="h-2.5 rounded-full bg-primary" style={{ width: `${(row.reached[stage] / applied) * 100}%` }} />
+          </div>
+          <span className="text-right tabular-nums">{row.reached[stage]}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
 /** One funnel table: jobs reaching each stage per row, and the response rate. */
 function FunnelTable({ title, rows }: { title: string; rows: FunnelRow[] }) {
   return (
-    <div className="mt-4">
-      <h3 className="font-medium">{title}</h3>
+    <div className="mt-6">
+      <h3 className="text-sm font-medium">{title}</h3>
       <Table className="mt-1">
         <TableHeader>
           <TableRow>

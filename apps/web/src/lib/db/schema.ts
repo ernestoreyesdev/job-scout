@@ -58,6 +58,9 @@ export const SKIPPED_COMPANY_KINDS: readonly CompanyKindRow[] = ["staffing", "ag
 
 export const POSTED_WITHIN_DAYS = [1, 3, 7, 14, 30] as const;
 
+/** Lowest fit score a scored search keeps, matching the Possible and Strong fit labels. */
+export const MIN_SCORES = [50, 70] as const;
+
 /** Upper bound the agent accepts for jobs scored in one search. */
 export const MAX_JOBS_PER_SEARCH = 25;
 
@@ -164,6 +167,7 @@ export type SearchRuleInput = {
   exclude: string[];
   posted_within_days: (typeof POSTED_WITHIN_DAYS)[number] | null;
   score: boolean;
+  min_score: (typeof MIN_SCORES)[number] | null;
 };
 
 export type ApplicationEventRow = {

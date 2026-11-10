@@ -56,6 +56,21 @@ class Rest:
         res.raise_for_status()
         return res.content
 
+    def list_users(self, per_page: int = 1000) -> list[dict[str, Any]]:
+        """Every Supabase Auth user; needs the service role key."""
+        users: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            res = self._http.get(
+                f"{self._base}/auth/v1/admin/users", params={"page": page, "per_page": per_page}, headers=self._headers
+            )
+            res.raise_for_status()
+            batch = res.json()["users"]
+            users += batch
+            if len(batch) < per_page:
+                return users
+            page += 1
+
 
 def user_db(settings: Settings, access_token: str) -> Rest:
     return Rest(settings, settings.supabase_anon_key, access_token)

@@ -10,6 +10,8 @@ const PRICES = { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125, we
 
 export type ScoredJob = Pick<ApplicationRow, "fit_score" | "fit_label" | "status"> & { source: JobSourceRow };
 
+export type LabeledScore = Pick<ApplicationRow, "fit_score" | "fit_label">;
+
 export type CutAccuracy = {
   cut: number;
   precision: number | null;
@@ -23,8 +25,8 @@ export type CutAccuracy = {
  * Precision and recall of "score at or above the cut means a good fit" against the jobs the user marked.
  * Precision is null when no marked job reaches the cut, recall when none is marked good.
  */
-export function accuracyByCut(jobs: ScoredJob[]): CutAccuracy[] {
-  const marked = jobs.filter((job): job is ScoredJob & { fit_score: number; fit_label: FitLabelRow } =>
+export function accuracyByCut(jobs: LabeledScore[]): CutAccuracy[] {
+  const marked = jobs.filter((job): job is LabeledScore & { fit_score: number; fit_label: FitLabelRow } =>
     job.fit_label !== null && job.fit_score !== null,
   );
   return SCORE_CUTS.map((cut) => {
@@ -86,7 +88,10 @@ export function runCost(usage: RunUsage | null): number {
 export type CostSummary = { runs: number; total: number; perSearch: number | null; thisMonth: number };
 
 /** Spend across the given runs, the average per finished search, and the spend since the start of this month. */
-export function summarizeCosts(runs: AgentRunRow[], now = new Date()): CostSummary {
+export function summarizeCosts(
+  runs: Pick<AgentRunRow, "kind" | "status" | "usage" | "created_at">[],
+  now = new Date(),
+): CostSummary {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const searches = runs.filter((run) => run.kind === "search" && run.status === "done");
   const total = runs.reduce((sum, run) => sum + runCost(run.usage), 0);

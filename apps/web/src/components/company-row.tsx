@@ -37,9 +37,13 @@ export function CompanyRow({ company, checked }: { company: DirectoryCompany; ch
           <span className={cn("font-medium", company.hidden && "line-through")}>{company.name}</span>
         )}
         {company.kind && company.kind !== "employer" && (
-          <span className="ml-2 text-xs text-muted-foreground">{company.kind === "staffing" ? "Staffing agency" : "Aggregator"}</span>
+          <span className="ml-2 inline-flex rounded-full bg-violet-100 px-2 py-0.5 text-xs text-violet-800 dark:bg-violet-950 dark:text-violet-300">
+            {company.kind === "staffing" ? "Staffing agency" : "Aggregator"}
+          </span>
         )}
-        {company.hidden && <span className="ml-2 text-xs">Hidden</span>}
+        {company.hidden && (
+          <span className="ml-2 inline-flex rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">Hidden</span>
+        )}
         {error && <p className="mt-1 text-sm text-destructive">{error}</p>}
       </TableCell>
       <TableCell className="text-right tabular-nums">{company.open_jobs.toLocaleString()}</TableCell>

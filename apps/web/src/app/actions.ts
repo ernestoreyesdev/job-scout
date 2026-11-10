@@ -8,6 +8,7 @@ import {
   FIT_LABELS,
   MAX_COMPANY_IMPORT,
   MAX_JOBS_PER_SEARCH,
+  MIN_SCORES,
   POSTED_WITHIN_DAYS,
   THEMES,
   WORKPLACE_TYPES,
@@ -44,17 +45,19 @@ function text(value: FormDataEntryValue | null): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-export async function saveAnthropicKey(formData: FormData): Promise<ActionResult> {
-  return run("/settings", async () => {
+/** Saves or replaces the shared Anthropic key runs use when a user has none; admins only. */
+export async function saveSharedKey(formData: FormData): Promise<ActionResult> {
+  return run("/admin", async () => {
     const apiKey = text(formData.get("apiKey"));
-    if (!apiKey) throw new Error("Paste your Anthropic API key.");
-    await callAgent("/me/anthropic-key", { method: "PUT", body: { api_key: apiKey } });
+    if (!apiKey) throw new Error("Paste an Anthropic API key.");
+    await callAgent("/admin/anthropic-key", { method: "PUT", body: { api_key: apiKey } });
   });
 }
 
-export async function removeAnthropicKey(): Promise<ActionResult> {
-  return run("/settings", async () => {
-    await callAgent("/me/anthropic-key", { method: "DELETE" });
+/** Removes the shared Anthropic key; admins only. */
+export async function removeSharedKey(): Promise<ActionResult> {
+  return run("/admin", async () => {
+    await callAgent("/admin/anthropic-key", { method: "DELETE" });
   });
 }
 
@@ -106,6 +109,12 @@ export async function startSearch(formData: FormData): Promise<ActionResult> {
       throw new Error("Unknown posted-within period.");
     }
 
+    const minScoreValue = text(formData.get("minScore"));
+    const minScore = minScoreValue ? Number(minScoreValue) : null;
+    if (minScore !== null && !(MIN_SCORES as readonly number[]).includes(minScore)) {
+      throw new Error("Unknown minimum score.");
+    }
+
     const rule: SearchRuleInput = {
       keywords,
       company,
@@ -116,6 +125,7 @@ export async function startSearch(formData: FormData): Promise<ActionResult> {
       exclude,
       posted_within_days: postedWithinDays as SearchRuleInput["posted_within_days"],
       score: formData.get("score") === "on",
+      min_score: minScore as SearchRuleInput["min_score"],
     };
     await callAgent("/runs/search", { method: "POST", body: rule });
   });
@@ -165,6 +175,7 @@ export async function rerunSearch(runId: string, webLookup = false): Promise<Act
       exclude: input.exclude ?? [],
       posted_within_days: input.posted_within_days ?? null,
       score: input.score ?? true,
+      min_score: input.min_score ?? null,
     };
     await callAgent("/runs/search", { method: "POST", body: rule });
   });

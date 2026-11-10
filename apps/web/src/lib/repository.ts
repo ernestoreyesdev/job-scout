@@ -7,6 +7,7 @@ import { createClient } from "./supabase/server";
 export interface SignedInSource {
   repository: JobFinderRepository;
   email?: string;
+  admin: boolean;
 }
 
 /**
@@ -22,5 +23,12 @@ export async function getSignedInSource(): Promise<SignedInSource> {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  return { repository: new JobFinderRepository(supabase), email: user.email };
+  return { repository: new JobFinderRepository(supabase), email: user.email, admin: user.app_metadata?.role === "admin" };
+}
+
+/** The signed-in admin's source; anyone else is sent to the Tracker. */
+export async function getAdminSource(): Promise<SignedInSource> {
+  const source = await getSignedInSource();
+  if (!source.admin) redirect("/tracker");
+  return source;
 }

@@ -1,17 +1,23 @@
+import { Briefcase } from "lucide-react";
 import { Suspense } from "react";
 
 import { LoginForm } from "@/components/login-form";
 
 export default function LoginPage() {
   return (
-    <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center px-6 py-16">
-      <h1 className="text-2xl font-semibold tracking-tight">Sign in</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        We&apos;ll email you a sign-in link, so there&apos;s no password to remember.
-      </p>
-      <Suspense>
-        <LoginForm />
-      </Suspense>
+    <main className="flex flex-1 items-center justify-center px-4 py-16">
+      <div className="w-full max-w-sm rounded-2xl border bg-card p-8 text-card-foreground shadow-sm">
+        <div className="flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground">
+          <Briefcase className="size-5" />
+        </div>
+        <h1 className="mt-5 text-2xl font-semibold tracking-tight">Sign in to Job Finder</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          We&apos;ll email you a sign-in link, so there&apos;s no password to remember.
+        </p>
+        <Suspense>
+          <LoginForm />
+        </Suspense>
+      </div>
     </main>
   );
 }

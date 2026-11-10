@@ -245,3 +245,41 @@ def test_a_stopped_search_halts_at_its_next_progress_update_and_keeps_its_status
     assert reached == [] and db.run_status == "stopped"
     final = db.updates[-1]
     assert final[1] == {"id": "eq.run-1"} and set(final[2]) == {"usage"}
+
+
+def test_summary_mentions_the_min_score():
+    kept = SearchResult(companies=4, found=300, matched=40, already_tracked=0, scored=20, failed=0, kept=3, min_score=70)
+    none = SearchResult(companies=4, found=300, matched=40, already_tracked=0, scored=20, failed=0, kept=0, min_score=70)
+
+    assert main.summarize(kept) == "Added 3 jobs scoring 70 or higher."
+    assert main.summarize(none) == "No new jobs scored 70 or higher."
+
+
+def test_admin_endpoints_refuse_users_without_the_admin_role():
+    from app.auth import admin_user
+
+    with pytest.raises(HTTPException) as refused:
+        admin_user(SimpleNamespace(id="u", access_token="t", admin=False))
+    assert refused.value.status_code == 403
+
+    admin = SimpleNamespace(id="u", access_token="t", admin=True)
+    assert admin_user(admin) is admin
+
+
+class KeyRest:
+    def __init__(self, personal: bool, shared: bool):
+        self.personal, self.shared = personal, shared
+
+    def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
+        if table == "api_credentials":
+            return [{"ciphertext": "personal"}] if self.personal else []
+        return [{"ciphertext": "shared"}] if self.shared else []
+
+
+def test_runs_use_the_users_key_then_the_shared_key_then_the_setting(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(main, "decrypt", lambda ciphertext, key: f"{ciphertext}-key")
+    settings = SimpleNamespace(agent_encryption_key="k", anthropic_api_key="env-key")
+
+    assert main.anthropic_key(KeyRest(personal=True, shared=True), "u", settings) == "personal-key"
+    assert main.anthropic_key(KeyRest(personal=False, shared=True), "u", settings) == "shared-key"
+    assert main.anthropic_key(KeyRest(personal=False, shared=False), "u", settings) == "env-key"

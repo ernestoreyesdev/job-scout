@@ -1,21 +1,23 @@
+import { FileText } from "lucide-react";
 import { Suspense } from "react";
 
 import { ResumeUpload } from "@/components/resume-upload";
+import { SectionCard } from "@/components/section-card";
 import { getSignedInSource } from "@/lib/repository";
 
 export default function ResumePage() {
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 px-6 py-10">
+    <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
       <h1 className="text-2xl font-semibold tracking-tight">Resume</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Upload your resume as a PDF or Word (.docx) file. Fit scores use the text extracted from your latest upload.
-      </p>
-      <div className="mt-6">
-        <ResumeUpload />
+      <p className="mt-1 text-sm text-muted-foreground">Fit scores use the text extracted from your latest upload.</p>
+      <div className="mt-8 space-y-6">
+        <SectionCard title="Upload a resume">
+          <ResumeUpload />
+        </SectionCard>
+        <Suspense fallback={<div className="h-40 animate-pulse rounded-xl border bg-card" />}>
+          <PrimaryResume />
+        </Suspense>
       </div>
-      <Suspense fallback={<p className="mt-8 text-sm text-muted-foreground">Loading…</p>}>
-        <PrimaryResume />
-      </Suspense>
     </main>
   );
 }
@@ -23,19 +25,25 @@ export default function ResumePage() {
 async function PrimaryResume() {
   const { repository } = await getSignedInSource();
   const resume = await repository.getPrimaryResume();
-  if (!resume) return <p className="mt-8 text-sm text-muted-foreground">No resume uploaded yet.</p>;
+  if (!resume) return null;
 
   return (
-    <section className="mt-8">
-      <h2 className="font-medium">{resume.file_name}</h2>
-      <p className="text-xs text-muted-foreground">Uploaded {new Date(resume.created_at).toLocaleString()}</p>
+    <SectionCard
+      title="Current resume"
+      description={
+        <span className="inline-flex items-center gap-1.5">
+          <FileText className="size-4" />
+          {resume.file_name} · uploaded {resume.created_at.slice(0, 10)}
+        </span>
+      }
+    >
       {resume.text ? (
-        <pre className="mt-4 max-h-[32rem] overflow-auto rounded-lg border bg-muted/40 p-4 text-sm whitespace-pre-wrap">
+        <pre className="max-h-[32rem] overflow-auto rounded-lg bg-muted/50 p-4 font-sans text-sm whitespace-pre-wrap">
           {resume.text}
         </pre>
       ) : (
-        <p className="mt-4 text-sm text-muted-foreground">Text hasn&apos;t been extracted yet.</p>
+        <p className="text-sm text-muted-foreground">Text hasn&apos;t been extracted yet.</p>
       )}
-    </section>
+    </SectionCard>
   );
 }

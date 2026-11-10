@@ -17,6 +17,7 @@ export function describeRun(run: AgentRunRow): { title: string; detail: string }
       ? `posted in the last ${input.posted_within_days === 1 ? "day" : `${input.posted_within_days} days`}`
       : null,
     input.limit !== undefined ? `up to ${input.limit} ${input.limit === 1 ? "job" : "jobs"}` : null,
+    input.score && input.min_score ? `score ${input.min_score}+` : null,
   ].filter(Boolean);
   return { title: input.company || "All companies", detail: parts.length ? ` · ${parts.join(" · ")}` : "" };
 }

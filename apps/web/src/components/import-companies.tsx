@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { ChevronDown, Plus } from "lucide-react";
 import { useState, useTransition } from "react";
 
 import { importCompanies } from "@/app/actions";
@@ -22,8 +22,12 @@ export function ImportCompanies() {
   }
 
   return (
-    <details className="mt-6 rounded-lg border px-4 py-3 text-sm">
-      <summary className="cursor-pointer font-medium select-none">Add companies</summary>
+    <details className="group mt-6 rounded-xl border bg-card px-4 py-3 text-sm shadow-xs">
+      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium select-none">
+        <Plus className="size-4 text-muted-foreground" />
+        Add companies
+        <ChevronDown className="ml-auto size-4 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
       <form action={submit} className="mt-3 space-y-2">
         <Label htmlFor="entries" className="font-normal text-muted-foreground">
           One careers page URL or company name per line, up to {MAX_COMPANY_IMPORT}. Names are checked on every job
