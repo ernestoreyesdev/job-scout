@@ -196,10 +196,9 @@ def test_scores_and_saves_every_match():
     saved = user.inserted("applications")[0]
     assert saved["fit_score"] == 72 and saved["gaps"] == ["Kubernetes"] and "status" not in saved
     assert (usage.input_tokens, usage.output_tokens) == (300, 60)
-    assert progress[0] == "Finding Acme's open jobs…"
-    assert progress[1] == "Scoring 3 jobs against your resume…"
+    assert progress[:3] == ["Gathering open jobs…", "Matching jobs to your search…", "Scoring jobs against your resume…"]
     assert result.kept == 3 and not any(table == "applications" for table, _, _ in user.updates)
-    assert progress[-1].startswith("Scored 3 of 3: ")
+    assert progress[-1] == "Scoring jobs against your resume (3 of 3)…"
 
 
 def test_a_looked_up_company_joins_the_directory():
@@ -217,7 +216,7 @@ def test_skips_tracked_jobs_and_they_do_not_count_toward_the_limit():
 
     assert (result.already_tracked, result.scored, result.kept) == (1, 2, 1)
     assert saved_ids(user) == ["posting-3", "posting-4"]
-    assert progress[1] == "Scoring 2 jobs against your resume…"
+    assert "Scoring jobs against your resume (2 of 2)…" in progress
     assert hidden_ids(user) == ["posting-4"]
 
 
@@ -400,7 +399,7 @@ def test_without_a_company_a_small_directory_is_topped_up_from_the_web():
         ("globex", "Globex", "discovery", 1),
     ]
     assert result.companies == 2 and saved_ids(user) == ["posting-1", "posting-9"]
-    assert progress[0] == "Searching the web for companies that are hiring…"
+    assert progress[0] == "Gathering open jobs…"
     assert service.inserted("directory_discoveries") == [
         {"keywords": ["software engineer"], "boards_found": 3, "boards_added": 2}
     ]
@@ -469,6 +468,8 @@ def test_a_board_that_keeps_failing_is_counted_and_kept():
     assert fetched.count(("ashby", "acme", "Acme")) == 2
     assert result.unreachable == 1
     assert result.unreachable_boards == ["ashby/acme"]
+    [fetch] = [f for f in result.board_fetches if f["board"] == "ashby/acme"]
+    assert fetch["outcome"] == "unreachable" and fetch["ms"] >= 0
     assert not any(filters == {"id": "eq.id-acme"} for _, filters, _ in service.updates)
     assert ("companies", {"id": "eq.id-acme"}) not in service.deletes
 
@@ -580,7 +581,7 @@ def test_web_lookup_takes_the_matching_board_with_the_most_jobs():
     (result, _, _, service, progress, _), lookups = lookup_run("CVS Health", found, boards)
 
     assert lookups == ["CVS Health"]
-    assert progress[1] == "Searching the web for CVS Health's job board…"
+    assert progress[:2] == ["Gathering open jobs…", "Gathering open jobs…"]
     assert (result.found, result.scored) == (3, 3)
     [[saved]] = service.inserted("companies")
     assert (saved["source"], saved["board"], saved["name"], saved["found_by"]) == ("workday", cvs, "CVS Health", "lookup")
@@ -703,7 +704,7 @@ def test_a_large_match_set_is_shortlisted_by_title_before_scoring():
     )
 
     assert calls == [(7, 4)]
-    assert "Picking the most promising matches…" in progress
+    assert progress.count("Matching jobs to your search…") == 2
     assert saved_ids(user) == ["posting-5", "posting-7"] and result.kept == 1
 
 
@@ -786,7 +787,7 @@ def test_rescore_updates_only_jobs_unscored_or_scored_against_another_resume():
     assert (saved["posting_id"], saved["resume_id"]) == ("posting-1", "resume-2")
     assert "status" not in saved and "in_tracker" not in saved
     assert "Updated resume." in messages.calls[0]["messages"][0]["content"][0]["text"]
-    assert progress[0] == "Scoring 1 job with your current resume…"
+    assert progress[0] == "Scoring jobs against your resume…"
 
 
 def test_rescore_with_nothing_stale_scores_nothing():
@@ -1042,7 +1043,8 @@ def test_related_titles_match_jobs_the_keywords_alone_miss():
     assert asked == [["program management"]]
     [rows] = user.inserted("applications")
     assert result.matched == 2 and sorted(row["posting_id"] for row in rows) == ["posting-1", "posting-2"]
-    assert "Matching titles like Program Manager, Technical Program Manager…" in progress
+    assert "Matching jobs to your search…" in progress
+    assert not any("Program Manager" in message for message in progress)
 
 
 def test_related_titles_are_not_asked_for_when_there_are_no_jobs():
@@ -1110,7 +1112,7 @@ def test_a_stop_during_parallel_scoring_ends_the_run():
 
     def report(message: str) -> None:
         reports.append(message)
-        if message.startswith("Scored 2 of"):
+        if message.startswith("Scoring jobs against your resume (2 of"):
             raise RunStopped()
 
     with pytest.raises(RunStopped):

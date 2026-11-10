@@ -198,6 +198,20 @@ export type SalaryPeriodRow = "year" | "month" | "week" | "day" | "hour";
 
 export type JobSort = (typeof JOB_SORTS)[number];
 
+export const WEB_VITALS = ["TTFB", "FCP", "LCP", "CLS", "INP"] as const;
+
+/** One page load measurement a browser reported. */
+export type WebVitalRow = {
+  id: string;
+  user_id: string;
+  page: string;
+  metric: (typeof WEB_VITALS)[number];
+  value: number;
+  rating: string | null;
+  navigation_type: string | null;
+  created_at: string;
+};
+
 export type HiddenCompanyRow = {
   user_id: string;
   company_id: string;
@@ -294,6 +308,12 @@ export type Database = {
       hidden_companies: {
         Row: HiddenCompanyRow;
         Insert: Partial<HiddenCompanyRow> & Pick<HiddenCompanyRow, "user_id" | "company_id">;
+        Update: never;
+        Relationships: [];
+      };
+      web_vitals: {
+        Row: WebVitalRow;
+        Insert: Pick<WebVitalRow, "page" | "metric" | "value" | "rating" | "navigation_type">;
         Update: never;
         Relationships: [];
       };

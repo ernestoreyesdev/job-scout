@@ -133,7 +133,7 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
     try:
         api_key = anthropic_key(service, user.id, settings)
         if not api_key:
-            raise RuntimeError("Add your Anthropic API key in Settings first.")
+            raise RuntimeError("Searches aren't set up yet: the app has no Anthropic key. Ask the admin to add one.")
 
         resume = None
         if body.score:
@@ -161,6 +161,7 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
             "error_code": None,
             "progress": summarize(result),
             "unreachable_boards": result.unreachable_boards,
+            "board_fetches": result.board_fetches,
         }
     except RunStopped:
         pass
@@ -243,7 +244,7 @@ def run_rescore(run_id: str, user: CurrentUser, settings: Settings) -> None:
     try:
         api_key = anthropic_key(service, user.id, settings)
         if not api_key:
-            raise RuntimeError("Add your Anthropic API key in Settings first.")
+            raise RuntimeError("Searches aren't set up yet: the app has no Anthropic key. Ask the admin to add one.")
 
         resumes = db.select("resumes", {"is_primary": "eq.true", "select": "id,text"})
         if not resumes or not resumes[0]["text"]:
@@ -302,7 +303,7 @@ def run_import(run_id: str, body: CompanyImport, user: CurrentUser, settings: Se
     try:
         api_key = anthropic_key(service, user.id, settings)
         if not api_key:
-            raise RuntimeError("Add your Anthropic API key in Settings first.")
+            raise RuntimeError("Searches aren't set up yet: the app has no Anthropic key. Ask the admin to add one.")
 
         result = import_companies(
             entries=body.entries,
@@ -342,7 +343,7 @@ def claude_and_resume(user: CurrentUser, settings: Settings) -> tuple[Any, str, 
     """
     api_key = anthropic_key(service_db(settings), user.id, settings)
     if not api_key:
-        raise HTTPException(400, "Add your Anthropic API key in Settings first.")
+        raise HTTPException(400, "This isn't set up yet: the app has no Anthropic key. Ask the admin to add one.")
     resumes = user_db(settings, user.access_token).select("resumes", {"is_primary": "eq.true", "select": "text"})
     if not resumes or not resumes[0]["text"]:
         raise HTTPException(400, "Upload a resume first.")
@@ -503,9 +504,10 @@ def delete_shared_key(admin: Admin, settings: Config) -> None:
 @app.get("/admin/stats")
 def admin_stats(admin: Admin, settings: Config) -> dict[str, Any]:
     """
-    App-wide data for the admin page: every user, the last STATS_DAYS of runs
-    and of Claude calls summed up by step, the company directory, every good or
-    bad label, and jobs past "new".
+    App-wide data for the admin page: every user, the last STATS_DAYS of runs,
+    of Claude calls summed up by step, of board fetches by board and job system
+    and of page load measurements by page,
+    the company directory, every good or bad label, and jobs past "new".
     """
     service = service_db(settings)
     since = (datetime.now(UTC) - timedelta(days=STATS_DAYS)).isoformat()
@@ -541,6 +543,22 @@ def admin_stats(admin: Admin, settings: Config) -> dict[str, Any]:
                     "order": "id",
                 },
             )
+        ),
+        "vitals": vital_stats(
+            select_all(
+                service,
+                "web_vitals",
+                {"select": "page,metric,value", "created_at": f"gte.{since}", "order": "id"},
+            )
+        ),
+        "boards": board_stats(
+            [
+                fetch
+                for run in service.select(
+                    "agent_runs", {"select": "board_fetches", "kind": "eq.search", "created_at": f"gte.{since}"}
+                )
+                for fetch in run["board_fetches"] or []
+            ]
         ),
         "companies": service.select("companies", {"select": "name,source,board,kind,open_jobs,missed_checks"}),
         "labels": service.select("applications", {"select": "fit_score,fit_label", "fit_label": "not.is.null"}),
@@ -586,3 +604,59 @@ def call_stats(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return sorted(stats, key=lambda row: row["calls"], reverse=True)
+
+
+def vital_stats(vitals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Page load measurements by page and metric: count, median and 75th percentile; most measured pages first."""
+    groups: dict[tuple[str, str], list[float]] = {}
+    for row in vitals:
+        groups.setdefault((row["page"], row["metric"]), []).append(row["value"])
+    stats = []
+    for (page, metric), values in groups.items():
+        values.sort()
+        stats.append(
+            {
+                "page": page,
+                "metric": metric,
+                "count": len(values),
+                "median": values[len(values) // 2],
+                "p75": values[min(len(values) - 1, int(len(values) * 0.75))],
+            }
+        )
+    loads = {page: count for page, metric, count in ((r["page"], r["metric"], r["count"]) for r in stats) if metric == "TTFB"}
+    return sorted(stats, key=lambda row: (-loads.get(row["page"], 0), row["page"], row["metric"]))
+
+
+# Boards listed on the admin page, slowest first.
+SLOW_BOARDS = 15
+
+
+def board_stats(fetches: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """
+    Board fetches summed up per job system (fetches, failures, median and
+    slowest time, jobs) and the SLOW_BOARDS slowest boards by median time.
+    """
+
+    def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        times = sorted(row["ms"] for row in rows)
+        return {
+            "fetches": len(rows),
+            "failures": sum(1 for row in rows if row["outcome"] != "ok"),
+            "median_ms": times[len(times) // 2],
+            "max_ms": times[-1],
+            "jobs": max(row["jobs"] for row in rows),
+        }
+
+    by_source: dict[str, list[dict[str, Any]]] = {}
+    by_board: dict[str, list[dict[str, Any]]] = {}
+    for fetch in fetches:
+        by_source.setdefault(fetch["source"], []).append(fetch)
+        by_board.setdefault(fetch["board"], []).append(fetch)
+    sources = [
+        {"source": source, **summarize(rows), "total_ms": sum(row["ms"] for row in rows)} for source, rows in by_source.items()
+    ]
+    boards = [{"board": board, "source": rows[0]["source"], **summarize(rows)} for board, rows in by_board.items()]
+    return {
+        "sources": sorted(sources, key=lambda row: row["total_ms"], reverse=True),
+        "slowest": sorted(boards, key=lambda row: row["median_ms"], reverse=True)[:SLOW_BOARDS],
+    }

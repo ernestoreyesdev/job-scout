@@ -320,3 +320,31 @@ def test_select_all_pages_past_the_row_limit():
     service = Paged()
     assert len(main.select_all(service, "llm_calls", {"order": "id"}, page=2)) == 5
     assert service.offsets == ["0", "2", "4"]
+
+
+def test_vital_stats_give_the_median_and_75th_percentile_per_page_and_metric():
+    rows = [{"page": "/tracker", "metric": "LCP", "value": v} for v in (800, 1200, 2000, 3500)]
+    rows += [{"page": "/tracker", "metric": "TTFB", "value": 300}, {"page": "/jobs", "metric": "LCP", "value": 900}]
+
+    stats = {(row["page"], row["metric"]): row for row in main.vital_stats(rows)}
+
+    lcp = stats[("/tracker", "LCP")]
+    assert (lcp["count"], lcp["median"], lcp["p75"]) == (4, 2000, 3500)
+    assert main.vital_stats(rows)[0]["page"] == "/tracker"
+
+
+def test_board_stats_sum_up_job_systems_and_list_the_slowest_boards():
+    fetches = [
+        {"board": "workday/acme", "source": "workday", "ms": 9000, "jobs": 1800, "outcome": "ok"},
+        {"board": "workday/acme", "source": "workday", "ms": 11000, "jobs": 1850, "outcome": "ok"},
+        {"board": "lever/beta", "source": "lever", "ms": 400, "jobs": 30, "outcome": "ok"},
+        {"board": "lever/gone", "source": "lever", "ms": 200, "jobs": 0, "outcome": "gone"},
+    ]
+
+    stats = main.board_stats(fetches)
+
+    workday, lever = stats["sources"]
+    assert (workday["source"], workday["fetches"], workday["total_ms"], workday["jobs"]) == ("workday", 2, 20000, 1850)
+    assert (lever["fetches"], lever["failures"]) == (2, 1)
+    assert [row["board"] for row in stats["slowest"]] == ["workday/acme", "lever/beta", "lever/gone"]
+    assert stats["slowest"][0]["median_ms"] == 11000

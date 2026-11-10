@@ -1,4 +1,3 @@
-import { SpeedInsights } from "@vercel/speed-insights/next";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Suspense } from "react";
@@ -7,6 +6,7 @@ import { AdminNavLink } from "@/components/admin-nav-link";
 import { NavLinks } from "@/components/nav-links";
 import { ThemeSync } from "@/components/theme-sync";
 import { UserMenu } from "@/components/user-menu";
+import { WebVitals } from "@/components/web-vitals";
 import { THEME_BOOT_SCRIPT } from "@/lib/theme";
 
 import "./globals.css";
@@ -55,9 +55,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           </div>
         </header>
         {children}
-        <Suspense>
-          <SpeedInsights />
-        </Suspense>
+        <WebVitals />
       </body>
     </html>
   );

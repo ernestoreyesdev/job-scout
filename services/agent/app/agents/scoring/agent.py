@@ -95,7 +95,7 @@ def score_and_save(
             usage.add(call_usage)
             scores[posting_id] = fit.score
             done["scored"] += 1
-            report(f"Scored {done['scored']} of {len(todo)}: {posting.title} at {posting.company}")
+            report(f"Scoring jobs against your resume ({done['scored']} of {len(todo)})…")
 
     if not todo:
         return ScoringResult(0, 0)

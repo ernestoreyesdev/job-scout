@@ -6,7 +6,7 @@ import { SectionCard } from "@/components/section-card";
 import { StatTile } from "@/components/stat-tile";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { callAgent } from "@/lib/agent";
-import type { AgentRunRow, ApplicationStatusRow, CompanyKindRow, FitLabelRow, RunUsage } from "@/lib/db";
+import type { AgentRunRow, ApplicationStatusRow, CompanyKindRow, FitLabelRow, RunUsage, WEB_VITALS } from "@/lib/db";
 import { MIN_LABELED, accuracyByCut, runCost, summarizeCosts } from "@/lib/insights";
 import { getAdminSource } from "@/lib/repository";
 import { cn } from "@/lib/utils";
@@ -38,6 +38,8 @@ const STEP_LABELS: Record<string, string> = {
   other: "Other",
 };
 
+type BoardFetches = { fetches: number; failures: number; median_ms: number; max_ms: number; jobs: number };
+
 type AdminStats = {
   generated_at: string;
   days: number;
@@ -47,6 +49,11 @@ type AdminStats = {
     unreachable_boards: string[];
   })[];
   calls: StepCalls[];
+  boards: {
+    sources: (BoardFetches & { source: string; total_ms: number })[];
+    slowest: (BoardFetches & { board: string; source: string })[];
+  };
+  vitals: { page: string; metric: (typeof WEB_VITALS)[number]; count: number; median: number; p75: number }[];
   companies: { name: string; source: string; board: string; kind: CompanyKindRow | null; open_jobs: number; missed_checks: number }[];
   labels: { fit_score: number | null; fit_label: FitLabelRow | null }[];
   applications: { user_id: string; status: ApplicationStatusRow }[];
@@ -147,7 +154,11 @@ async function AdminData() {
 
       <HealthSection stats={stats} />
 
+      <PageSpeedSection vitals={stats.vitals} days={stats.days} />
+
       <SpeedSection runs={searches} />
+
+      <BoardSection boards={stats.boards} companies={stats.companies} days={stats.days} />
 
       <SectionCard
         title="Claude calls by step"
@@ -358,6 +369,151 @@ function HealthSection({ stats }: { stats: AdminStats }) {
             </li>
           ))}
         </ul>
+      )}
+    </SectionCard>
+  );
+}
+
+/** Core Web Vitals thresholds: at or under the first is good, over the second is poor. */
+const VITAL_THRESHOLDS = { TTFB: [800, 1800], FCP: [1800, 3000], LCP: [2500, 4000], INP: [200, 500], CLS: [0.1, 0.25] } as const;
+const VITAL_COLUMNS = [
+  { metric: "TTFB", label: "First byte", stat: "p75" },
+  { metric: "FCP", label: "First paint", stat: "p75" },
+  { metric: "LCP", label: "Main content", stat: "median" },
+  { metric: "LCP", label: "Main content (75%)", stat: "p75" },
+  { metric: "INP", label: "Response to input", stat: "p75" },
+  { metric: "CLS", label: "Layout shift", stat: "p75" },
+] as const;
+
+/** How fast each page loads for real users, from the measurements their browsers reported. */
+function PageSpeedSection({ vitals, days }: { vitals: AdminStats["vitals"]; days: number }) {
+  const pages = [...new Set(vitals.map((row) => row.page))];
+  const find = (page: string, metric: string) => vitals.find((row) => row.page === page && row.metric === metric);
+
+  return (
+    <SectionCard
+      title="Page speed"
+      description={`What signed-in users' browsers measured over the last ${days} days, including moving between pages. 75% means three in four loads were at least this fast. Green is good, amber needs work and red is poor.`}
+    >
+      {pages.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No measurements yet. Browsers report them from now on.</p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Page</TableHead>
+              <TableHead className="text-right">Loads</TableHead>
+              {VITAL_COLUMNS.map((column) => (
+                <TableHead key={column.label} className="text-right">
+                  {column.label}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {pages.map((page) => (
+              <TableRow key={page}>
+                <TableCell className="font-mono text-xs">{page}</TableCell>
+                <TableCell className="text-right tabular-nums">{find(page, "TTFB")?.count ?? find(page, "LCP")?.count ?? "–"}</TableCell>
+                {VITAL_COLUMNS.map((column) => {
+                  const row = find(page, column.metric);
+                  const value = row?.[column.stat];
+                  const [good, poor] = VITAL_THRESHOLDS[column.metric];
+                  return (
+                    <TableCell
+                      key={column.label}
+                      className={cn(
+                        "text-right tabular-nums",
+                        value !== undefined &&
+                          (value <= good
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : value > poor
+                              ? "text-destructive"
+                              : "text-amber-600 dark:text-amber-400"),
+                      )}
+                    >
+                      {value === undefined ? "–" : column.metric === "CLS" ? value.toFixed(2) : seconds(Math.round(value))}
+                    </TableCell>
+                  );
+                })}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </SectionCard>
+  );
+}
+
+/** Where the "Checking companies" step spends its time: totals per job system and the slowest boards. */
+function BoardSection({ boards, companies, days }: { boards: AdminStats["boards"]; companies: AdminStats["companies"]; days: number }) {
+  const names = new Map(companies.map((company) => [`${company.source}/${company.board}`, company.name]));
+
+  return (
+    <SectionCard
+      title="Board fetches"
+      description={`Every board searches downloaded over the last ${days} days, timed from the first request to the last page, retry included.`}
+    >
+      {boards.sources.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No board fetches recorded yet. Searches across all companies record them from now on.</p>
+      ) : (
+        <>
+          <p className="text-sm font-medium">By job system</p>
+          <Table className="mt-1">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Job system</TableHead>
+                <TableHead className="text-right">Fetches</TableHead>
+                <TableHead className="text-right">Failed</TableHead>
+                <TableHead className="text-right">Median</TableHead>
+                <TableHead className="text-right">Slowest</TableHead>
+                <TableHead className="text-right">Total time</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {boards.sources.map((row) => (
+                <TableRow key={row.source}>
+                  <TableCell className="font-mono text-xs">{row.source}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.fetches}</TableCell>
+                  <TableCell className={cn("text-right tabular-nums", row.failures > 0 && "text-destructive")}>{row.failures}</TableCell>
+                  <TableCell className="text-right tabular-nums">{seconds(row.median_ms)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{seconds(row.max_ms)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{seconds(row.total_ms)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <p className="mt-6 text-sm font-medium">Slowest boards</p>
+          <Table className="mt-1">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Company</TableHead>
+                <TableHead>Board</TableHead>
+                <TableHead className="text-right">Median</TableHead>
+                <TableHead className="text-right">Slowest</TableHead>
+                <TableHead className="text-right">Jobs</TableHead>
+                <TableHead className="text-right">Failed</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {boards.slowest.map((row) => (
+                <TableRow key={row.board}>
+                  <TableCell>{names.get(row.board) ?? "–"}</TableCell>
+                  <TableCell className="max-w-56 truncate font-mono text-xs" title={row.board}>
+                    {row.board}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{seconds(row.median_ms)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{seconds(row.max_ms)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.jobs.toLocaleString()}</TableCell>
+                  <TableCell className={cn("text-right tabular-nums", row.failures > 0 && "text-destructive")}>{row.failures}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Boards download at the same time, a few at once, so the step takes less than the total time added up.
+          </p>
+        </>
       )}
     </SectionCard>
   );
