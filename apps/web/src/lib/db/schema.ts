@@ -215,6 +215,7 @@ export type AgentRunRow = {
   error_code: string | null;
   progress: string | null;
   usage: RunUsage | null;
+  timings: Record<string, number> | null;
   created_at: string;
   updated_at: string;
   finished_at: string | null;

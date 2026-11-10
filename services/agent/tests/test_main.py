@@ -49,6 +49,7 @@ def test_starting_a_search_first_fails_runs_older_than_the_limit(monkeypatch: py
     assert table == "agent_runs" and filters["status"] == "in.(queued,running)"
     assert filters["created_at"].startswith("lt.")
     assert patch["status"] == "failed" and patch["error"] == "Stopped after running for more than 10 minutes."
+    assert patch["error_code"] == "timed_out"
 
 
 def test_a_second_search_while_one_runs_is_refused(monkeypatch: pytest.MonkeyPatch):
@@ -244,7 +245,7 @@ def test_a_stopped_search_halts_at_its_next_progress_update_and_keeps_its_status
 
     assert reached == [] and db.run_status == "stopped"
     final = db.updates[-1]
-    assert final[1] == {"id": "eq.run-1"} and set(final[2]) == {"usage"}
+    assert final[1] == {"id": "eq.run-1"} and set(final[2]) == {"usage", "timings"}
 
 
 def test_summary_mentions_the_min_score():
@@ -283,3 +284,39 @@ def test_runs_use_the_users_key_then_the_shared_key_then_the_setting(monkeypatch
     assert main.anthropic_key(KeyRest(personal=True, shared=True), "u", settings) == "personal-key"
     assert main.anthropic_key(KeyRest(personal=False, shared=True), "u", settings) == "shared-key"
     assert main.anthropic_key(KeyRest(personal=False, shared=False), "u", settings) == "env-key"
+
+
+def test_call_stats_sum_up_each_step():
+    def call(step: str, ms: int, error: str | None = None) -> dict[str, Any]:
+        return {
+            "step": step,
+            "duration_ms": ms,
+            "error": error,
+            "input_tokens": 100,
+            "output_tokens": 10,
+            "cache_read_input_tokens": 50,
+            "cache_creation_input_tokens": 0,
+            "web_search_requests": 0,
+        }
+
+    stats = main.call_stats([call("scoring", 900), call("scoring", 1200), call("scoring", 3000, "overloaded"), call("titles", 400)])
+
+    scoring, titles = stats
+    assert (scoring["step"], scoring["calls"], scoring["errors"], scoring["median_ms"], scoring["p95_ms"]) == ("scoring", 3, 1, 1200, 3000)
+    assert (scoring["input_tokens"], scoring["cache_read_input_tokens"]) == (300, 150)
+    assert (titles["calls"], titles["median_ms"]) == (1, 400)
+
+
+def test_select_all_pages_past_the_row_limit():
+    class Paged:
+        def __init__(self):
+            self.offsets: list[str] = []
+
+        def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
+            self.offsets.append(params["offset"])
+            start = int(params["offset"])
+            return [{"n": n} for n in range(start, min(start + int(params["limit"]), 5))]
+
+    service = Paged()
+    assert len(main.select_all(service, "llm_calls", {"order": "id"}, page=2)) == 5
+    assert service.offsets == ["0", "2", "4"]

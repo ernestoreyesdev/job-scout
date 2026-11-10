@@ -468,6 +468,7 @@ def test_a_board_that_keeps_failing_is_counted_and_kept():
 
     assert fetched.count(("ashby", "acme", "Acme")) == 2
     assert result.unreachable == 1
+    assert result.unreachable_boards == ["ashby/acme"]
     assert not any(filters == {"id": "eq.id-acme"} for _, filters, _ in service.updates)
     assert ("companies", {"id": "eq.id-acme"}) not in service.deletes
 
@@ -1126,3 +1127,11 @@ def test_jobs_below_the_min_score_leave_the_tracker_even_under_the_limit():
 
     assert (result.scored, result.kept, result.min_score) == (4, 2, 70)
     assert hidden_ids(user) == ["posting-3", "posting-4"]
+
+
+def test_a_search_records_how_long_each_step_took():
+    timings: dict[str, int] = {}
+
+    run(timings=timings)
+
+    assert {"companies", "titles", "scoring"} <= set(timings) and all(ms >= 0 for ms in timings.values())

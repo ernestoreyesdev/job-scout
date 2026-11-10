@@ -3,8 +3,7 @@ import re
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from itertools import zip_longest
 from typing import Any
@@ -30,6 +29,7 @@ from app.sources import (
     is_complete,
 )
 from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, Posting
+from app.telemetry import ContextThreadPool, timed
 from app.sources.filters import (
     matches_exclusions,
     matches_keywords,
@@ -77,6 +77,7 @@ class SearchResult:
     company: str | None = None
     kept: int = 0
     min_score: int | None = None
+    unreachable_boards: list[str] = field(default_factory=list)
 
 
 def run_search(
@@ -101,42 +102,47 @@ def run_search(
     read_posts: Callable[[], list[HiringPost]] = recent_posts,
     extractor: Callable[..., list[Posting]] = extract_jobs,
     expander: Callable[..., list[str]] = related_titles,
+    timings: dict[str, int] | None = None,
 ) -> SearchResult:
     """
     One search run: gathers open jobs from one company, or from the whole
     directory plus recent Hacker News hiring posts, filters them in code against
     the keywords and the related titles Claude lists for them, then has the scoring agent score the newest ones the
     user hasn't tracked yet, up to the rule's limit. Without rule.score, the newest
-    of those are added unscored instead.
+    of those are added unscored instead. Milliseconds per step go into timings when given.
     """
-    unreachable = 0
+    unreachable: list[str] = []
     if rule.company:
-        report(f"Finding {rule.company}'s open jobs…")
-        try:
-            found = finder(rule.company)
-        except CompanyNotFound:
-            if not rule.web_lookup:
-                raise
-            report(f"Searching the web for {rule.company}'s job board…")
-            found = web_lookup(rule.company, client, settings, usage, fetcher, lookup)
-        save_companies(
-            service, [(found.source, found.board, found.name, "lookup")], {f"{found.source}/{found.board}": found.postings}
-        )
-        label_if_new(found, client, settings, service, usage, namer)
-        remove_duplicate_names(service)
-        mark_closed(user, service, {f"{found.source}/{found.board}": found.postings})
+        with timed(timings, "companies"):
+            report(f"Finding {rule.company}'s open jobs…")
+            try:
+                found = finder(rule.company)
+            except CompanyNotFound:
+                if not rule.web_lookup:
+                    raise
+                report(f"Searching the web for {rule.company}'s job board…")
+                found = web_lookup(rule.company, client, settings, usage, fetcher, lookup)
+            save_companies(
+                service, [(found.source, found.board, found.name, "lookup")], {f"{found.source}/{found.board}": found.postings}
+            )
+            label_if_new(found, client, settings, service, usage, namer)
+            remove_duplicate_names(service)
+            mark_closed(user, service, {f"{found.source}/{found.board}": found.postings})
         if not found.postings:
             report(f"Found {found.name}, but it has no open jobs listed.")
             return SearchResult(1, 0, 0, 0, 0, 0, company=found.name)
         everything = found.postings
         companies = 1
     else:
-        everything, companies, unreachable = directory_postings(
-            rule, client, settings, user, service, usage, report, fetcher, discover, namer
-        )
-        everything += hiring_thread_postings(client, settings, service, usage, report, read_posts, extractor)
+        with timed(timings, "companies"):
+            everything, companies, unreachable = directory_postings(
+                rule, client, settings, user, service, usage, report, fetcher, discover, namer
+            )
+        with timed(timings, "hacker_news"):
+            everything += hiring_thread_postings(client, settings, service, usage, report, read_posts, extractor)
 
-    titles = expander(client, settings.discovery_model, rule.keywords, usage) if everything else []
+    with timed(timings, "titles"):
+        titles = expander(client, settings.discovery_model, rule.keywords, usage) if everything else []
     if titles:
         report(f"Matching titles like {', '.join(titles[:6])}…")
     keywords = [*rule.keywords, *titles]
@@ -151,7 +157,7 @@ def run_search(
     ]
     if not matched:
         report("No jobs match your search.")
-        return SearchResult(companies, len(everything), 0, 0, 0, 0, unreachable)
+        return SearchResult(companies, len(everything), 0, 0, 0, 0, len(unreachable), unreachable_boards=unreachable)
 
     matched.sort(key=lambda p: p.posted_at or datetime.min.replace(tzinfo=UTC), reverse=True)
     matched = one_per_job(one_per_title(matched))
@@ -171,31 +177,41 @@ def run_search(
                 on_conflict="user_id,posting_id",
             )
         return SearchResult(
-            companies, len(everything), len(matched), already_tracked, 0, 0, unreachable, kept=len(newest)
+            companies,
+            len(everything),
+            len(matched),
+            already_tracked,
+            0,
+            0,
+            len(unreachable),
+            kept=len(newest),
+            unreachable_boards=unreachable,
         )
 
     pool_size = rule.limit * POOL_FACTOR
     if len(fresh) > pool_size:
         report("Picking the most promising matches…")
-        fresh = by_title_fit(fresh, pool_size, client, settings, resume_text, usage, triage)
+        with timed(timings, "shortlist"):
+            fresh = by_title_fit(fresh, pool_size, client, settings, resume_text, usage, triage)
     pool = pick(fresh, pool_size, per_company)
     todo = with_descriptions(pool, service, describer)
     report(f"Scoring {len(todo)} {'job' if len(todo) == 1 else 'jobs'} against your resume…")
 
-    scoring = score_and_save(
-        client=client,
-        model=settings.scoring_model,
-        effort=settings.scoring_effort,
-        todo=todo,
-        resume_id=resume_id,
-        resume_text=resume_text,
-        user_id=user_id,
-        user=user,
-        service=service,
-        usage=usage,
-        report=report,
-        examples=labeled_examples(user),
-    )
+    with timed(timings, "scoring"):
+        scoring = score_and_save(
+            client=client,
+            model=settings.scoring_model,
+            effort=settings.scoring_effort,
+            todo=todo,
+            resume_id=resume_id,
+            resume_text=resume_text,
+            user_id=user_id,
+            user=user,
+            service=service,
+            usage=usage,
+            report=report,
+            examples=labeled_examples(user),
+        )
     kept = keep_best(user, todo, scoring.scores, rule.limit, rule.min_score)
     return SearchResult(
         companies,
@@ -204,9 +220,10 @@ def run_search(
         already_tracked,
         scoring.scored,
         scoring.failed,
-        unreachable,
+        len(unreachable),
         kept=kept,
         min_score=rule.min_score,
+        unreachable_boards=unreachable,
     )
 
 
@@ -226,7 +243,8 @@ def directory_postings(
     Open jobs at every directory company the user hasn't hidden, topping the
     directory up from the web while it's small or once a week. Staffing agencies
     and aggregators count as hidden unless the user chose to show them. Returns
-    the jobs, the companies checked and the companies that couldn't be reached.
+    the jobs, the companies checked and the boards ("source/board") that couldn't
+    be reached.
     """
     directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,kind"})
     choices = {row["company_id"]: row["hidden"] for row in user.select("hidden_companies", {"select": "company_id,hidden"})}
@@ -289,7 +307,7 @@ def directory_postings(
             fetched[key] = postings
             report(f"Checked {len(fetched)} of {len(boards)} companies…")
 
-    with ThreadPoolExecutor(max_workers=FETCH_CONCURRENCY) as pool:
+    with ContextThreadPool(max_workers=FETCH_CONCURRENCY) as pool:
         list(pool.map(fetch, boards))
 
     live = [entry for entry in boards if f"{entry[0]}/{entry[1]}" in fetched]
@@ -302,7 +320,7 @@ def directory_postings(
     mark_closed(user, service, fetched)
     searched = [entry for entry in live if f"{entry[0]}/{entry[1]}" not in skipped]
     postings = [p for key, found in fetched.items() if key not in skipped for p in found]
-    return postings, len(searched), len(unreachable)
+    return postings, len(searched), sorted(unreachable)
 
 
 def save_companies(service: Rest, boards: list[Board], postings: dict[str, list[Posting]]) -> None:
@@ -489,7 +507,7 @@ def by_title_fit(
         return rank(batches[0], usage)
 
     spent = [Usage() for _ in batches]
-    with ThreadPoolExecutor(max_workers=len(batches)) as pool:
+    with ContextThreadPool(max_workers=len(batches)) as pool:
         picks = list(pool.map(rank, batches, spent))
     for batch_usage in spent:
         usage.add(batch_usage)
@@ -529,6 +547,7 @@ def rescore(
     usage: Usage,
     report: Callable[[str], None],
     describer: Callable[[Posting], str] = describe,
+    timings: dict[str, int] | None = None,
 ) -> int:
     """
     Scores the jobs on the user's Tracker or Jobs that were scored against
@@ -547,20 +566,21 @@ def rescore(
         report("Every job is already scored with your current resume.")
         return 0
     report(f"Scoring {len(todo)} {'job' if len(todo) == 1 else 'jobs'} with your current resume…")
-    scoring = score_and_save(
-        client=client,
-        model=settings.scoring_model,
-        effort=settings.scoring_effort,
-        todo=with_descriptions(todo, service, describer),
-        resume_id=resume_id,
-        resume_text=resume_text,
-        user_id=user_id,
-        user=user,
-        service=service,
-        usage=usage,
-        report=report,
-        examples=labeled_examples(user),
-    )
+    with timed(timings, "scoring"):
+        scoring = score_and_save(
+            client=client,
+            model=settings.scoring_model,
+            effort=settings.scoring_effort,
+            todo=with_descriptions(todo, service, describer),
+            resume_id=resume_id,
+            resume_text=resume_text,
+            user_id=user_id,
+            user=user,
+            service=service,
+            usage=usage,
+            report=report,
+            examples=labeled_examples(user),
+        )
     return scoring.scored
 
 
@@ -654,7 +674,7 @@ def import_companies(
             not_found.append(entry)
         else:
             by_url.setdefault(board, entry)
-    with ThreadPoolExecutor(max_workers=FETCH_CONCURRENCY) as pool:
+    with ContextThreadPool(max_workers=FETCH_CONCURRENCY) as pool:
         list(pool.map(look_up, names))
 
     existing = {key for key in [*by_name, *by_url] if key in known}
@@ -683,7 +703,7 @@ def import_companies(
 
     if new_urls:
         report(f"Checking {len(new_urls)} careers pages…")
-        with ThreadPoolExecutor(max_workers=FETCH_CONCURRENCY) as pool:
+        with ContextThreadPool(max_workers=FETCH_CONCURRENCY) as pool:
             list(pool.map(fetch, new_urls))
 
     save_companies(service, boards, fetched)

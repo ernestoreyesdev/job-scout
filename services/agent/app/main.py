@@ -11,6 +11,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from pypdf import PdfReader
 
 from app.agents.orchestrator import (
+    MAX_MISSED_CHECKS,
     ImportResult,
     SearchResult,
     import_companies,
@@ -25,8 +26,10 @@ from app.config import Settings, get_settings
 from app.crypto import decrypt, encrypt, key_hint
 from app.db import Rest, service_db, user_db
 from app.sources.base import CompanyNotFound, Posting
+from app.telemetry import CallLog, RecordingClient, configure_logging, current_run
 
 logger = logging.getLogger("agent")
+configure_logging()
 
 RUN_TIME_LIMIT = timedelta(minutes=10)
 UNFINISHED = "in.(queued,running)"
@@ -125,6 +128,7 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
     service = service_db(settings)
     usage = Usage()
     report = start_run(db, run_id)
+    calls, timings = CallLog(user.id, run_id), {}
     outcome: dict[str, Any] = {}
     try:
         api_key = anthropic_key(service, user.id, settings)
@@ -140,7 +144,7 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
 
         result = orchestrate_search(
             rule=body,
-            client=make_client(api_key),
+            client=RecordingClient(make_client(api_key), calls),
             settings=settings,
             resume_id=resume["id"] if resume else None,
             resume_text=resume["text"] if resume else None,
@@ -149,8 +153,15 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
             service=service,
             usage=usage,
             report=report,
+            timings=timings,
         )
-        outcome = {"status": "done", "error": None, "error_code": None, "progress": summarize(result)}
+        outcome = {
+            "status": "done",
+            "error": None,
+            "error_code": None,
+            "progress": summarize(result),
+            "unreachable_boards": result.unreachable_boards,
+        }
     except RunStopped:
         pass
     except CompanyNotFound as exc:
@@ -159,7 +170,8 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
         logger.exception("search run %s failed", run_id)
         outcome = {"status": "failed", "error": str(exc) or exc.__class__.__name__, "error_code": None, "progress": None}
 
-    finish_run(db, run_id, outcome, usage)
+    finish_run(db, run_id, outcome, usage, timings)
+    calls.save(service)
 
 
 def extract_pdf_text(data: bytes) -> str:
@@ -192,11 +204,17 @@ def summarize(result: SearchResult) -> str:
 
 
 def fail_runs(db: Rest, filters: dict[str, str], error: str) -> None:
-    """Marks matching unfinished runs as failed so they stop showing as running."""
+    """Marks matching unfinished runs as failed with error code timed_out, so they stop showing as running."""
     db.update(
         "agent_runs",
         filters,
-        {"status": "failed", "error": error, "progress": None, "finished_at": datetime.now(UTC).isoformat()},
+        {
+            "status": "failed",
+            "error": error,
+            "error_code": "timed_out",
+            "progress": None,
+            "finished_at": datetime.now(UTC).isoformat(),
+        },
     )
 
 
@@ -220,6 +238,7 @@ def run_rescore(run_id: str, user: CurrentUser, settings: Settings) -> None:
     service = service_db(settings)
     usage = Usage()
     report = start_run(db, run_id)
+    calls, timings = CallLog(user.id, run_id), {}
     outcome: dict[str, Any] = {}
     try:
         api_key = anthropic_key(service, user.id, settings)
@@ -231,7 +250,7 @@ def run_rescore(run_id: str, user: CurrentUser, settings: Settings) -> None:
             raise RuntimeError("Upload a resume first.")
 
         count = orchestrate_rescore(
-            client=make_client(api_key),
+            client=RecordingClient(make_client(api_key), calls),
             settings=settings,
             resume_id=resumes[0]["id"],
             resume_text=resumes[0]["text"],
@@ -240,6 +259,7 @@ def run_rescore(run_id: str, user: CurrentUser, settings: Settings) -> None:
             service=service,
             usage=usage,
             report=report,
+            timings=timings,
         )
         progress = (
             f"Scored {count} {'job' if count == 1 else 'jobs'} with your current resume."
@@ -253,7 +273,8 @@ def run_rescore(run_id: str, user: CurrentUser, settings: Settings) -> None:
         logger.exception("rescore run %s failed", run_id)
         outcome = {"status": "failed", "error": str(exc) or exc.__class__.__name__, "progress": None}
 
-    finish_run(db, run_id, outcome, usage)
+    finish_run(db, run_id, outcome, usage, timings)
+    calls.save(service)
 
 
 @app.post("/runs/import", status_code=202)
@@ -276,6 +297,7 @@ def run_import(run_id: str, body: CompanyImport, user: CurrentUser, settings: Se
     service = service_db(settings)
     usage = Usage()
     report = start_run(db, run_id)
+    calls, timings = CallLog(user.id, run_id), {}
     outcome: dict[str, Any] = {}
     try:
         api_key = anthropic_key(service, user.id, settings)
@@ -284,7 +306,7 @@ def run_import(run_id: str, body: CompanyImport, user: CurrentUser, settings: Se
 
         result = import_companies(
             entries=body.entries,
-            client=make_client(api_key),
+            client=RecordingClient(make_client(api_key), calls),
             settings=settings,
             service=service,
             usage=usage,
@@ -297,7 +319,8 @@ def run_import(run_id: str, body: CompanyImport, user: CurrentUser, settings: Se
         logger.exception("import run %s failed", run_id)
         outcome = {"status": "failed", "error": str(exc) or exc.__class__.__name__, "progress": None}
 
-    finish_run(db, run_id, outcome, usage)
+    finish_run(db, run_id, outcome, usage, timings)
+    calls.save(service)
 
 
 def summarize_import(result: ImportResult) -> str:
@@ -312,15 +335,19 @@ def summarize_import(result: ImportResult) -> str:
     return ", ".join(parts) + "."
 
 
-def claude_and_resume(user: CurrentUser, settings: Settings) -> tuple[Any, str]:
-    """The user's Claude client and primary resume text, or a 400 saying which one is missing."""
+def claude_and_resume(user: CurrentUser, settings: Settings) -> tuple[Any, str, CallLog]:
+    """
+    The user's recording Claude client, primary resume text and the log its
+    calls go to, or a 400 saying which one is missing.
+    """
     api_key = anthropic_key(service_db(settings), user.id, settings)
     if not api_key:
         raise HTTPException(400, "Add your Anthropic API key in Settings first.")
     resumes = user_db(settings, user.access_token).select("resumes", {"is_primary": "eq.true", "select": "text"})
     if not resumes or not resumes[0]["text"]:
         raise HTTPException(400, "Upload a resume first.")
-    return make_client(api_key), resumes[0]["text"]
+    calls = CallLog(user.id)
+    return RecordingClient(make_client(api_key), calls), resumes[0]["text"], calls
 
 
 @app.post("/applications/{application_id}/gap-analysis")
@@ -329,12 +356,14 @@ def post_gap_analysis(application_id: str, user: User, settings: Config) -> dict
     rows = db.select("applications", {"id": f"eq.{application_id}", "select": "id,posting:postings(*)"})
     if not rows:
         raise HTTPException(404, "Job not found.")
-    client, resume_text = claude_and_resume(user, settings)
+    client, resume_text, calls = claude_and_resume(user, settings)
     usage = Usage()
     try:
         analysis = analyze_gaps(client, settings.analysis_model, resume_text, Posting.model_validate(rows[0]["posting"]), usage)
     except (GapAnalysisError, anthropic.APIError) as error:
         raise HTTPException(502, f"Couldn't analyze this job: {error}")
+    finally:
+        calls.save(service_db(settings))
     db.update(
         "applications",
         {"id": f"eq.{application_id}"},
@@ -358,7 +387,7 @@ def post_follow_up(application_id: str, user: User, settings: Config) -> dict[st
     applied = sorted(event["changed_at"] for event in rows[0]["events"] if event["status"] == "applied")
     if not applied:
         raise HTTPException(400, "This job was never marked applied.")
-    client, resume_text = claude_and_resume(user, settings)
+    client, resume_text, calls = claude_and_resume(user, settings)
     usage = Usage()
     posting = rows[0]["posting"]
     try:
@@ -367,6 +396,8 @@ def post_follow_up(application_id: str, user: User, settings: Config) -> dict[st
         )
     except (FollowUpError, anthropic.APIError) as error:
         raise HTTPException(502, f"Couldn't draft a follow-up: {error}")
+    finally:
+        calls.save(service_db(settings))
     return {**draft.model_dump(), "usage": usage.model_dump()}
 
 
@@ -389,8 +420,10 @@ def start_run(db: Rest, run_id: str) -> Callable[[str], None]:
     """
     Marks a queued run running and returns its progress reporter. Progress is
     written only while the run is still running; once the user has stopped it,
-    the next report raises RunStopped.
+    the next report raises RunStopped. Logs from here on carry the run's id.
     """
+    current_run.set(run_id)
+    logger.info("run started")
     db.update("agent_runs", {"id": f"eq.{run_id}", "status": "eq.queued"}, {"status": "running", "progress": "Starting…"})
 
     def report(message: str) -> None:
@@ -400,12 +433,20 @@ def start_run(db: Rest, run_id: str) -> Callable[[str], None]:
     return report
 
 
-def finish_run(db: Rest, run_id: str, outcome: dict[str, Any], usage: Usage) -> None:
-    """Saves a run's outcome while it's still running; a run the user stopped keeps its status and gets only its usage."""
-    finished = {"usage": usage.model_dump(), "finished_at": datetime.now(UTC).isoformat()}
+def finish_run(db: Rest, run_id: str, outcome: dict[str, Any], usage: Usage, timings: dict[str, int]) -> None:
+    """
+    Saves a run's outcome while it's still running; a run the user stopped keeps
+    its status and gets only its usage and step timings.
+    """
+    measured = {"usage": usage.model_dump(), "timings": timings or None}
+    logger.info(
+        "run finished",
+        extra={"status": outcome.get("status", "stopped"), "timings": timings, "input_tokens": usage.input_tokens},
+    )
+    finished = {**measured, "finished_at": datetime.now(UTC).isoformat()}
     if outcome and db.update("agent_runs", {"id": f"eq.{run_id}", "status": "eq.running"}, {**outcome, **finished}):
         return
-    db.update("agent_runs", {"id": f"eq.{run_id}"}, {"usage": finished["usage"]})
+    db.update("agent_runs", {"id": f"eq.{run_id}"}, measured)
 
 
 @app.post("/runs/{run_id}/stop")
@@ -462,14 +503,16 @@ def delete_shared_key(admin: Admin, settings: Config) -> None:
 @app.get("/admin/stats")
 def admin_stats(admin: Admin, settings: Config) -> dict[str, Any]:
     """
-    App-wide data for the admin page: every user, the last STATS_DAYS of runs,
-    the company directory, every good or bad label, and jobs past "new".
+    App-wide data for the admin page: every user, the last STATS_DAYS of runs
+    and of Claude calls summed up by step, the company directory, every good or
+    bad label, and jobs past "new".
     """
     service = service_db(settings)
     since = (datetime.now(UTC) - timedelta(days=STATS_DAYS)).isoformat()
     return {
         "generated_at": datetime.now(UTC).isoformat(),
         "days": STATS_DAYS,
+        "max_missed_checks": MAX_MISSED_CHECKS,
         "users": [
             {
                 "id": user["id"],
@@ -481,9 +524,65 @@ def admin_stats(admin: Admin, settings: Config) -> dict[str, Any]:
         ],
         "runs": service.select(
             "agent_runs",
-            {"select": "user_id,kind,status,created_at,usage", "created_at": f"gte.{since}", "order": "created_at.desc"},
+            {
+                "select": "id,user_id,kind,status,error,error_code,unreachable_boards,created_at,finished_at,usage,timings",
+                "created_at": f"gte.{since}",
+                "order": "created_at.desc",
+            },
         ),
-        "companies": service.select("companies", {"select": "source,kind,open_jobs"}),
+        "calls": call_stats(
+            select_all(
+                service,
+                "llm_calls",
+                {
+                    "select": "step,duration_ms,error,input_tokens,output_tokens,cache_read_input_tokens,"
+                    "cache_creation_input_tokens,web_search_requests",
+                    "created_at": f"gte.{since}",
+                    "order": "id",
+                },
+            )
+        ),
+        "companies": service.select("companies", {"select": "name,source,board,kind,open_jobs,missed_checks"}),
         "labels": service.select("applications", {"select": "fit_score,fit_label", "fit_label": "not.is.null"}),
         "applications": service.select("applications", {"select": "user_id,status", "status": "neq.new"}),
     }
+
+
+def select_all(service: Rest, table: str, params: dict[str, str], page: int = 1000) -> list[dict[str, Any]]:
+    """Every matching row, fetched a page at a time past the API's row limit; params need a stable order."""
+    rows: list[dict[str, Any]] = []
+    while True:
+        batch = service.select(table, {**params, "limit": str(page), "offset": str(len(rows))})
+        rows += batch
+        if len(batch) < page:
+            return rows
+
+
+def call_stats(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Claude calls summed up by step: count, errors, median and slowest-5% time, and token totals; busiest first."""
+    by_step: dict[str, list[dict[str, Any]]] = {}
+    for call in calls:
+        by_step.setdefault(call["step"], []).append(call)
+    stats = []
+    for step, rows in by_step.items():
+        times = sorted(row["duration_ms"] for row in rows)
+        stats.append(
+            {
+                "step": step,
+                "calls": len(rows),
+                "errors": sum(1 for row in rows if row["error"]),
+                "median_ms": times[len(times) // 2],
+                "p95_ms": times[min(len(times) - 1, int(len(times) * 0.95))],
+                **{
+                    field: sum(row[field] for row in rows)
+                    for field in (
+                        "input_tokens",
+                        "output_tokens",
+                        "cache_read_input_tokens",
+                        "cache_creation_input_tokens",
+                        "web_search_requests",
+                    )
+                },
+            }
+        )
+    return sorted(stats, key=lambda row: row["calls"], reverse=True)

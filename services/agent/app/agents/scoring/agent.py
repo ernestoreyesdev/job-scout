@@ -1,7 +1,7 @@
 import logging
 import threading
 from collections.abc import Callable, Sequence
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -9,6 +9,7 @@ from typing import Any
 from app.agents.schemas import FitScore, JobDetails, RunStopped, Usage
 from app.agents.scoring.prompts import FIT_SYSTEM, LabeledJob, fit_blocks
 from app.db import Rest
+from app.telemetry import ContextThreadPool
 from app.sources.base import Posting
 
 logger = logging.getLogger("agent")
@@ -102,7 +103,7 @@ def score_and_save(
     # A failure on the first job (bad key, model unavailable) would repeat for every job, so it ends the run.
     score_one(*todo[0])
 
-    with ThreadPoolExecutor(max_workers=SCORE_CONCURRENCY) as pool:
+    with ContextThreadPool(max_workers=SCORE_CONCURRENCY) as pool:
         futures = {pool.submit(score_one, posting_id, posting): posting for posting_id, posting in todo[1:]}
         for future in as_completed(futures):
             if isinstance(future.exception(), RunStopped):

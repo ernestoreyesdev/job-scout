@@ -1,6 +1,5 @@
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -11,6 +10,7 @@ from app.agents.hiring_threads.prompts import EXTRACTION_SYSTEM, extraction_mess
 from app.agents.schemas import HiringJobs, Usage
 from app.sources.base import Posting
 from app.sources.text import html_to_text
+from app.telemetry import ContextThreadPool
 
 logger = logging.getLogger("agent")
 
@@ -54,7 +54,7 @@ def extract_jobs(client: Any, model: str, posts: list[HiringPost], usage: Usage)
     """
     batches = [posts[i : i + POSTS_PER_CALL] for i in range(0, len(posts), POSTS_PER_CALL)]
     spent = [Usage() for _ in batches]
-    with ThreadPoolExecutor(max_workers=CALL_CONCURRENCY) as pool:
+    with ContextThreadPool(max_workers=CALL_CONCURRENCY) as pool:
         found = list(pool.map(lambda batch, used: _extract(client, model, batch, used), batches, spent))
     for batch_usage in spent:
         usage.add(batch_usage)

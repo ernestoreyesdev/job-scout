@@ -6,21 +6,48 @@ import { SectionCard } from "@/components/section-card";
 import { StatTile } from "@/components/stat-tile";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { callAgent } from "@/lib/agent";
-import type { AgentRunRow, ApplicationStatusRow, CompanyKindRow, FitLabelRow } from "@/lib/db";
+import type { AgentRunRow, ApplicationStatusRow, CompanyKindRow, FitLabelRow, RunUsage } from "@/lib/db";
 import { MIN_LABELED, accuracyByCut, runCost, summarizeCosts } from "@/lib/insights";
 import { getAdminSource } from "@/lib/repository";
+import { cn } from "@/lib/utils";
 
 const DOLLARS = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const PERCENT = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 });
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_DAYS = 7;
 const CHART_DAYS = 14;
 
+type StepCalls = RunUsage & {
+  step: string;
+  calls: number;
+  errors: number;
+  median_ms: number;
+  p95_ms: number;
+};
+
+const STEP_LABELS: Record<string, string> = {
+  companies: "Checking companies",
+  hacker_news: "Hacker News posts",
+  titles: "Related titles",
+  shortlist: "Shortlisting",
+  scoring: "Scoring",
+  discovery: "Finding companies",
+  naming: "Labeling companies",
+  gap_analysis: "Gap analysis",
+  follow_up: "Follow-up drafts",
+  other: "Other",
+};
+
 type AdminStats = {
   generated_at: string;
   days: number;
+  max_missed_checks: number;
   users: { id: string; email: string | null; created_at: string | null; last_sign_in_at: string | null }[];
-  runs: Pick<AgentRunRow, "user_id" | "kind" | "status" | "created_at" | "usage">[];
-  companies: { source: string; kind: CompanyKindRow | null; open_jobs: number }[];
+  runs: (Pick<AgentRunRow, "id" | "user_id" | "kind" | "status" | "error" | "error_code" | "created_at" | "finished_at" | "usage" | "timings"> & {
+    unreachable_boards: string[];
+  })[];
+  calls: StepCalls[];
+  companies: { name: string; source: string; board: string; kind: CompanyKindRow | null; open_jobs: number; missed_checks: number }[];
   labels: { fit_score: number | null; fit_label: FitLabelRow | null }[];
   applications: { user_id: string; status: ApplicationStatusRow }[];
 };
@@ -118,6 +145,49 @@ async function AdminData() {
         </div>
       </SectionCard>
 
+      <HealthSection stats={stats} />
+
+      <SpeedSection runs={searches} />
+
+      <SectionCard
+        title="Claude calls by step"
+        description={`Every call over the last ${stats.days} days. Cache hits are the share of input read from the prompt cache.`}
+      >
+        {stats.calls.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No calls recorded yet. Runs record their calls from now on.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Step</TableHead>
+                <TableHead className="text-right">Calls</TableHead>
+                <TableHead className="text-right">Errors</TableHead>
+                <TableHead className="text-right">Median</TableHead>
+                <TableHead className="text-right">Slowest 5%</TableHead>
+                <TableHead className="text-right">Cache hits</TableHead>
+                <TableHead className="text-right">Cost</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {stats.calls.map((row) => {
+                const input = row.input_tokens + row.cache_read_input_tokens + row.cache_creation_input_tokens;
+                return (
+                  <TableRow key={row.step}>
+                    <TableCell>{STEP_LABELS[row.step] ?? row.step}</TableCell>
+                    <TableCell className="text-right tabular-nums">{row.calls.toLocaleString()}</TableCell>
+                    <TableCell className={cn("text-right tabular-nums", row.errors > 0 && "text-destructive")}>{row.errors}</TableCell>
+                    <TableCell className="text-right tabular-nums">{seconds(row.median_ms)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{seconds(row.p95_ms)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{input ? PERCENT.format(row.cache_read_input_tokens / input) : "–"}</TableCell>
+                    <TableCell className="text-right tabular-nums">{DOLLARS.format(runCost(row))}</TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </SectionCard>
+
       <SectionCard title="Users" description={`Searches and spend over the last ${stats.days} days; applied counts every job past saved.`}>
         <Table>
           <TableHeader>
@@ -167,4 +237,128 @@ async function AdminData() {
 /** "2026-11-10", in local time. */
 function isoDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+/** "1.4 s" or "850 ms". */
+function seconds(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`;
+}
+
+/** Median and slowest finished search, and the average time searches spent in each step. */
+function SpeedSection({ runs }: { runs: AdminStats["runs"] }) {
+  const done = runs.filter((run) => run.status === "done" && run.finished_at);
+  const durations = done
+    .map((run) => new Date(run.finished_at!).getTime() - new Date(run.created_at).getTime())
+    .sort((a, b) => a - b);
+  const timed = done.filter((run) => run.timings);
+  const steps = Object.entries(
+    timed.reduce<Record<string, number>>((totals, run) => {
+      for (const [step, ms] of Object.entries(run.timings!)) totals[step] = (totals[step] ?? 0) + ms;
+      return totals;
+    }, {}),
+  )
+    .map(([step, total]) => ({ step, average: total / timed.length }))
+    .sort((a, b) => b.average - a.average);
+  const longest = Math.max(1, ...steps.map((row) => row.average));
+
+  return (
+    <SectionCard title="Search speed" description="Finished searches, from start to the last saved job.">
+      <dl className="grid gap-3 sm:grid-cols-3">
+        <StatTile label="Finished searches" value={done.length} />
+        <StatTile label="Median" value={durations.length ? seconds(durations[Math.floor(durations.length / 2)]) : "–"} />
+        <StatTile label="Slowest" value={durations.length ? seconds(durations.at(-1)!) : "–"} />
+      </dl>
+      <p className="mt-6 text-sm font-medium">Average time per step</p>
+      {steps.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">No step timings yet. Searches record them from now on.</p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {steps.map((row) => (
+            <li key={row.step} className="grid grid-cols-[9rem_1fr_4rem] items-center gap-3 text-sm">
+              <span className="text-muted-foreground">{STEP_LABELS[row.step] ?? row.step}</span>
+              <div className="h-2.5 rounded-full bg-muted">
+                <div className="h-2.5 rounded-full bg-primary" style={{ width: `${(row.average / longest) * 100}%` }} />
+              </div>
+              <span className="text-right tabular-nums">{seconds(Math.round(row.average))}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </SectionCard>
+  );
+}
+
+const RECENT_FAILURES = 8;
+
+/** Failed and timed-out runs, and the boards searches couldn't reach or found gone. */
+function HealthSection({ stats }: { stats: AdminStats }) {
+  const emails = new Map(stats.users.map((user) => [user.id, user.email ?? "–"]));
+  const names = new Map(stats.companies.map((company) => [`${company.source}/${company.board}`, company.name]));
+  const failed = stats.runs.filter((run) => run.status === "failed");
+  const timedOut = failed.filter((run) => run.error_code === "timed_out").length;
+  const unreachable = new Map<string, { count: number; last: string }>();
+  for (const run of stats.runs) {
+    for (const board of run.unreachable_boards ?? []) {
+      const seen = unreachable.get(board);
+      unreachable.set(board, { count: (seen?.count ?? 0) + 1, last: seen && seen.last > run.created_at ? seen.last : run.created_at });
+    }
+  }
+  const missing = stats.companies.filter((company) => company.missed_checks > 0).sort((a, b) => b.missed_checks - a.missed_checks);
+  const problems = [
+    ...[...unreachable.entries()].map(([board, seen]) => ({
+      key: `unreachable-${board}`,
+      name: names.get(board) ?? board,
+      board,
+      problem: `Couldn't be reached in ${seen.count} ${seen.count === 1 ? "search" : "searches"}, last ${isoDate(new Date(seen.last))}`,
+    })),
+    ...missing.map((company) => ({
+      key: `missing-${company.source}/${company.board}`,
+      name: company.name,
+      board: `${company.source}/${company.board}`,
+      problem: `Board not found in ${company.missed_checks} ${company.missed_checks === 1 ? "search" : "searches"} in a row; removed at ${stats.max_missed_checks}`,
+    })),
+  ];
+
+  return (
+    <SectionCard title="Health" description={`Problems over the last ${stats.days} days.`}>
+      <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StatTile label="Failed runs" value={failed.length} note={`of ${stats.runs.length} runs`} />
+        <StatTile label="Timed out" value={timedOut} note="Stopped after 10 minutes" />
+        <StatTile label="Boards unreachable" value={unreachable.size} />
+        <StatTile label="Boards going missing" value={missing.length} />
+      </dl>
+      <p className="mt-6 text-sm font-medium">Recent failures</p>
+      {failed.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">None.</p>
+      ) : (
+        <ul className="mt-2 divide-y rounded-lg border text-sm">
+          {failed.slice(0, RECENT_FAILURES).map((run) => (
+            <li key={run.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2">
+              <span className="w-24 shrink-0 text-muted-foreground tabular-nums">{isoDate(new Date(run.created_at))}</span>
+              <span className="w-56 shrink-0 truncate text-muted-foreground">{emails.get(run.user_id) ?? "–"}</span>
+              <span className="shrink-0 capitalize">{run.kind}</span>
+              {run.error_code && (
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{run.error_code.replace("_", " ")}</span>
+              )}
+              <span className="min-w-0 flex-1 text-destructive">{run.error ?? "No error message"}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-6 text-sm font-medium">Problem boards</p>
+      {problems.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">None.</p>
+      ) : (
+        <ul className="mt-2 divide-y rounded-lg border text-sm">
+          {problems.map((row) => (
+            <li key={row.key} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2">
+              <span className="font-medium">{row.name}</span>
+              <span className="font-mono text-xs text-muted-foreground">{row.board}</span>
+              <span className="ml-auto text-muted-foreground">{row.problem}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </SectionCard>
+  );
 }
