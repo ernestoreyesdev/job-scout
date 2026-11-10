@@ -108,20 +108,22 @@ export function JobRow({
   }
 
   return (
-    <li className="flex gap-4 rounded-xl border bg-card p-4 text-card-foreground shadow-xs transition-colors hover:border-foreground/20">
+    <li className="flex flex-wrap gap-x-4 gap-y-3 rounded-xl border bg-card p-4 text-card-foreground shadow-xs transition-colors hover:border-foreground/20">
       <ScoreBadge score={job.fit_score} />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-56">
         <a
           href={job.posting.url}
           target="_blank"
           rel="noreferrer"
           className="group/link inline-flex items-baseline gap-1.5 font-medium hover:underline"
         >
-          {job.posting.title}
+          {tidyCase(job.posting.title)}
           <ExternalLink className="size-3.5 shrink-0 self-center text-muted-foreground group-hover/link:text-foreground" />
         </a>
         <p className="text-sm text-muted-foreground">
-          {[job.posting.company, job.posting.location, posted].filter(Boolean).join(" · ")}
+          {[tidyCase(job.posting.company), job.posting.location && tidyCase(job.posting.location), posted]
+            .filter(Boolean)
+            .join(" · ")}
         </p>
         {(facts.length > 0 || stack.length > 0 || ghost.length > 0 || staleResume || closedOn) && (
           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -241,7 +243,7 @@ export function JobRow({
         )}
         {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-2">
+      <div className="flex w-full shrink-0 items-center justify-between gap-2 sm:w-auto sm:flex-col sm:items-end sm:justify-start">
         <Select key={job.status} defaultValue={job.status} onValueChange={(value) => save("status", value)} disabled={pending}>
           <SelectTrigger size="sm" className="w-32 rounded-full capitalize">
             <SelectValue />
@@ -345,22 +347,22 @@ function GapList({ title, items }: { title: string; items: GapItem[] }) {
   );
 }
 
-/** The fit score in a circle: green from 70, amber from 50, gray below and when unscored. */
+/** The fit score in a circle with its label: green from 70, amber from 50, gray below and when unscored. */
 function ScoreBadge({ score }: { score: number | null }) {
-  const tone =
+  const [tone, label] =
     score === null
-      ? "bg-muted text-muted-foreground"
+      ? ["bg-muted text-muted-foreground", "Not scored"]
       : score >= 70
-        ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+        ? ["bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300", "Strong fit"]
         : score >= 50
-          ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
-          : "bg-muted text-muted-foreground";
+          ? ["bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300", "Possible fit"]
+          : ["bg-muted text-muted-foreground", "Weak fit"];
   return (
-    <div
-      className={cn("flex size-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold tabular-nums", tone)}
-      title={score === null ? "Not scored" : `Fit score ${score} of 100`}
-    >
-      {score ?? "–"}
+    <div className="flex w-14 shrink-0 flex-col items-center gap-1" title={score === null ? undefined : `Fit score ${score} of 100`}>
+      <div className={cn("flex size-11 items-center justify-center rounded-full text-sm font-semibold tabular-nums", tone)}>
+        {score ?? "–"}
+      </div>
+      <span className="text-center text-[11px] leading-tight text-muted-foreground">{label}</span>
     </div>
   );
 }
@@ -372,3 +374,16 @@ function postedAgo(days: number): string {
   if (days < 60) return `posted ${Math.floor(days / 7)} weeks ago`;
   return `posted ${Math.floor(days / 30)} months ago`;
 }
+
+/**
+ * Text a source sent in all capitals, in title case. Words of up to three letters stay capitalized as likely
+ * acronyms ("US", "NY", "AWS"), except the common words in SHORT_WORDS.
+ */
+function tidyCase(text: string): string {
+  if (text !== text.toUpperCase() || !/[A-Z]{4}/.test(text)) return text;
+  return text.replace(/[A-Z]+/g, (word) =>
+    word.length <= 3 && !SHORT_WORDS.has(word) ? word : word[0] + word.slice(1).toLowerCase(),
+  );
+}
+
+const SHORT_WORDS = new Set(["NEW", "THE", "AND", "FOR", "OF", "IN", "AT", "TO", "SAN", "LOS", "LAS", "ALL", "ANY"]);

@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import Link from "next/link";
 import { Suspense } from "react";
 
+import { NavLinks } from "@/components/nav-links";
 import { ThemeSync } from "@/components/theme-sync";
 import { UserMenu } from "@/components/user-menu";
 import { THEME_BOOT_SCRIPT } from "@/lib/theme";
@@ -24,15 +24,6 @@ export const metadata: Metadata = {
   description: "Find jobs that match your resume, score the fit and track your applications.",
 };
 
-const NAV = [
-  { href: "/tracker", label: "Tracker" },
-  { href: "/jobs", label: "Jobs" },
-  { href: "/companies", label: "Companies" },
-  { href: "/insights", label: "Insights" },
-  { href: "/resume", label: "Resume" },
-  { href: "/settings", label: "Settings" },
-];
-
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
@@ -48,17 +39,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <ThemeSync />
         </Suspense>
         <header className="border-b">
-          <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-6 py-3">
-            <nav className="flex items-center gap-5 text-sm">
-              <Link href="/tracker" className="font-semibold tracking-tight">
-                Job Finder
-              </Link>
-              {NAV.map((item) => (
-                <Link key={item.href} href={item.href} className="text-muted-foreground hover:text-foreground">
-                  {item.label}
-                </Link>
-              ))}
-            </nav>
+          <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+            <NavLinks />
             <Suspense>
               <UserMenu />
             </Suspense>

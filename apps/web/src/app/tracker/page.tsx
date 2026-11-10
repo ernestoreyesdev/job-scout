@@ -2,6 +2,7 @@ import { Suspense } from "react";
 
 import { ClearTracker } from "@/components/clear-tracker";
 import { JobListFilters } from "@/components/job-filters";
+import { JobListSkeleton } from "@/components/job-list-skeleton";
 import { JobsTable } from "@/components/jobs-table";
 import { Pager } from "@/components/pager";
 import { RecentRuns } from "@/components/recent-runs";
@@ -13,8 +14,8 @@ import { getSignedInSource } from "@/lib/repository";
 
 export default function TrackerPage({ searchParams }: PageProps<"/tracker">) {
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10">
-      <h1 className="text-2xl font-semibold tracking-tight">Find jobs</h1>
+    <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
+      <h1 className="text-2xl font-semibold tracking-tight">Tracker</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Search every company the app knows, or one you name. With your resume, each match gets a fit score. You always
         apply yourself.
@@ -24,7 +25,7 @@ export default function TrackerPage({ searchParams }: PageProps<"/tracker">) {
           <SearchFormData />
         </Suspense>
       </div>
-      <Suspense fallback={<p className="mt-8 text-sm text-muted-foreground">Loading…</p>}>
+      <Suspense fallback={<JobListSkeleton />}>
         <TrackerData searchParams={searchParams} />
       </Suspense>
     </main>
@@ -57,11 +58,18 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
           </div>
         ) : (
           <>
-            <JobListFilters basePath="/tracker" query={query} companies={companies} total={jobs.total} />
-            <div className="mt-2 flex flex-wrap items-center justify-end gap-3">
-              {stale > 0 && <RescoreButton count={stale} />}
-              <ClearTracker count={trackerTotal} />
-            </div>
+            <JobListFilters
+              basePath="/tracker"
+              query={query}
+              companies={companies}
+              total={jobs.total}
+              actions={
+                <>
+                  {stale > 0 && <RescoreButton count={stale} />}
+                  <ClearTracker count={trackerTotal} />
+                </>
+              }
+            />
             {jobs.total === 0 && <p className="mt-4 text-sm text-muted-foreground">No jobs match these filters.</p>}
             <div className="mt-3">
               <JobsTable

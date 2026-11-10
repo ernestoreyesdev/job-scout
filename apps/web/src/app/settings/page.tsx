@@ -38,5 +38,6 @@ async function KeySection() {
 async function ThemeSection() {
   const { repository } = await getSignedInSource();
   const profile = await repository.getProfile();
-  return <ThemeForm theme={profile?.theme ?? "light"} />;
+  const theme = profile?.theme ?? "light";
+  return <ThemeForm key={theme} theme={theme} />;
 }

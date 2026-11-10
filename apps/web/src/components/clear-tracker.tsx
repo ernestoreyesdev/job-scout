@@ -23,8 +23,8 @@ export function ClearTracker({ count }: { count: number }) {
     return (
       <div className="flex items-center gap-3">
         {error && <span className="text-sm text-destructive">{error}</span>}
-        <Button variant="outline" size="sm" onClick={() => setConfirming(true)}>
-          Clear
+        <Button variant="outline" size="sm" className="rounded-full" onClick={() => setConfirming(true)}>
+          Clear tracker
         </Button>
       </div>
     );

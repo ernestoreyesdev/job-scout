@@ -11,7 +11,7 @@ import { MAX_JOBS_PER_SEARCH, POSTED_WITHIN_DAYS, WORKPLACE_TYPES } from "@/lib/
 
 const WORKPLACE_LABELS = { onsite: "On-site", hybrid: "Hybrid", remote: "Remote" } as const;
 
-const FIELD = "space-y-1.5 rounded-lg border bg-background p-3";
+const FIELD = "min-w-36 flex-1 space-y-1.5 rounded-lg border bg-background p-3";
 
 /**
  * Starts a background search run on one company, or every company in the directory when none is given. Scoring
@@ -58,8 +58,8 @@ export function SearchForm({ hasResume }: { hasResume: boolean }) {
             More filters
             <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
           </summary>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-            <div className="rounded-lg border bg-background p-3 sm:col-span-2">
+          <div className="mt-3 flex flex-wrap gap-3">
+            <div className="min-w-64 flex-[2] rounded-lg border bg-background p-3">
               <fieldset className="space-y-1.5">
                 <legend className="text-sm leading-none font-medium">Location type</legend>
                 <div className="flex h-9 items-center gap-4">
@@ -74,11 +74,11 @@ export function SearchForm({ hasResume }: { hasResume: boolean }) {
             </div>
             <div className={FIELD}>
               <Label htmlFor="location">Location</Label>
-              <Input id="location" name="location" placeholder="Tampa or Florida" />
+              <Input id="location" name="location" placeholder="Tampa" />
             </div>
             <div className={FIELD}>
               <Label htmlFor="exclude">Leave out</Label>
-              <Input id="exclude" name="exclude" placeholder="intern, manager" />
+              <Input id="exclude" name="exclude" placeholder="intern, sales" />
             </div>
             <div className={FIELD}>
               <Label htmlFor="postedWithin">Posted</Label>

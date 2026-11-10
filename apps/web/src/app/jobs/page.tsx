@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 
 import { JobListFilters } from "@/components/job-filters";
+import { JobListSkeleton } from "@/components/job-list-skeleton";
 import { JobsTable } from "@/components/jobs-table";
 import { Pager } from "@/components/pager";
 import { RescoreButton } from "@/components/rescore-button";
@@ -10,13 +11,13 @@ import { getSignedInSource } from "@/lib/repository";
 
 export default function JobsPage({ searchParams }: PageProps<"/jobs">) {
   return (
-    <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10">
+    <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
       <h1 className="text-2xl font-semibold tracking-tight">Jobs</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Jobs you&apos;ve saved, tailored, applied to or heard back from. Status changes are dated for you under
         Details; use notes for what the app can&apos;t know, like a recruiter&apos;s name.
       </p>
-      <Suspense fallback={<p className="mt-8 text-sm text-muted-foreground">Loading…</p>}>
+      <Suspense fallback={<JobListSkeleton />}>
         <JobsData searchParams={searchParams} />
       </Suspense>
     </main>
@@ -47,12 +48,8 @@ async function JobsData({ searchParams }: Pick<PageProps<"/jobs">, "searchParams
             companies={companies}
             total={jobs.total}
             statuses={APPLICATION_STATUSES.filter((status) => status !== "new")}
+            actions={stale > 0 && <RescoreButton count={stale} />}
           />
-          {stale > 0 && (
-            <div className="mt-2 flex justify-end">
-              <RescoreButton count={stale} />
-            </div>
-          )}
           {jobs.total === 0 && <p className="mt-4 text-sm text-muted-foreground">No jobs match these filters.</p>}
           <div className="mt-3">
             <JobsTable jobs={jobs.items} showNotes canRemoveFromTracker={false} currentResumeId={resume?.id ?? null} />
