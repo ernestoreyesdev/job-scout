@@ -161,3 +161,7 @@ class FollowUpDraft(BaseModel):
 
 class RelatedTitles(BaseModel):
     titles: list[str] = Field(description="Core job titles employers use for these roles, without seniority words.")
+
+
+class RunStopped(Exception):
+    """The user stopped the run; raised at its next progress update."""

@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from app.agents.schemas import FitScore, JobDetails, Usage
+from app.agents.schemas import FitScore, JobDetails, RunStopped, Usage
 from app.agents.scoring.prompts import FIT_SYSTEM, LabeledJob, fit_blocks
 from app.db import Rest
 from app.sources.base import Posting
@@ -105,6 +105,9 @@ def score_and_save(
     with ThreadPoolExecutor(max_workers=SCORE_CONCURRENCY) as pool:
         futures = {pool.submit(score_one, posting_id, posting): posting for posting_id, posting in todo[1:]}
         for future in as_completed(futures):
+            if isinstance(future.exception(), RunStopped):
+                pool.shutdown(cancel_futures=True)
+                raise RunStopped()
             if future.exception() is not None:
                 logger.warning("scoring %s failed: %s", futures[future].title, future.exception())
                 with lock:

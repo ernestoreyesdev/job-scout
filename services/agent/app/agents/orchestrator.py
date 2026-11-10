@@ -149,7 +149,7 @@ def run_search(
         and posted_within(p, rule.posted_within_days)
     ]
     if not matched:
-        report(f"Found {len(everything)} open jobs, none match.")
+        report("No jobs match your search.")
         return SearchResult(companies, len(everything), 0, 0, 0, 0, unreachable)
 
     matched.sort(key=lambda p: p.posted_at or datetime.min.replace(tzinfo=UTC), reverse=True)
@@ -162,10 +162,7 @@ def run_search(
     already_tracked = len(matched) - len(fresh)
     if not rule.score:
         newest = pick(fresh, rule.limit, per_company)
-        report(
-            f"Found {len(everything)} open jobs, {len(matched)} match, {already_tracked} already tracked. "
-            f"Adding the newest {len(newest)}."
-        )
+        report(f"Adding the {len(newest)} newest matches…")
         if newest:
             user.insert(
                 "applications",
@@ -178,14 +175,11 @@ def run_search(
 
     pool_size = rule.limit * POOL_FACTOR
     if len(fresh) > pool_size:
-        report(f"Shortlisting {min(len(fresh), MAX_TRIAGE * MAX_TRIAGE_BATCHES)} of {len(fresh)} matches by title…")
+        report("Picking the most promising matches…")
         fresh = by_title_fit(fresh, pool_size, client, settings, resume_text, usage, triage)
     pool = pick(fresh, pool_size, per_company)
     todo = with_descriptions(pool, service, describer)
-    report(
-        f"Found {len(everything)} open jobs, {len(matched)} match, {already_tracked} already tracked. "
-        f"Scoring {len(todo)} to keep the best {min(rule.limit, len(todo))}."
-    )
+    report(f"Scoring {len(todo)} {'job' if len(todo) == 1 else 'jobs'} against your resume…")
 
     scoring = score_and_save(
         client=client,
@@ -304,8 +298,6 @@ def directory_postings(
         record_kinds(service, {key: kind for key, kind in kinds.items() if f"{key[0]}/{key[1]}" in fetched})
     record_misses(service, [c for c in directory if f"{c['source']}/{c['board']}" in gone])
     mark_closed(user, service, fetched)
-    if unreachable:
-        report(f"Couldn't reach {len(unreachable)} of {len(boards)} companies; skipped them this time.")
     searched = [entry for entry in live if f"{entry[0]}/{entry[1]}" not in skipped]
     postings = [p for key, found in fetched.items() if key not in skipped for p in found]
     return postings, len(searched), len(unreachable)
@@ -715,7 +707,6 @@ def hiring_thread_postings(
         posts = read_posts()
     except Exception as error:
         logger.warning("reading Hacker News failed: %s", error)
-        report("Couldn't reach Hacker News; skipped its hiring posts this time.")
         return []
     if not posts:
         return []
@@ -726,7 +717,7 @@ def hiring_thread_postings(
     new = [post for post in posts if post.id not in read]
     if not new:
         return saved
-    report(f"Reading {len(new)} new Hacker News hiring posts…")
+    report("Reading recent Hacker News hiring posts…")
     found = extractor(client, settings.discovery_model, new, usage)
     if found:
         service.insert("postings", [p.model_dump(mode="json") for p in found], on_conflict="source,external_id")

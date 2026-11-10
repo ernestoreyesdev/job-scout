@@ -3,7 +3,7 @@ import { describeRun } from "@/lib/runs";
 
 const WHEN = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
-/** Collapsible list of past searches and re-scores with what each one did and the tokens it used. */
+/** Collapsible list of past searches and re-scores with what each one did. */
 export function RecentRuns({ runs }: { runs: AgentRunRow[] }) {
   if (runs.length === 0) return null;
 
@@ -15,7 +15,6 @@ export function RecentRuns({ runs }: { runs: AgentRunRow[] }) {
       <ul className="mt-2 divide-y rounded-lg border">
         {runs.map((run) => {
           const { title, detail } = describeRun(run);
-          const tokens = run.usage ? run.usage.input_tokens + run.usage.output_tokens : 0;
           return (
             <li key={run.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2">
               <span className="w-32 shrink-0 text-muted-foreground tabular-nums">{WHEN.format(new Date(run.created_at))}</span>
@@ -26,7 +25,6 @@ export function RecentRuns({ runs }: { runs: AgentRunRow[] }) {
                   {run.status === "failed" ? run.error : (run.progress ?? run.status)}
                 </span>
               </span>
-              {tokens > 0 && <span className="text-muted-foreground tabular-nums">{tokens.toLocaleString()} tokens</span>}
             </li>
           );
         })}

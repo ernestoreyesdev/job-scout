@@ -8,13 +8,19 @@ export function describeRun(run: AgentRunRow): { title: string; detail: string }
     return { title: "Import companies", detail: ` (${entries.length} ${entries.length === 1 ? "entry" : "entries"})` };
   }
   const input = run.input as Partial<SearchRuleInput>;
-  const detail = [
-    input.keywords?.length ? ` for ${input.keywords.join(", ")}` : "",
-    input.workplace_types?.length ? `, location_type=${input.workplace_types.join("/")}` : "",
-    input.location ? `, location=${input.location}` : "",
-    input.exclude?.length ? `, exclude=${input.exclude.join("/")}` : "",
-    input.posted_within_days ? `, posted_within=${input.posted_within_days}d` : "",
-    input.limit !== undefined ? `, max_jobs=${input.limit}` : "",
-  ].join("");
-  return { title: input.company || "All companies", detail };
+  const parts = [
+    input.keywords?.join(", "),
+    input.workplace_types?.length
+      ? input.workplace_types.map((type, i) => (i ? WORKPLACE_LABELS[type].toLowerCase() : WORKPLACE_LABELS[type])).join(" or ")
+      : null,
+    input.location,
+    input.exclude?.length ? `excluding ${input.exclude.join(", ")}` : null,
+    input.posted_within_days
+      ? `posted in the last ${input.posted_within_days === 1 ? "day" : `${input.posted_within_days} days`}`
+      : null,
+    input.limit !== undefined ? `up to ${input.limit} ${input.limit === 1 ? "job" : "jobs"}` : null,
+  ].filter(Boolean);
+  return { title: input.company || "All companies", detail: parts.length ? ` · ${parts.join(" · ")}` : "" };
 }
+
+const WORKPLACE_LABELS = { onsite: "On-site", hybrid: "Hybrid", remote: "Remote" } as const;

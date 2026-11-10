@@ -12,14 +12,19 @@ from app.sources.base import CompanyNotFound
 
 
 class FakeRest:
-    def __init__(self, conflict: bool = False):
+    def __init__(self, conflict: bool = False, run_status: str = "queued"):
         self.conflict = conflict
+        self.run_status = run_status
         self.updates: list[tuple[str, dict[str, str], dict[str, Any]]] = []
         self.inserts: list[tuple[str, Any]] = []
 
     def update(self, table: str, filters: dict[str, str], patch: dict[str, Any]) -> list[dict[str, Any]]:
         self.updates.append((table, filters, patch))
-        return []
+        wanted = filters.get("status")
+        if wanted and self.run_status not in wanted.removeprefix("eq.").removeprefix("in.(").rstrip(")").split(","):
+            return []
+        self.run_status = patch.get("status", self.run_status)
+        return [patch]
 
     def insert(self, table: str, rows: Any, on_conflict: str | None = None) -> list[dict[str, Any]]:
         if self.conflict:
@@ -54,10 +59,16 @@ def test_a_second_search_while_one_runs_is_refused(monkeypatch: pytest.MonkeyPat
     assert refused.value.detail == "A search is already running. Wait for it to finish."
 
 
-def test_summary_mentions_unreachable_companies():
-    result = SearchResult(companies=30, found=900, matched=12, already_tracked=0, scored=10, failed=0, unreachable=2, kept=10)
+def test_summary_says_how_many_jobs_were_added_without_internal_counts():
+    scored_all = SearchResult(companies=30, found=900, matched=12, already_tracked=2, scored=10, failed=0, unreachable=2, kept=10)
+    unscored = SearchResult(companies=5, found=90, matched=8, already_tracked=0, scored=0, failed=0, kept=1)
+    nothing_new = SearchResult(companies=5, found=90, matched=8, already_tracked=8, scored=0, failed=0)
+    no_match = SearchResult(companies=5, found=90, matched=0, already_tracked=0, scored=0, failed=0)
 
-    assert main.summarize(result) == "Scored and saved 10 jobs from 30 companies, couldn't reach 2 companies."
+    assert main.summarize(scored_all) == "Added 10 jobs."
+    assert main.summarize(unscored) == "Added the 1 newest job."
+    assert main.summarize(nothing_new) == "No new jobs: every match is already on your list."
+    assert main.summarize(no_match) == "No jobs match your search."
 
 
 class RunRest(FakeRest):
@@ -95,7 +106,7 @@ def test_summary_says_when_a_company_has_no_open_jobs():
 def test_summary_says_how_many_of_the_scored_jobs_were_kept():
     result = SearchResult(companies=4, found=300, matched=40, already_tracked=0, scored=20, failed=0, kept=10)
 
-    assert main.summarize(result) == "Scored 20 jobs from 4 companies and kept the top 10."
+    assert main.summarize(result) == "Added your 10 best-matching jobs."
 
 
 def test_import_summary_names_companies_with_no_open_jobs():
@@ -196,3 +207,41 @@ def test_follow_up_needs_an_applied_job(monkeypatch: pytest.MonkeyPatch):
         call_job_endpoint(monkeypatch, main.post_follow_up, db)
 
     assert refused.value.status_code == 400
+
+
+def test_stopping_a_run_marks_it_stopped_only_while_it_is_unfinished(monkeypatch: pytest.MonkeyPatch):
+    db = FakeRest(run_status="running")
+    monkeypatch.setattr(main, "user_db", lambda settings, token: db)
+    user = SimpleNamespace(id="user-1", access_token="token")
+
+    assert main.stop_run("run-1", user, SimpleNamespace()) == {"status": "stopped"}
+    [(table, filters, patch)] = db.updates
+    assert table == "agent_runs" and filters == {"id": "eq.run-1", "status": "in.(queued,running)"}
+    assert patch["status"] == "stopped" and patch["progress"] == "Stopped." and patch["finished_at"]
+
+    with pytest.raises(HTTPException) as finished:
+        main.stop_run("run-1", user, SimpleNamespace())
+    assert finished.value.status_code == 409
+
+
+def test_a_stopped_search_halts_at_its_next_progress_update_and_keeps_its_status(monkeypatch: pytest.MonkeyPatch):
+    db = RunRest()
+    monkeypatch.setattr(main, "user_db", lambda settings, token: db)
+    monkeypatch.setattr(main, "service_db", lambda settings: db)
+    monkeypatch.setattr(main, "decrypt", lambda ciphertext, key: "key")
+    reached: list[str] = []
+
+    def search(**kwargs: Any) -> SearchResult:
+        kwargs["report"]("Checking 5 companies…")
+        db.run_status = "stopped"
+        kwargs["report"]("Scoring 3 jobs…")
+        reached.append("after stop")
+        raise AssertionError("kept running after a stop")
+
+    monkeypatch.setattr(main, "orchestrate_search", search)
+
+    main.run_search("run-1", SearchRule(keywords=["engineer"]), SimpleNamespace(id="u", access_token="t"), SimpleNamespace(agent_encryption_key="k"))
+
+    assert reached == [] and db.run_status == "stopped"
+    final = db.updates[-1]
+    assert final[1] == {"id": "eq.run-1"} and set(final[2]) == {"usage"}

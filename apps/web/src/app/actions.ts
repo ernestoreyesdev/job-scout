@@ -140,13 +140,15 @@ export async function updateApplication(id: string, formData: FormData): Promise
   });
 }
 
-/** Starts a new run with the same rule as a failed one, optionally looking the company up on the web. */
+/** Starts a new run with the same rule as a failed or stopped one, optionally looking the company up on the web. */
 export async function rerunSearch(runId: string, webLookup = false): Promise<ActionResult> {
   return run("/tracker", async () => {
     const { repository } = await getSignedInSource();
     const previous = await repository.getRun(runId);
     if (!previous) throw new Error("Search not found.");
-    if (previous.status !== "failed") throw new Error("Only failed searches can be re-run.");
+    if (previous.status !== "failed" && previous.status !== "stopped") {
+      throw new Error("Only failed or stopped searches can be re-run.");
+    }
 
     const input = previous.input as Partial<SearchRuleInput>;
     if (!input.keywords?.length) throw new Error("This search has no keywords. Start a new one instead.");
@@ -236,4 +238,11 @@ export async function draftFollowUp(id: string): Promise<FollowUpResult> {
     unstable_rethrow(error);
     return { ok: false, error: error instanceof Error ? error.message : "Could not draft a follow-up." };
   }
+}
+
+/** Stops a queued or running search, re-score or import; jobs it already added stay. */
+export async function stopRun(runId: string): Promise<ActionResult> {
+  return run(["/tracker", "/jobs"], async () => {
+    await callAgent(`/runs/${encodeURIComponent(runId)}/stop`, { method: "POST" });
+  });
 }

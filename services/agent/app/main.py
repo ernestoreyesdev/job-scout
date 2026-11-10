@@ -1,5 +1,6 @@
 import io
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
@@ -18,7 +19,7 @@ from app.agents.orchestrator import (
 )
 from app.agents.follow_up.agent import FollowUpError, draft_follow_up
 from app.agents.gap_analysis.agent import GapAnalysisError, analyze_gaps
-from app.agents.schemas import AnthropicKeyRequest, CompanyImport, SearchRule, Usage
+from app.agents.schemas import AnthropicKeyRequest, CompanyImport, RunStopped, SearchRule, Usage
 from app.auth import CurrentUser, current_user
 from app.config import Settings, get_settings
 from app.crypto import decrypt, encrypt, key_hint
@@ -128,12 +129,8 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
     db = user_db(settings, user.access_token)
     service = service_db(settings)
     usage = Usage()
-    db.update("agent_runs", {"id": f"eq.{run_id}"}, {"status": "running", "progress": "Starting…"})
-
-    def report(message: str) -> None:
-        db.update("agent_runs", {"id": f"eq.{run_id}"}, {"progress": message})
-
-    progress = None
+    report = start_run(db, run_id)
+    outcome: dict[str, Any] = {}
     try:
         api_key = anthropic_key(service, user.id, settings)
         if not api_key:
@@ -158,26 +155,16 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
             usage=usage,
             report=report,
         )
-        status, error, error_code = "done", None, None
-        progress = summarize(result)
+        outcome = {"status": "done", "error": None, "error_code": None, "progress": summarize(result)}
+    except RunStopped:
+        pass
     except CompanyNotFound as exc:
-        status, error, error_code = "failed", str(exc), "company_not_found"
+        outcome = {"status": "failed", "error": str(exc), "error_code": "company_not_found", "progress": None}
     except Exception as exc:
         logger.exception("search run %s failed", run_id)
-        status, error, error_code = "failed", str(exc) or exc.__class__.__name__, None
+        outcome = {"status": "failed", "error": str(exc) or exc.__class__.__name__, "error_code": None, "progress": None}
 
-    db.update(
-        "agent_runs",
-        {"id": f"eq.{run_id}"},
-        {
-            "status": status,
-            "error": error,
-            "error_code": error_code,
-            "progress": progress,
-            "usage": usage.model_dump(),
-            "finished_at": datetime.now(UTC).isoformat(),
-        },
-    )
+    finish_run(db, run_id, outcome, usage)
 
 
 def extract_pdf_text(data: bytes) -> str:
@@ -191,23 +178,18 @@ def summarize(result: SearchResult) -> str:
     """Final one-line progress for a finished search."""
     if result.company and result.found == 0:
         return f"Found {result.company}, but it has no open jobs listed."
-    companies = "1 company" if result.companies == 1 else f"{result.companies} companies"
-    unreachable = f" Couldn't reach {result.unreachable} more." if result.unreachable else ""
     if result.matched == 0:
-        return f"Found {result.found} open jobs at {companies}, none match.{unreachable}"
-    if result.scored == 0 and result.kept:
-        parts = [f"Added the {result.kept} newest jobs from {companies}"]
-    elif result.kept < result.scored:
-        parts = [f"Scored {result.scored} jobs from {companies} and kept the top {result.kept}"]
-    else:
-        parts = [f"Scored and saved {result.scored} jobs from {companies}"]
-    if result.failed:
-        parts.append(f"{result.failed} failed")
-    if result.already_tracked:
-        parts.append(f"skipped {result.already_tracked} already tracked")
-    if result.unreachable:
-        parts.append(f"couldn't reach {result.unreachable} {'company' if result.unreachable == 1 else 'companies'}")
-    return ", ".join(parts) + "."
+        return "No jobs match your search."
+    if result.kept == 0:
+        if result.failed:
+            return "Couldn't score the matching jobs. Try again."
+        return "No new jobs: every match is already on your list."
+    jobs = "job" if result.kept == 1 else "jobs"
+    if result.scored == 0:
+        return f"Added the {result.kept} newest {jobs}."
+    if result.kept < result.scored:
+        return f"Added your {result.kept} best-matching {jobs}."
+    return f"Added {result.kept} {jobs}."
 
 
 def fail_runs(db: Rest, filters: dict[str, str], error: str) -> None:
@@ -238,12 +220,8 @@ def run_rescore(run_id: str, user: CurrentUser, settings: Settings) -> None:
     db = user_db(settings, user.access_token)
     service = service_db(settings)
     usage = Usage()
-    db.update("agent_runs", {"id": f"eq.{run_id}"}, {"status": "running", "progress": "Starting…"})
-
-    def report(message: str) -> None:
-        db.update("agent_runs", {"id": f"eq.{run_id}"}, {"progress": message})
-
-    progress = None
+    report = start_run(db, run_id)
+    outcome: dict[str, Any] = {}
     try:
         api_key = anthropic_key(service, user.id, settings)
         if not api_key:
@@ -264,27 +242,19 @@ def run_rescore(run_id: str, user: CurrentUser, settings: Settings) -> None:
             usage=usage,
             report=report,
         )
-        status, error = "done", None
         progress = (
             f"Scored {count} {'job' if count == 1 else 'jobs'} with your current resume."
             if count
             else "Every job is already scored with your current resume."
         )
+        outcome = {"status": "done", "error": None, "progress": progress}
+    except RunStopped:
+        pass
     except Exception as exc:
         logger.exception("rescore run %s failed", run_id)
-        status, error = "failed", str(exc) or exc.__class__.__name__
+        outcome = {"status": "failed", "error": str(exc) or exc.__class__.__name__, "progress": None}
 
-    db.update(
-        "agent_runs",
-        {"id": f"eq.{run_id}"},
-        {
-            "status": status,
-            "error": error,
-            "progress": progress,
-            "usage": usage.model_dump(),
-            "finished_at": datetime.now(UTC).isoformat(),
-        },
-    )
+    finish_run(db, run_id, outcome, usage)
 
 
 @app.post("/runs/import", status_code=202)
@@ -306,12 +276,8 @@ def run_import(run_id: str, body: CompanyImport, user: CurrentUser, settings: Se
     db = user_db(settings, user.access_token)
     service = service_db(settings)
     usage = Usage()
-    db.update("agent_runs", {"id": f"eq.{run_id}"}, {"status": "running", "progress": "Starting…"})
-
-    def report(message: str) -> None:
-        db.update("agent_runs", {"id": f"eq.{run_id}"}, {"progress": message})
-
-    progress = None
+    report = start_run(db, run_id)
+    outcome: dict[str, Any] = {}
     try:
         api_key = anthropic_key(service, user.id, settings)
         if not api_key:
@@ -325,23 +291,14 @@ def run_import(run_id: str, body: CompanyImport, user: CurrentUser, settings: Se
             usage=usage,
             report=report,
         )
-        status, error = "done", None
-        progress = summarize_import(result)
+        outcome = {"status": "done", "error": None, "progress": summarize_import(result)}
+    except RunStopped:
+        pass
     except Exception as exc:
         logger.exception("import run %s failed", run_id)
-        status, error = "failed", str(exc) or exc.__class__.__name__
+        outcome = {"status": "failed", "error": str(exc) or exc.__class__.__name__, "progress": None}
 
-    db.update(
-        "agent_runs",
-        {"id": f"eq.{run_id}"},
-        {
-            "status": status,
-            "error": error,
-            "progress": progress,
-            "usage": usage.model_dump(),
-            "finished_at": datetime.now(UTC).isoformat(),
-        },
-    )
+    finish_run(db, run_id, outcome, usage)
 
 
 def summarize_import(result: ImportResult) -> str:
@@ -422,3 +379,40 @@ def anthropic_key(service: Rest, user_id: str, settings: Settings) -> str | None
     if credentials:
         return decrypt(credentials[0]["ciphertext"], settings.agent_encryption_key)
     return settings.anthropic_api_key
+
+
+def start_run(db: Rest, run_id: str) -> Callable[[str], None]:
+    """
+    Marks a queued run running and returns its progress reporter. Progress is
+    written only while the run is still running; once the user has stopped it,
+    the next report raises RunStopped.
+    """
+    db.update("agent_runs", {"id": f"eq.{run_id}", "status": "eq.queued"}, {"status": "running", "progress": "Starting…"})
+
+    def report(message: str) -> None:
+        if not db.update("agent_runs", {"id": f"eq.{run_id}", "status": "eq.running"}, {"progress": message}):
+            raise RunStopped()
+
+    return report
+
+
+def finish_run(db: Rest, run_id: str, outcome: dict[str, Any], usage: Usage) -> None:
+    """Saves a run's outcome while it's still running; a run the user stopped keeps its status and gets only its usage."""
+    finished = {"usage": usage.model_dump(), "finished_at": datetime.now(UTC).isoformat()}
+    if outcome and db.update("agent_runs", {"id": f"eq.{run_id}", "status": "eq.running"}, {**outcome, **finished}):
+        return
+    db.update("agent_runs", {"id": f"eq.{run_id}"}, {"usage": finished["usage"]})
+
+
+@app.post("/runs/{run_id}/stop")
+def stop_run(run_id: str, user: User, settings: Config) -> dict[str, str]:
+    """Stops a queued or running run; its background task halts at its next progress update."""
+    db = user_db(settings, user.access_token)
+    stopped = db.update(
+        "agent_runs",
+        {"id": f"eq.{run_id}", "status": UNFINISHED},
+        {"status": "stopped", "progress": "Stopped.", "finished_at": datetime.now(UTC).isoformat()},
+    )
+    if not stopped:
+        raise HTTPException(409, "This search already finished.")
+    return {"status": "stopped"}

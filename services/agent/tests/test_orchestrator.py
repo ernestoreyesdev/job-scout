@@ -18,7 +18,7 @@ from app.agents.orchestrator import (
     one_per_job,
     run_search,
 )
-from app.agents.schemas import CompanyName, FitScore, JobDetails, SearchRule, Usage
+from app.agents.schemas import CompanyName, FitScore, JobDetails, RunStopped, SearchRule, Usage
 from app.agents.scoring.agent import ScoringError
 from app.config import Settings
 from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, Posting
@@ -167,7 +167,7 @@ def run(
         user=user,
         service=service,
         usage=usage,
-        report=progress.append,
+        report=overrides.pop("report", progress.append),
         finder=overrides.pop("finder", lambda company: CompanyBoard("ashby", "acme", "Acme", jobs)),
         triage=overrides.pop("triage", newest_first),
         namer=overrides.pop("namer", lambda client, model, boards, usage: {}),
@@ -197,7 +197,7 @@ def test_scores_and_saves_every_match():
     assert saved["fit_score"] == 72 and saved["gaps"] == ["Kubernetes"] and "status" not in saved
     assert (usage.input_tokens, usage.output_tokens) == (300, 60)
     assert progress[0] == "Finding Acme's open jobs…"
-    assert progress[1] == "Found 4 open jobs, 3 match, 0 already tracked. Scoring 3 to keep the best 3."
+    assert progress[1] == "Scoring 3 jobs against your resume…"
     assert result.kept == 3 and not any(table == "applications" for table, _, _ in user.updates)
     assert progress[-1].startswith("Scored 3 of 3: ")
 
@@ -217,7 +217,7 @@ def test_skips_tracked_jobs_and_they_do_not_count_toward_the_limit():
 
     assert (result.already_tracked, result.scored, result.kept) == (1, 2, 1)
     assert saved_ids(user) == ["posting-3", "posting-4"]
-    assert progress[1] == "Found 4 open jobs, 3 match, 1 already tracked. Scoring 2 to keep the best 1."
+    assert progress[1] == "Scoring 2 jobs against your resume…"
     assert hidden_ids(user) == ["posting-4"]
 
 
@@ -461,14 +461,13 @@ def test_a_board_that_fails_once_is_retried():
     assert result.unreachable == 0 and saved_ids(user) == ["posting-1"]
 
 
-def test_a_board_that_keeps_failing_is_reported_and_kept():
+def test_a_board_that_keeps_failing_is_counted_and_kept():
     (result, _, _, service, progress, _), fetched, _ = directory_run(
         full_directory("acme"), [], {"acme": [REMOTE_JOB]}, flaky={"acme": 2}
     )
 
     assert fetched.count(("ashby", "acme", "Acme")) == 2
     assert result.unreachable == 1
-    assert "Couldn't reach 1 of 26 companies; skipped them this time." in progress
     assert not any(filters == {"id": "eq.id-acme"} for _, filters, _ in service.updates)
     assert ("companies", {"id": "eq.id-acme"}) not in service.deletes
 
@@ -703,7 +702,7 @@ def test_a_large_match_set_is_shortlisted_by_title_before_scoring():
     )
 
     assert calls == [(7, 4)]
-    assert "Shortlisting 7 of 7 matches by title…" in progress
+    assert "Picking the most promising matches…" in progress
     assert saved_ids(user) == ["posting-5", "posting-7"] and result.kept == 1
 
 
@@ -963,7 +962,7 @@ def test_an_unreachable_hacker_news_is_skipped():
         raise RuntimeError("timed out")
 
     assert hiring_thread_postings(None, SETTINGS, FakeRest(), Usage(), progress.append, unreachable, None) == []
-    assert progress == ["Couldn't reach Hacker News; skipped its hiring posts this time."]
+    assert progress == []
 
 
 def test_duplicate_names_keep_the_board_with_the_most_jobs():
@@ -1102,3 +1101,16 @@ def test_labeled_jobs_are_the_most_recent_of_each_label():
         ("eq.good", "updated_at.desc", "15"),
         ("eq.bad", "updated_at.desc", "15"),
     ]
+
+
+def test_a_stop_during_parallel_scoring_ends_the_run():
+    jobs = [posting(str(n), f"Software Engineer {n}") for n in range(1, 11)]
+    reports: list[str] = []
+
+    def report(message: str) -> None:
+        reports.append(message)
+        if message.startswith("Scored 2 of"):
+            raise RunStopped()
+
+    with pytest.raises(RunStopped):
+        run(rule=SearchRule(company="Acme", keywords=["software engineer"], limit=10), jobs=jobs, report=report)

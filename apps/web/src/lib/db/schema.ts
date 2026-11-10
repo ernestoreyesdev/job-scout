@@ -43,7 +43,7 @@ export const FOLLOW_UP_DAYS = 7;
 
 export type ApplicationStatusRow = (typeof APPLICATION_STATUSES)[number];
 
-export type RunStatusRow = "queued" | "running" | "done" | "failed";
+export type RunStatusRow = "queued" | "running" | "done" | "failed" | "stopped";
 
 export const WORKPLACE_TYPES = ["onsite", "hybrid", "remote"] as const;
 
