@@ -9,10 +9,12 @@ import {
   MAX_COMPANY_IMPORT,
   MAX_JOBS_PER_SEARCH,
   POSTED_WITHIN_DAYS,
+  THEMES,
   WORKPLACE_TYPES,
   type ApplicationStatusRow,
   type FitLabelRow,
   type SearchRuleInput,
+  type ThemeRow,
   type WorkplaceTypeRow,
 } from "@/lib/db";
 import { callAgent } from "@/lib/agent";
@@ -244,5 +246,13 @@ export async function draftFollowUp(id: string): Promise<FollowUpResult> {
 export async function stopRun(runId: string): Promise<ActionResult> {
   return run(["/tracker", "/jobs"], async () => {
     await callAgent(`/runs/${encodeURIComponent(runId)}/stop`, { method: "POST" });
+  });
+}
+
+export async function saveTheme(theme: string): Promise<ActionResult> {
+  return run("/settings", async () => {
+    if (!THEMES.includes(theme as ThemeRow)) throw new Error("Unknown theme.");
+    const { repository } = await getSignedInSource();
+    await repository.saveTheme(theme as ThemeRow);
   });
 }

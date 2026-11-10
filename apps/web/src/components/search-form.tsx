@@ -11,6 +11,8 @@ import { MAX_JOBS_PER_SEARCH, POSTED_WITHIN_DAYS, WORKPLACE_TYPES } from "@/lib/
 
 const WORKPLACE_LABELS = { onsite: "On-site", hybrid: "Hybrid", remote: "Remote" } as const;
 
+const FIELD = "space-y-1.5 rounded-lg border bg-background p-3";
+
 /**
  * Starts a background search run on one company, or every company in the directory when none is given. Scoring
  * against the resume is on by default and only available once one is uploaded.
@@ -49,35 +51,36 @@ export function SearchForm({ hasResume }: { hasResume: boolean }) {
         </Button>
       </div>
       <div className="mt-3 flex items-start gap-4 text-sm">
-      {/* Closed filters still submit their values; the server validates them. */}
-      <details className="group min-w-0 flex-1">
-        <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-muted-foreground select-none hover:text-foreground">
-          <SlidersHorizontal className="size-3.5" />
-          More filters
-          <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
-        </summary>
-        <div className="mt-3 grid gap-4 rounded-lg bg-muted/40 p-3 sm:grid-cols-2 lg:grid-cols-5">
-          <fieldset className="space-y-1.5 lg:col-span-2">
-            <legend className="text-sm leading-none font-medium">Location type</legend>
-            <div className="flex h-9 items-center gap-4">
-              {WORKPLACE_TYPES.map((type) => (
-                <label key={type} className="flex items-center gap-1.5">
-                  <input type="checkbox" name="workplace" value={type} className="size-4 accent-primary" />
-                  {WORKPLACE_LABELS[type]}
-                </label>
-              ))}
+        {/* Closed filters still submit their values; the server validates them. */}
+        <details className="group min-w-0 flex-1">
+          <summary className="inline-flex cursor-pointer list-none items-center gap-1.5 text-muted-foreground select-none hover:text-foreground">
+            <SlidersHorizontal className="size-3.5" />
+            More filters
+            <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+            <div className="rounded-lg border bg-background p-3 sm:col-span-2">
+              <fieldset className="space-y-1.5">
+                <legend className="text-sm leading-none font-medium">Location type</legend>
+                <div className="flex h-9 items-center gap-4">
+                  {WORKPLACE_TYPES.map((type) => (
+                    <label key={type} className="flex items-center gap-1.5">
+                      <input type="checkbox" name="workplace" value={type} className="size-4 accent-primary" />
+                      {WORKPLACE_LABELS[type]}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
             </div>
-          </fieldset>
-          <div className="space-y-1.5">
-            <Label htmlFor="location">Location</Label>
-            <Input id="location" name="location" placeholder="Tampa or Florida" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="exclude">Leave out</Label>
-            <Input id="exclude" name="exclude" placeholder="intern, manager" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
+            <div className={FIELD}>
+              <Label htmlFor="location">Location</Label>
+              <Input id="location" name="location" placeholder="Tampa or Florida" />
+            </div>
+            <div className={FIELD}>
+              <Label htmlFor="exclude">Leave out</Label>
+              <Input id="exclude" name="exclude" placeholder="intern, manager" />
+            </div>
+            <div className={FIELD}>
               <Label htmlFor="postedWithin">Posted</Label>
               <select
                 id="postedWithin"
@@ -93,21 +96,20 @@ export function SearchForm({ hasResume }: { hasResume: boolean }) {
                 ))}
               </select>
             </div>
-            <div className="space-y-1.5">
+            <div className={FIELD}>
               <Label htmlFor="limit">Max jobs</Label>
               <Input id="limit" name="limit" type="number" min={1} max={MAX_JOBS_PER_SEARCH} defaultValue={10} />
             </div>
           </div>
-        </div>
-      </details>
-      <label
-        className="inline-flex shrink-0 cursor-pointer items-center gap-2 text-muted-foreground"
-        title={hasResume ? undefined : "Upload a resume to score jobs"}
-      >
-        Score with my resume
-        <input type="checkbox" name="score" defaultChecked={hasResume} disabled={!hasResume} className="peer sr-only" />
-        <span className="relative h-5 w-9 rounded-full bg-muted-foreground/30 transition-colors peer-checked:bg-primary peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50 peer-disabled:opacity-50 after:absolute after:top-0.5 after:left-0.5 after:size-4 after:rounded-full after:bg-background after:shadow-xs after:transition-transform peer-checked:after:translate-x-4" />
-      </label>
+        </details>
+        <label
+          className="inline-flex shrink-0 cursor-pointer items-center gap-2 text-muted-foreground"
+          title={hasResume ? undefined : "Upload a resume to score jobs"}
+        >
+          Score with my resume
+          <input type="checkbox" name="score" defaultChecked={hasResume} disabled={!hasResume} className="peer sr-only" />
+          <span className="relative h-5 w-9 rounded-full bg-muted-foreground/30 transition-colors peer-checked:bg-primary peer-focus-visible:ring-3 peer-focus-visible:ring-ring/50 peer-disabled:opacity-50 after:absolute after:top-0.5 after:left-0.5 after:size-4 after:rounded-full after:bg-background after:shadow-xs after:transition-transform peer-checked:after:translate-x-4" />
+        </label>
       </div>
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
     </form>

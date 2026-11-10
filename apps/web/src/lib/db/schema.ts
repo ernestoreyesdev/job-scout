@@ -67,6 +67,7 @@ export const MAX_COMPANY_IMPORT = 100;
 export type ProfileRow = {
   user_id: string;
   anthropic_key_hint: string | null;
+  theme: ThemeRow;
   updated_at: string;
 };
 
@@ -184,6 +185,10 @@ export type CompanySort = keyof typeof COMPANY_SORTS;
 export const FIT_LABELS = ["good", "bad"] as const;
 
 export type FitLabelRow = (typeof FIT_LABELS)[number];
+
+export const THEMES = ["light", "dark"] as const;
+
+export type ThemeRow = (typeof THEMES)[number];
 
 export type SalaryPeriodRow = "year" | "month" | "week" | "day" | "hour";
 

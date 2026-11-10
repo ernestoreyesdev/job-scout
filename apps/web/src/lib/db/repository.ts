@@ -13,6 +13,7 @@ import type {
   PostingRow,
   ProfileRow,
   ResumeRow,
+  ThemeRow,
 } from "./schema";
 import { FOLLOW_UP_DAYS, GHOST_JOB_DAYS, SKIPPED_COMPANY_KINDS } from "./schema";
 import type { FunnelJob, ScoredJob } from "../insights";
@@ -391,5 +392,11 @@ export class JobFinderRepository {
     if (error) throw error;
     const cutoff = Date.now() - GHOST_JOB_DAYS * DAY_MS;
     return data.filter((job) => new Date(job.posting.posted_at ?? job.posting.created_at).getTime() <= cutoff).length;
+  }
+
+  /** Saves the user's color theme, creating their profile row if it doesn't exist yet. */
+  async saveTheme(theme: ThemeRow): Promise<void> {
+    const { error } = await this.client.from("profiles").upsert({ user_id: await this.userId(), theme });
+    if (error) throw error;
   }
 }

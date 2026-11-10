@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 
 import { KeyForm } from "@/components/key-form";
+import { ThemeForm } from "@/components/theme-form";
 import { getSignedInSource } from "@/lib/repository";
 
 export default function SettingsPage() {
@@ -17,6 +18,13 @@ export default function SettingsPage() {
           <KeySection />
         </Suspense>
       </section>
+      <section className="mt-10">
+        <h2 className="font-medium">Appearance</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Your choice is saved to your account and used on every device.</p>
+        <Suspense fallback={<p className="mt-4 text-sm text-muted-foreground">Loading…</p>}>
+          <ThemeSection />
+        </Suspense>
+      </section>
     </main>
   );
 }
@@ -25,4 +33,10 @@ async function KeySection() {
   const { repository } = await getSignedInSource();
   const profile = await repository.getProfile();
   return <KeyForm hint={profile?.anthropic_key_hint ?? null} />;
+}
+
+async function ThemeSection() {
+  const { repository } = await getSignedInSource();
+  const profile = await repository.getProfile();
+  return <ThemeForm theme={profile?.theme ?? "light"} />;
 }

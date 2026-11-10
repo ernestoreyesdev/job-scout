@@ -34,8 +34,12 @@ export function JobListFilters({
   const active = Object.keys(query.params).length > 0;
 
   return (
-    <form method="get" action={basePath} className="flex flex-wrap items-center gap-2 text-sm">
-      <span className="mr-auto font-medium">
+    <form
+      method="get"
+      action={basePath}
+      className="flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3 text-sm shadow-xs"
+    >
+      <span className="mr-auto pl-1 font-medium">
         {total} {total === 1 ? "job" : "jobs"}
       </span>
       <select name="sort" defaultValue={query.sort} aria-label="Sort" className={PILL}>
