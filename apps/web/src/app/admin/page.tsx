@@ -588,6 +588,7 @@ function RefreshSection({
   const names = new Map(companies.map((company) => [`${company.source}/${company.board}`, company.name]));
   const totalBytes = boards.reduce((sum, row) => sum + row.bytes, 0);
   const unembedded = boards.reduce((sum, row) => sum + row.open_jobs - row.embedded, 0);
+  const worth = boards.filter((row, rank) => rank < SLOWEST_BOARDS || row.failures > 0);
 
   return (
     <SectionCard
@@ -632,49 +633,23 @@ function RefreshSection({
       )}
       {boards.length > 0 && (
         <>
-          <p className="mt-6 text-sm font-medium">By board, {size(totalBytes)} saved in all</p>
+          <p className="mt-6 text-sm font-medium">
+            {boards.length} boards, {size(totalBytes)} saved in all
+          </p>
           {unembedded > 0 && (
             <p className="text-xs text-muted-foreground">
               {unembedded.toLocaleString()} open {unembedded === 1 ? "job has" : "jobs have"} no embedding yet, so searches rank{" "}
               {unembedded === 1 ? "it" : "them"} after the rest. Each refresh embeds up to 1,000.
             </p>
           )}
-          <Table className="mt-1">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Company</TableHead>
-                <TableHead>Board</TableHead>
-                <TableHead className="text-right">Median</TableHead>
-                <TableHead className="text-right">Last</TableHead>
-                <TableHead className="text-right">Failed</TableHead>
-                <TableHead className="text-right">Open jobs</TableHead>
-                <TableHead className="text-right">Embedded</TableHead>
-                <TableHead className="text-right">Saved jobs</TableHead>
-                <TableHead className="text-right">Space</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {boards.map((row) => (
-                <TableRow key={row.board}>
-                  <TableCell>{names.get(row.board) ?? "–"}</TableCell>
-                  <TableCell className="max-w-56 truncate font-mono text-xs" title={row.board}>
-                    {row.board}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">{row.median_ms === null ? "–" : seconds(row.median_ms)}</TableCell>
-                  <TableCell className={cn("text-right tabular-nums", row.last_outcome !== null && row.last_outcome !== "ok" && "text-destructive")}>
-                    {row.last_ms === null ? "–" : row.last_outcome === "ok" ? seconds(row.last_ms) : row.last_outcome}
-                  </TableCell>
-                  <TableCell className={cn("text-right tabular-nums", row.failures > 0 && "text-destructive")}>{row.failures}</TableCell>
-                  <TableCell className="text-right tabular-nums">{row.open_jobs.toLocaleString()}</TableCell>
-                  <TableCell className={cn("text-right tabular-nums", row.embedded < row.open_jobs && "text-amber-600 dark:text-amber-400")}>
-                    {row.embedded.toLocaleString()}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">{row.saved_jobs.toLocaleString()}</TableCell>
-                  <TableCell className="text-right tabular-nums">{size(row.bytes)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <p className="mt-4 text-sm font-medium">Slowest and failing boards</p>
+          <RefreshBoardTable boards={worth} names={names} />
+          {boards.length > worth.length && (
+            <details className="mt-4">
+              <summary className="cursor-pointer text-sm font-medium">All boards ({boards.length})</summary>
+              <RefreshBoardTable boards={boards} names={names} />
+            </details>
+          )}
           <p className="mt-3 text-xs text-muted-foreground">
             Fetching boards costs nothing per call. What they use is the refresh&apos;s time, against Vercel&apos;s 300-second
             limit, and database space, against Supabase&apos;s 500 MB free plan.
@@ -682,5 +657,49 @@ function RefreshSection({
         </>
       )}
     </SectionCard>
+  );
+}
+
+const SLOWEST_BOARDS = 15;
+
+/** One row per board: fetch times, failures, jobs, embeddings and the space its saved jobs take. */
+function RefreshBoardTable({ boards, names }: { boards: AdminStats["refresh_boards"]; names: Map<string, string> }) {
+  return (
+    <Table className="mt-1">
+      <TableHeader>
+        <TableRow>
+          <TableHead>Company</TableHead>
+          <TableHead>Board</TableHead>
+          <TableHead className="text-right">Median</TableHead>
+          <TableHead className="text-right">Last</TableHead>
+          <TableHead className="text-right">Failed</TableHead>
+          <TableHead className="text-right">Open jobs</TableHead>
+          <TableHead className="text-right">Embedded</TableHead>
+          <TableHead className="text-right">Saved jobs</TableHead>
+          <TableHead className="text-right">Space</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {boards.map((row) => (
+          <TableRow key={row.board}>
+            <TableCell>{names.get(row.board) ?? "–"}</TableCell>
+            <TableCell className="max-w-56 truncate font-mono text-xs" title={row.board}>
+              {row.board}
+            </TableCell>
+            <TableCell className="text-right tabular-nums">{row.median_ms === null ? "–" : seconds(row.median_ms)}</TableCell>
+            <TableCell className={cn("text-right tabular-nums", row.last_outcome !== null && row.last_outcome !== "ok" && "text-destructive")}>
+              {row.last_ms === null ? "–" : row.last_outcome === "ok" ? seconds(row.last_ms) : row.last_outcome}
+            </TableCell>
+            <TableCell className={cn("text-right tabular-nums", row.failures > 0 && "text-destructive")}>{row.failures}</TableCell>
+            <TableCell className="text-right tabular-nums">{row.open_jobs.toLocaleString()}</TableCell>
+            <TableCell className={cn("text-right tabular-nums", row.embedded < row.open_jobs && "text-amber-600 dark:text-amber-400")}>
+              {row.embedded.toLocaleString()}
+            </TableCell>
+            <TableCell className="text-right tabular-nums">{row.saved_jobs.toLocaleString()}</TableCell>
+            <TableCell className="text-right tabular-nums">{size(row.bytes)}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }
