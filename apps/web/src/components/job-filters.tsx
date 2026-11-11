@@ -4,7 +4,7 @@ import Link from "next/link";
 import type { ChangeEvent, ReactNode } from "react";
 
 import { APPLICATION_STATUSES, type ApplicationStatusRow } from "@/lib/db";
-import type { JobQuery } from "@/lib/job-query";
+import { jobListHref, type JobQuery } from "@/lib/job-query";
 
 const SORT_LABELS = {
   desc: "Best match",
@@ -19,6 +19,7 @@ const PILL = "h-8 rounded-full border border-input bg-transparent px-3 text-sm s
  * Job count plus status, company, sort, salary, closed-job and clearance controls for the Tracker or Jobs, with the
  * page's own `actions` at the end; each control submits the form as a plain GET to the page as soon as it changes. The salary minimum keeps jobs that
  * state a yearly salary reaching it; jobs whose details were never read pass both the salary and clearance filters.
+ * Jobs' rated view stays selected through filter changes and Reset.
  */
 export function JobListFilters({
   basePath,
@@ -35,11 +36,13 @@ export function JobListFilters({
   actions?: ReactNode;
   statuses?: readonly ApplicationStatusRow[];
 }) {
-  const active = Object.keys(query.params).length > 0;
+  const kept: Record<string, string> = query.rated ? { view: "rated" } : {};
+  const active = Object.keys(query.params).length > Object.keys(kept).length;
 
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3 text-sm shadow-xs">
       <form method="get" action={basePath} className="flex flex-1 flex-wrap items-center gap-2">
+        {query.rated && <input type="hidden" name="view" value="rated" />}
         <span className="mr-auto pl-1 font-medium">
           {total} {total === 1 ? "job" : "jobs"}
         </span>
@@ -100,7 +103,7 @@ export function JobListFilters({
           Apply filters
         </button>
         {active && (
-          <Link href={basePath} className="text-muted-foreground hover:text-foreground">
+          <Link href={jobListHref(basePath, kept)} className="text-muted-foreground hover:text-foreground">
             Reset
           </Link>
         )}

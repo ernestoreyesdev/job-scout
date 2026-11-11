@@ -111,6 +111,9 @@ class FakeRest:
         self.snapshot_params: list[dict[str, str]] = []
         self.tracked_postings: list[dict[str, Any]] = []
         self.labeled: list[dict[str, Any]] = []
+        self.unembedded_labeled: list[dict[str, Any]] = []
+        self.unembedded: list[dict[str, str]] = []
+        self.rpcs: list[tuple[str, dict[str, Any]]] = []
         self.inserts: list[tuple[str, Any]] = []
         self.updates: list[tuple[str, dict[str, str], dict[str, Any]]] = []
         self.deletes: list[tuple[str, dict[str, str]]] = []
@@ -126,8 +129,14 @@ class FakeRest:
         if table == "board_snapshots":
             self.snapshot_params.append(params)
             return self.snapshots
-        if "fit_label" in params:
+        if table == "postings":
+            return self.unembedded
+        if "posting.embedding" in params:
+            return self.unembedded_labeled
+        if params.get("fit_label", "").startswith("eq."):
             return [row for row in self.labeled if params["fit_label"] == f"eq.{row['fit_label']}"]
+        if "fit_label" in params:
+            return self.labeled
         if "posting:" in params.get("select", ""):
             return self.tracked_postings
         return [{"posting_id": posting_id} for posting_id in self.tracked]
@@ -145,6 +154,10 @@ class FakeRest:
 
     def delete(self, table: str, filters: dict[str, str]) -> None:
         self.deletes.append((table, filters))
+
+    def rpc(self, function: str, args: dict[str, Any]) -> Any:
+        self.rpcs.append((function, args))
+        return self.labeled if function == "nearest_labeled_jobs" else None
 
     def inserted(self, table: str) -> list[Any]:
         return [rows for name, rows in self.inserts if name == table]
@@ -179,9 +192,14 @@ def run(
         namer=overrides.pop("namer", lambda client, model, boards, usage: {}),
         read_posts=overrides.pop("read_posts", lambda: []),
         expander=overrides.pop("expander", lambda client, model, keywords, usage: []),
+        embed=overrides.pop("embed", fake_embed),
         **overrides,
     )
     return result, messages, user, service, progress, usage
+
+
+def fake_embed(texts: list[str]) -> list[list[float]]:
+    return [[float(len(text))] for text in texts]
 
 
 def newest_first(client: Any, model: str, resume_text: str, postings: list[Posting], count: int, usage: Usage) -> list[int]:
@@ -1102,19 +1120,47 @@ def test_labeled_jobs_are_left_out_until_each_label_has_enough():
     assert "<labeled_jobs>" not in messages.calls[0]["messages"][0]["content"][0]["text"]
 
 
-def test_labeled_jobs_are_the_most_recent_of_each_label():
-    queries: list[dict[str, str]] = []
-
-    class LabelRest(FakeRest):
-        def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
-            queries.append(params)
-            return []
-
-    assert orchestrator.labeled_examples(LabelRest()) == []
-    assert [(q["fit_label"], q["order"], q["limit"]) for q in queries] == [
-        ("eq.good", "updated_at.desc", "15"),
-        ("eq.bad", "updated_at.desc", "15"),
+def test_labeled_jobs_are_those_nearest_the_jobs_being_scored_after_embedding_missing_ones():
+    user, service = FakeRest(), FakeRest()
+    user.labeled = [*[labeled_row("good", n) for n in range(3)], *[labeled_row("bad", n) for n in range(3, 6)]]
+    user.unembedded_labeled = [
+        {"posting_id": "posting-9", "posting": {"title": "Old Role", "company": "Acme", "location": None, "description": "Old."}}
     ]
+    service.unembedded = [{"id": "posting-1"}]
+
+    examples = orchestrator.labeled_examples(user, service, [("posting-1", JOBS[0]), ("posting-3", JOBS[2])], fake_embed)
+
+    [(function, args)] = service.rpcs
+    assert function == "set_posting_embeddings"
+    assert [row["id"] for row in args["embeddings"]] == ["posting-1", "posting-9"]
+    assert user.rpcs == [("nearest_labeled_jobs", {"job_ids": ["posting-1", "posting-3"], "per_label": 15})]
+    assert [example.label for example in examples] == ["good"] * 3 + ["bad"] * 3
+
+
+def test_a_failed_embedding_falls_back_to_the_most_recent_labeled_jobs():
+    user = FakeRest()
+    user.labeled = [*[labeled_row("good", n) for n in range(3)], *[labeled_row("bad", n) for n in range(3, 6)]]
+    service = FakeRest()
+    service.unembedded = [{"id": "posting-1"}]
+
+    def embed(texts: list[str]) -> list[list[float]]:
+        raise RuntimeError("download failed")
+
+    examples = orchestrator.labeled_examples(user, service, [("posting-1", JOBS[0])], embed)
+
+    assert [example.label for example in examples] == ["good"] * 3 + ["bad"] * 3
+    assert user.rpcs == []
+
+
+def test_nothing_is_embedded_until_each_label_has_enough():
+    user, service = FakeRest(), FakeRest()
+    user.labeled = [*[labeled_row("good", n) for n in range(2)], *[labeled_row("bad", n) for n in range(2, 5)]]
+
+    def embed(texts: list[str]) -> list[list[float]]:
+        raise AssertionError("embedded")
+
+    assert orchestrator.labeled_examples(user, service, [("posting-1", JOBS[0])], embed) == []
+    assert (user.rpcs, service.rpcs) == ([], [])
 
 
 def test_a_stop_during_parallel_scoring_ends_the_run():

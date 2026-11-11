@@ -71,6 +71,11 @@ class Rest:
                 return users
             page += 1
 
+    def rpc(self, function: str, args: dict[str, Any]) -> Any:
+        res = self._http.post(f"{self._base}/rest/v1/rpc/{function}", json=args, headers=self._headers)
+        res.raise_for_status()
+        return res.json() if res.content else None
+
 
 def user_db(settings: Settings, access_token: str) -> Rest:
     return Rest(settings, settings.supabase_anon_key, access_token)

@@ -188,15 +188,7 @@ export async function deleteApplication(id: string): Promise<ActionResult> {
   });
 }
 
-/** Takes a job off the Tracker; it stays under Jobs. */
-export async function removeFromTracker(id: string): Promise<ActionResult> {
-  return run(["/tracker", "/jobs"], async () => {
-    const { repository } = await getSignedInSource();
-    await repository.removeFromTracker(id);
-  });
-}
-
-/** Empties the Tracker; jobs past "new" stay under Jobs. */
+/** Empties the Tracker; rated jobs and jobs past "new" stay under Jobs. */
 export async function clearTracker(): Promise<ActionResult> {
   return run(["/tracker", "/jobs"], async () => {
     const { repository } = await getSignedInSource();

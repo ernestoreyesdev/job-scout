@@ -1,9 +1,9 @@
 "use client";
 
-import { ChevronDown, ExternalLink, EyeOff, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
+import { ChevronDown, ExternalLink, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
 import { useState, useTransition } from "react";
 
-import { analyzeGaps, deleteApplication, draftFollowUp, removeFromTracker, updateApplication } from "@/app/actions";
+import { analyzeGaps, deleteApplication, draftFollowUp, updateApplication } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -37,19 +37,20 @@ const WARNING_CHIP =
  * One tracked job as a card: score badge, posting link, facts as chips, warnings, a two-line fit summary, status
  * select and actions. Thumbs up or down records whether the user agrees it fits; clicking the active one clears it.
  * "Show more" opens the full summary, notes, timeline, strengths and gaps, and an on-demand gap analysis. Delete
- * removes the job everywhere; remove (Tracker only, jobs past "new") keeps it under Jobs.
+ * removes the job everywhere. `onMovedToJobs` runs after a status change past new or a rating, either of which takes
+ * the job off the Tracker; `rated` says which.
  */
 export function JobRow({
   job,
   showNotes,
-  canRemoveFromTracker,
+  onMovedToJobs,
   staleResume,
   closedOn,
   timeline,
 }: {
   job: TrackedJob;
   showNotes: boolean;
-  canRemoveFromTracker: boolean;
+  onMovedToJobs?: (rated: boolean) => void;
   staleResume: boolean;
   closedOn: string | null;
   timeline: string[];
@@ -73,6 +74,9 @@ export function JobRow({
     startTransition(async () => {
       const result = await updateApplication(job.id, formData);
       setError(result.ok ? null : (result.error ?? "Could not save."));
+      if (result.ok && ((field === "status" && value !== "new") || (field === "fitLabel" && value))) {
+        onMovedToJobs?.(field === "fitLabel");
+      }
     });
   }
 
@@ -97,13 +101,6 @@ export function JobRow({
     startTransition(async () => {
       const result = await deleteApplication(job.id);
       if (!result.ok) setError(result.error ?? "Could not delete.");
-    });
-  }
-
-  function hide() {
-    startTransition(async () => {
-      const result = await removeFromTracker(job.id);
-      if (!result.ok) setError(result.error ?? "Could not remove from the Tracker.");
     });
   }
 
@@ -281,19 +278,6 @@ export function JobRow({
               </Button>
             );
           })}
-          {canRemoveFromTracker && job.status !== "new" && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={hide}
-              disabled={pending}
-              title="Remove from Tracker (stays in Jobs)"
-              aria-label={`Remove ${job.posting.title} from the Tracker, keeping it in Jobs`}
-              className="text-muted-foreground"
-            >
-              <EyeOff />
-            </Button>
-          )}
           <Button
             variant="ghost"
             size="icon-sm"

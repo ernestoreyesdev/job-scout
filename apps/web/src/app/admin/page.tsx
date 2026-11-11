@@ -32,6 +32,7 @@ const STEP_LABELS: Record<string, string> = {
   hacker_news: "Hacker News posts",
   titles: "Related titles",
   shortlist: "Shortlisting",
+  examples: "Picking labeled examples",
   scoring: "Scoring",
   discovery: "Finding companies",
   naming: "Labeling companies",

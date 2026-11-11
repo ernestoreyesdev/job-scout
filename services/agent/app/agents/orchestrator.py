@@ -2,6 +2,7 @@ import logging
 import re
 import threading
 import time
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -18,6 +19,7 @@ from app.agents.scoring.agent import score_and_save
 from app.agents.scoring.prompts import LabeledJob
 from app.config import Settings
 from app.db import Rest
+from app.embeddings import embed_jobs, job_text
 from app.sources import (
     CACHE_SECONDS,
     describes_separately,
@@ -105,6 +107,7 @@ def run_search(
     read_posts: Callable[[], list[HiringPost]] = recent_posts,
     extractor: Callable[..., list[Posting]] = extract_jobs,
     expander: Callable[..., list[str]] = related_titles,
+    embed: Callable[[list[str]], list[list[float]]] = embed_jobs,
     timings: dict[str, int] | None = None,
 ) -> SearchResult:
     """
@@ -212,6 +215,8 @@ def run_search(
     pool = pick(fresh, pool_size, per_company)
     todo = with_descriptions(pool, service, describer)
     report("Scoring jobs against your resume…")
+    with timed(timings, "examples"):
+        examples = labeled_examples(user, service, todo, embed)
 
     with timed(timings, "scoring"):
         scoring = score_and_save(
@@ -226,7 +231,7 @@ def run_search(
             service=service,
             usage=usage,
             report=report,
-            examples=labeled_examples(user),
+            examples=examples,
         )
     kept = keep_best(user, todo, scoring.scores, rule.limit, rule.min_score)
     return SearchResult(
@@ -589,6 +594,7 @@ def rescore(
     usage: Usage,
     report: Callable[[str], None],
     describer: Callable[[Posting], str] = describe,
+    embed: Callable[[list[str]], list[list[float]]] = embed_jobs,
     timings: dict[str, int] | None = None,
 ) -> int:
     """
@@ -608,12 +614,15 @@ def rescore(
         report("Every job is already scored with your current resume.")
         return 0
     report("Scoring jobs against your resume…")
+    todo = with_descriptions(todo, service, describer)
+    with timed(timings, "examples"):
+        examples = labeled_examples(user, service, todo, embed)
     with timed(timings, "scoring"):
         scoring = score_and_save(
             client=client,
             model=settings.scoring_model,
             effort=settings.scoring_effort,
-            todo=with_descriptions(todo, service, describer),
+            todo=todo,
             resume_id=resume_id,
             resume_text=resume_text,
             user_id=user_id,
@@ -621,7 +630,7 @@ def rescore(
             service=service,
             usage=usage,
             report=report,
-            examples=labeled_examples(user),
+            examples=examples,
         )
     return scoring.scored
 
@@ -832,26 +841,23 @@ def one_per_job(postings: list[Posting]) -> list[Posting]:
     return list(chosen.values())
 
 
-def labeled_examples(user: Rest) -> list[LabeledJob]:
+def labeled_examples(
+    user: Rest, service: Rest, todo: list[tuple[str, Posting]], embed: Callable[[list[str]], list[list[float]]]
+) -> list[LabeledJob]:
     """
-    The user's most recently updated jobs marked good and bad, up to
-    MAX_EXAMPLES of each, or none until both labels have MIN_EXAMPLES.
+    The user's jobs marked good and bad nearest the jobs being scored, up to
+    MAX_EXAMPLES of each, or none until both labels have MIN_EXAMPLES. Jobs
+    among either without an embedding are embedded first. When embedding or
+    the nearest lookup fails, the most recently updated ones are used.
     """
-    by_label: dict[str, list[LabeledJob]] = {}
-    for label in ("good", "bad"):
-        rows = user.select(
-            "applications",
-            {
-                "select": "posting:postings(title,company,location,workplace_type,years_experience,tech_stack)",
-                "fit_label": f"eq.{label}",
-                "order": "updated_at.desc",
-                "limit": str(MAX_EXAMPLES),
-            },
-        )
-        by_label[label] = [labeled_job(label, row["posting"]) for row in rows]
-    if any(len(jobs) < MIN_EXAMPLES for jobs in by_label.values()):
+    labels = Counter(row["fit_label"] for row in user.select("applications", {"select": "fit_label", "fit_label": "not.is.null"}))
+    if not todo or labels["good"] < MIN_EXAMPLES or labels["bad"] < MIN_EXAMPLES:
         return []
-    return [*by_label["good"], *by_label["bad"]]
+    try:
+        return nearest_examples(user, service, todo, embed)
+    except Exception as error:
+        logger.warning("picking labeled examples by similarity failed: %s", error)
+        return recent_examples(user)
 
 
 def labeled_job(label: str, posting: dict[str, Any]) -> LabeledJob:
@@ -889,3 +895,52 @@ def save_snapshot(service: Rest, source: str, board: str, postings: list[Posting
         )
     except Exception as error:
         logger.warning("saving the %s/%s snapshot failed: %s", source, board, error, extra={"board": f"{source}/{board}"})
+
+
+def save_embeddings(service: Rest, jobs: list[tuple[str, str]], embed: Callable[[list[str]], list[list[float]]]) -> None:
+    """Embeds each (posting id, text) and saves the vectors in one call."""
+    if not jobs:
+        return
+    vectors = embed([text for _, text in jobs])
+    service.rpc(
+        "set_posting_embeddings",
+        {"embeddings": [{"id": posting_id, "embedding": vector} for (posting_id, _), vector in zip(jobs, vectors)]},
+    )
+
+
+def recent_examples(user: Rest) -> list[LabeledJob]:
+    """The user's most recently updated jobs marked good and bad, up to MAX_EXAMPLES of each."""
+    examples: list[LabeledJob] = []
+    for label in ("good", "bad"):
+        rows = user.select(
+            "applications",
+            {
+                "select": "posting:postings(title,company,location,workplace_type,years_experience,tech_stack)",
+                "fit_label": f"eq.{label}",
+                "order": "updated_at.desc",
+                "limit": str(MAX_EXAMPLES),
+            },
+        )
+        examples += [labeled_job(label, row["posting"]) for row in rows]
+    return examples
+
+
+def nearest_examples(
+    user: Rest, service: Rest, todo: list[tuple[str, Posting]], embed: Callable[[list[str]], list[list[float]]]
+) -> list[LabeledJob]:
+    """Embeds the jobs being scored and the labeled jobs that lack an embedding, then returns those nearest the batch."""
+    ids = [posting_id for posting_id, _ in todo]
+    unembedded = {row["id"] for row in service.select("postings", {"select": "id", "id": f"in.({','.join(ids)})", "embedding": "is.null"})}
+    pending = [(posting_id, job_text(p.title, p.company, p.location, p.description)) for posting_id, p in todo if posting_id in unembedded]
+    labeled = user.select(
+        "applications",
+        {
+            "select": "posting_id,posting:postings!inner(title,company,location,description)",
+            "fit_label": "not.is.null",
+            "posting.embedding": "is.null",
+        },
+    )
+    pending += [(row["posting_id"], job_text(**row["posting"])) for row in labeled]
+    save_embeddings(service, pending, embed)
+    rows = user.rpc("nearest_labeled_jobs", {"job_ids": ids, "per_label": MAX_EXAMPLES})
+    return [labeled_job(row["fit_label"], row["posting"]) for row in rows]

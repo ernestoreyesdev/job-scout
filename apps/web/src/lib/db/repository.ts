@@ -48,6 +48,9 @@ export type JobFilters = {
   minSalary?: number;
 };
 
+/** Which jobs a list shows: the Tracker's, Jobs' default (saved and beyond) or Jobs' rated view. */
+export type JobView = "tracker" | "jobs" | "rated";
+
 export type DirectoryCompany = CompanyRow & { hidden: boolean };
 
 export type ApplicationPatch = { status?: ApplicationStatusRow; notes?: string | null; fit_label?: FitLabelRow | null };
@@ -120,9 +123,9 @@ export class JobFinderRepository {
     return data;
   }
 
-  /** "tracker" lists jobs not removed from the Tracker; "jobs" lists every job the user has moved past new. */
+  /** "tracker" lists jobs still on the Tracker, "jobs" every job moved past new, "rated" every job marked good or bad. */
   async listTrackedJobs(
-    view: "tracker" | "jobs",
+    view: JobView,
     sort: JobSort = "desc",
     page = 1,
     filters: JobFilters = {},
@@ -131,7 +134,12 @@ export class JobFinderRepository {
       let query = this.client
         .from("applications")
         .select("*, posting:postings!inner(*), events:application_events(status, changed_at)", { count: "exact" });
-      query = view === "tracker" ? query.eq("in_tracker", true) : query.neq("status", "new");
+      query =
+        view === "tracker"
+          ? query.eq("in_tracker", true)
+          : view === "rated"
+            ? query.not("fit_label", "is", null)
+            : query.neq("status", "new");
       if (filters.status) query = query.eq("status", filters.status);
       if (filters.company) query = query.eq("posting.company", filters.company);
       if (filters.hideClosed) query = query.is("posting.closed_at", null);
@@ -183,11 +191,22 @@ export class JobFinderRepository {
     });
   }
 
-  /** Setting a job back to "new" also returns it to the Tracker, since Jobs only lists jobs past new. */
+  /**
+   * The Tracker holds only new, unrated jobs: moving a job past new or rating it takes it off, setting it back to new
+   * or clearing the rating of a new job returns it.
+   */
   async updateApplication(id: string, patch: ApplicationPatch): Promise<void> {
-    const update = patch.status === "new" ? { ...patch, in_tracker: true } : patch;
+    const update = {
+      ...patch,
+      ...(patch.status !== undefined && { in_tracker: patch.status === "new" }),
+      ...(patch.fit_label && { in_tracker: false }),
+    };
     const { error } = await this.client.from("applications").update(update).eq("id", id);
     if (error) throw error;
+    if (patch.fit_label === null) {
+      const returned = await this.client.from("applications").update({ in_tracker: true }).eq("id", id).eq("status", "new");
+      if (returned.error) throw returned.error;
+    }
   }
 
   async listRuns(limit = 5): Promise<AgentRunRow[]> {
@@ -211,21 +230,14 @@ export class JobFinderRepository {
     if (error) throw error;
   }
 
-  /** Only jobs past "new" can leave the Tracker, since those are the ones Jobs still lists. */
-  async removeFromTracker(id: string): Promise<void> {
-    const { data, error } = await this.client
-      .from("applications")
-      .update({ in_tracker: false })
-      .eq("id", id)
-      .neq("status", "new")
-      .select("id");
-    if (error) throw error;
-    if (data.length === 0) throw new Error("Save the job first, or delete it.");
-  }
-
-  /** Empties the Tracker: new jobs are deleted, the rest leave the Tracker and stay under Jobs. */
+  /** Empties the Tracker: unrated new jobs are deleted, rated ones leave it and stay under Jobs' rated view. */
   async clearTracker(): Promise<void> {
-    const removed = await this.client.from("applications").delete().eq("in_tracker", true).eq("status", "new");
+    const removed = await this.client
+      .from("applications")
+      .delete()
+      .eq("in_tracker", true)
+      .eq("status", "new")
+      .is("fit_label", null);
     if (removed.error) throw removed.error;
 
     const hidden = await this.client.from("applications").update({ in_tracker: false }).eq("in_tracker", true);
@@ -308,9 +320,13 @@ export class JobFinderRepository {
   }
 
   /** Companies of the jobs in a view, for its company filter. */
-  async listTrackedCompanies(view: "tracker" | "jobs"): Promise<string[]> {
+  async listTrackedCompanies(view: JobView): Promise<string[]> {
     const query = this.client.from("applications").select("posting:postings!inner(company)");
-    const { data, error } = await (view === "tracker" ? query.eq("in_tracker", true) : query.neq("status", "new"));
+    const { data, error } = await (view === "tracker"
+      ? query.eq("in_tracker", true)
+      : view === "rated"
+        ? query.not("fit_label", "is", null)
+        : query.neq("status", "new"));
     if (error) throw error;
     return [...new Set(data.map((row) => row.posting.company))].sort((a, b) => a.localeCompare(b));
   }

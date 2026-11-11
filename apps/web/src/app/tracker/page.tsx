@@ -94,7 +94,7 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
               <JobsTable
                 jobs={jobs.items}
                 showNotes={false}
-                canRemoveFromTracker
+                onTracker
                 currentResumeId={resume?.id ?? null}
               />
             </div>

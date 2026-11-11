@@ -33,7 +33,7 @@ export function ClearTracker({ count }: { count: number }) {
   return (
     <div className="flex items-center gap-2 text-sm">
       <span className="text-muted-foreground">
-        Clear {count} {count === 1 ? "job" : "jobs"}? New jobs are deleted; the rest stay under Jobs.
+        Clear {count} {count === 1 ? "job" : "jobs"}? They&apos;re deleted.
       </span>
       <Button variant="destructive" size="sm" onClick={clear} disabled={pending}>
         {pending ? "Clearing…" : "Clear"}
