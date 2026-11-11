@@ -7,7 +7,7 @@ from app.sources.base import WorkplaceType
 
 
 class _TextExtractor(HTMLParser):
-    BLOCKS = {"p", "div", "br", "li", "h1", "h2", "h3", "h4", "tr"}
+    BLOCKS = frozenset({"p", "div", "br", "li", "h1", "h2", "h3", "h4", "tr"})
 
     def __init__(self) -> None:
         super().__init__()
@@ -85,7 +85,7 @@ def with_country(location: str | None, country: str | None) -> str | None:
     return f"{location.strip()}, {country}"
 
 
-JSON_LD = re.compile(r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>', re.S)
+JSON_LD = re.compile(r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>', re.DOTALL)
 
 
 def job_posting_ld(page: str) -> dict:

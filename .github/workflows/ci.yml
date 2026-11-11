@@ -19,6 +19,7 @@ jobs:
           enable-cache: true
       - run: uv python install 3.12
       - run: uv sync --locked
+      - run: uv run ruff check .
       - run: uv run pytest
 
   web:
@@ -32,3 +33,33 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx turbo run lint typecheck
+
+  migrations:
+    name: Migrations apply
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.1.0
+      - run: supabase db start
+      - run: supabase db reset
+
+  # Applies new migrations to the hosted database once every check passes; Vercel's Deployment Checks hold the
+  # production deploy until this job succeeds, so new code goes live after its migrations.
+  migrate:
+    name: Migrate production
+    needs: [agent, web, migrations]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency: production-migrations
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.1.0
+      - run: supabase db push --remote="$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD" --yes

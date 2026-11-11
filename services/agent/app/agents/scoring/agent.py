@@ -9,8 +9,8 @@ from typing import Any
 from app.agents.schemas import FitScore, JobDetails, RunStopped, Usage
 from app.agents.scoring.prompts import FIT_SYSTEM, LabeledJob, fit_blocks
 from app.db import Rest
-from app.telemetry import ContextThreadPool
 from app.sources.base import Posting
+from app.telemetry import ContextThreadPool
 
 logger = logging.getLogger("agent")
 

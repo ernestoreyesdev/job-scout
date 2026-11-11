@@ -9,13 +9,12 @@ from datetime import UTC, datetime, timedelta
 from itertools import zip_longest
 from typing import Any
 
-
 from app.agents.discovery.agent import FoundBoard, discover_boards, find_company_boards, name_companies
 from app.agents.hiring_threads.agent import HiringPost, extract_jobs, recent_posts
-from app.agents.titles.agent import related_titles
 from app.agents.schemas import CompanyName, SearchRule, Usage
 from app.agents.scoring.agent import score_and_save
 from app.agents.scoring.prompts import LabeledJob
+from app.agents.titles.agent import related_titles
 from app.config import Settings
 from app.db import Rest
 from app.embeddings import embed_jobs, job_text, resume_chunks
@@ -31,14 +30,8 @@ from app.sources import (
     is_complete,
 )
 from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, Posting
+from app.sources.filters import matches_exclusions, matches_keywords, matches_location, matches_workplace, posted_within
 from app.telemetry import ContextThreadPool, timed
-from app.sources.filters import (
-    matches_exclusions,
-    matches_keywords,
-    matches_location,
-    matches_workplace,
-    posted_within,
-)
 
 logger = logging.getLogger("agent")
 

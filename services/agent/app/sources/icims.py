@@ -11,9 +11,9 @@ HOST = "icims.com"
 # Search pages read; boards list about 20 jobs per page.
 MAX_PAGES = 100
 PAGE_CONCURRENCY = 8
-CARD = re.compile(r'<li class="iCIMS_JobCardItem">(.*?)</li>', re.S)
-LINK = re.compile(r'<a href="(https://[^"]+/jobs/(\d+)/[^"]*)"[^>]*class="iCIMS_Anchor"[^>]*>.*?<h3[^>]*>(.*?)</h3>', re.S)
-LOCATION = re.compile(r"Job Locations?</span>\s*(?:</dt>\s*<dd[^>]*>)?\s*<span[^>]*>(.*?)</span>", re.S)
+CARD = re.compile(r'<li class="iCIMS_JobCardItem">(.*?)</li>', re.DOTALL)
+LINK = re.compile(r'<a href="(https://[^"]+/jobs/(\d+)/[^"]*)"[^>]*class="iCIMS_Anchor"[^>]*>.*?<h3[^>]*>(.*?)</h3>', re.DOTALL)
+LOCATION = re.compile(r"Job Locations?</span>\s*(?:</dt>\s*<dd[^>]*>)?\s*<span[^>]*>(.*?)</span>", re.DOTALL)
 POSTED = re.compile(r'Posted Date</span>\s*<span title="([^"]+)"')
 PAGES = re.compile(r"Page \d+ of ([\d,]+)")
 # 'US-MA-Pittsfield', 'US-Remote', 'IN-Hyderabad'

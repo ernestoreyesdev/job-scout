@@ -11,6 +11,8 @@ from docx import Document
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from pypdf import PdfReader
 
+from app.agents.follow_up.agent import FollowUpError, draft_follow_up
+from app.agents.gap_analysis.agent import GapAnalysisError, analyze_gaps
 from app.agents.orchestrator import (
     MAX_MISSED_CHECKS,
     ImportResult,
@@ -20,8 +22,6 @@ from app.agents.orchestrator import (
     rescore as orchestrate_rescore,
     run_search as orchestrate_search,
 )
-from app.agents.follow_up.agent import FollowUpError, draft_follow_up
-from app.agents.gap_analysis.agent import GapAnalysisError, analyze_gaps
 from app.agents.schemas import AnthropicKeyRequest, CompanyImport, RunStopped, SearchRule, Usage
 from app.auth import CurrentUser, admin_user, current_user
 from app.config import Settings, get_settings

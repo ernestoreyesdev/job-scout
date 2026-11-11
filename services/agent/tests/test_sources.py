@@ -230,7 +230,7 @@ def test_without_a_location_other_jobs_must_be_in_the_us():
 
 
 def test_board_fetches_are_reused_until_they_expire(monkeypatch: pytest.MonkeyPatch):
-    import app.sources as sources
+    from app import sources
 
     source = FakeSource("ashby", {"acme": 2})
     clock = [1000.0]

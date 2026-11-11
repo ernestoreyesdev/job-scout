@@ -8,7 +8,7 @@ HOST = "jobs.jobvite.com"
 ROW = re.compile(
     r'<td class="jv-job-list-name">\s*<a href="/[^/"]+/job/([^"/?]+)"[^>]*>(.*?)</a>\s*</td>\s*'
     r'<td class="jv-job-list-location">(.*?)</td>',
-    re.S,
+    re.DOTALL,
 )
 
 

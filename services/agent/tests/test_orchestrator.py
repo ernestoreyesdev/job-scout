@@ -13,9 +13,9 @@ from app.agents.orchestrator import (
     MIN_DIRECTORY,
     hiring_thread_postings,
     import_companies,
-    remove_duplicate_names,
     keyword_set,
     one_per_job,
+    remove_duplicate_names,
     run_search,
 )
 from app.agents.schemas import CompanyName, FitScore, JobDetails, RunStopped, SearchRule, Usage
@@ -194,7 +194,7 @@ def run(
         report=overrides.pop("report", progress.append),
         finder=overrides.pop("finder", lambda company: CompanyBoard("ashby", "acme", "Acme", jobs)),
         namer=overrides.pop("namer", lambda client, model, boards, usage: {}),
-        read_posts=overrides.pop("read_posts", lambda: []),
+        read_posts=overrides.pop("read_posts", list),
         expander=overrides.pop("expander", lambda client, model, keywords, usage: []),
         embed=overrides.pop("embed", fake_embed),
         **overrides,
@@ -211,7 +211,7 @@ def saved_ids(user: FakeRest) -> list[str]:
 
 
 def test_scores_and_saves_every_match():
-    result, messages, user, service, progress, usage = run()
+    result, _messages, user, service, progress, usage = run()
 
     assert (result.companies, result.found, result.matched, result.scored, result.failed) == (1, 4, 3, 3, 0)
     assert saved_ids(user) == ["posting-1", "posting-3", "posting-4"]
@@ -492,7 +492,7 @@ def test_a_board_that_fails_once_is_retried():
 
 
 def test_a_board_that_keeps_failing_is_counted_and_kept():
-    (result, _, _, service, progress, _), fetched, _ = directory_run(
+    (result, _, _, service, _progress, _), fetched, _ = directory_run(
         full_directory("acme"), [], {"acme": [REMOTE_JOB]}, flaky={"acme": 2}
     )
 
@@ -1060,7 +1060,7 @@ def test_the_same_job_from_two_sources_is_scored_once_from_its_board():
 def test_scoring_saves_the_facts_read_from_each_posting():
     _, _, _, service, _, _ = run(jobs=[posting("1", "Software Engineer, Backend")])
 
-    [(table, filters, patch)] = [update for update in service.updates if update[0] == "postings" and "id" in update[1]]
+    [(_table, filters, patch)] = [update for update in service.updates if update[0] == "postings" and "id" in update[1]]
     assert filters == {"id": "eq.posting-1"}
     assert (patch["salary_min"], patch["salary_max"], patch["years_experience"]) == (150000, 190000, 5)
     assert patch["tech_stack"] == ["Python"] and patch["workplace_type"] == "remote" and patch["details_extracted_at"]
@@ -1214,7 +1214,7 @@ def test_a_min_score_search_scores_more_jobs_until_enough_pass():
     scores = {f"Engineer {n}": 40 for n in range(1, 10)} | {"Engineer 1": 80, "Engineer 5": 75, "Engineer 6": 72, "Engineer 9": 90}
     messages = FakeMessages(set(), scores=scores)
 
-    result, messages, user, _, progress, _ = run(
+    result, messages, _user, _, progress, _ = run(
         rule=SearchRule(company="Acme", keywords=["software engineer"], limit=2, min_score=70), jobs=jobs, messages=messages
     )
 

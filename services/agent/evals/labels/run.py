@@ -22,8 +22,8 @@ from app.agents.scoring.agent import score_posting
 from app.agents.scoring.prompts import LabeledJob
 from app.config import get_settings
 from app.crypto import decrypt
-from app.embeddings import embed_jobs, job_text
 from app.db import service_db
+from app.embeddings import embed_jobs, job_text
 from app.sources.base import Posting
 
 CUTS = (50, 60, 70, 80)
@@ -146,7 +146,7 @@ def main() -> None:
         # The first call runs alone so the cached prefix exists before the rest.
         first = score(held[0], with_examples)
         with ThreadPoolExecutor(max_workers=4) as pool:
-            calls = [first, *pool.map(lambda row: score(row, with_examples), held[1:])]
+            calls = [first, *pool.map(score, held[1:], [with_examples] * (len(held) - 1))]
         for *_, call_usage in calls:
             usage.add(call_usage)
         report(name, [(label, value) for label, value, _ in calls])
