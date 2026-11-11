@@ -57,6 +57,32 @@ type AdminStats = {
     slowest: (BoardFetches & { board: string; source: string })[];
   };
   vitals: { page: string; metric: (typeof WEB_VITALS)[number]; count: number; median: number; p75: number }[];
+  model_weeks: {
+    week: string;
+    calls: number;
+    errors: number;
+    broken: number;
+    median_ms: number | null;
+    cache_share: number | null;
+    searches: number;
+    search_usage: Partial<RunUsage>;
+    scored: number;
+    average_score: number | null;
+    rated: number;
+    good: number;
+  }[];
+  prompt_versions: { step: string; prompt_version: string | null; model: string; calls: number; first: string; last: string }[];
+  score_versions: {
+    prompt_version: string | null;
+    model: string | null;
+    scored: number;
+    average_score: number;
+    rated: number;
+    good: number;
+    predicted_good: number;
+    predicted_good_correct: number;
+  }[];
+  evals: { eval: string; model: string | null; prompt_version: string | null; metrics: Record<string, unknown>; cost: number | null; created_at: string }[];
   refreshes: {
     id: string;
     started_at: string;
@@ -230,6 +256,8 @@ async function AdminData() {
           </Table>
         )}
       </SectionCard>
+
+      <ModelQualitySection stats={stats} />
 
       <SectionCard title="Users" description={`Searches and spend over the last ${stats.days} days; applied counts every job past saved.`}>
         <Table>
@@ -701,5 +729,198 @@ function RefreshBoardTable({ boards, names }: { boards: AdminStats["refresh_boar
         ))}
       </TableBody>
     </Table>
+  );
+}
+
+const STEP_NAMES: Record<string, string> = {
+  scoring: "Scoring",
+  shortlist: "Title shortlist",
+  titles: "Related titles",
+  discovery: "Finding companies",
+  naming: "Labeling companies",
+  hacker_news: "Hacker News posts",
+  gap_analysis: "Gap analysis",
+  follow_up: "Follow-up drafts",
+  other: "Other",
+};
+
+/** "84%", or "–" when there is nothing to divide by. */
+function share(part: number, whole: number): string {
+  return whole ? PERCENT.format(part / whole) : "–";
+}
+
+/** One line for an evaluation run's results, from the numbers each eval saves. */
+function evalSummary(run: AdminStats["evals"][number]): string {
+  const metrics = run.metrics as {
+    skipped?: string;
+    held_out?: number;
+    arms?: Record<string, { auc: number }>;
+    methods?: Record<string, { passing: number; scored: number }>;
+    cut?: number;
+  };
+  if (metrics.skipped) return `Skipped: ${metrics.skipped}`;
+  if (metrics.arms) {
+    const arms = Object.entries(metrics.arms).map(([name, arm]) => `${name} AUC ${arm.auc.toFixed(2)}`);
+    return `${metrics.held_out} held-out jobs · ${arms.join(" · ")}`;
+  }
+  if (metrics.methods) {
+    const methods = Object.entries(metrics.methods).map(([name, method]) => `${name} ${method.passing} of ${method.scored}`);
+    return `Reaching ${metrics.cut}: ${methods.join(" · ")}`;
+  }
+  return "–";
+}
+
+/**
+ * The AI's quality and cost over time: prompt versions in use, fit scores checked against ratings per version, weekly
+ * trends for drift, and the latest evaluation runs.
+ */
+function ModelQualitySection({ stats }: { stats: AdminStats }) {
+  return (
+    <SectionCard
+      title="Model quality"
+      description="Each prompt gets a version from its text, so a change to a prompt or model shows up as a new row. Weeks start on Monday, in UTC."
+    >
+      <p className="text-sm font-medium">Prompt versions</p>
+      {stats.prompt_versions.length === 0 ? (
+        <p className="mt-1 text-sm text-muted-foreground">No versioned calls yet. Calls record their prompt version from now on.</p>
+      ) : (
+        <Table className="mt-1">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Step</TableHead>
+              <TableHead>Version</TableHead>
+              <TableHead>Model</TableHead>
+              <TableHead className="text-right">Calls</TableHead>
+              <TableHead className="text-right">First used</TableHead>
+              <TableHead className="text-right">Last used</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {stats.prompt_versions.map((row) => (
+              <TableRow key={`${row.step}-${row.prompt_version}-${row.model}`}>
+                <TableCell>{STEP_NAMES[row.step] ?? row.step}</TableCell>
+                <TableCell className="font-mono text-xs">{row.prompt_version ?? "before versions"}</TableCell>
+                <TableCell className="font-mono text-xs">{row.model}</TableCell>
+                <TableCell className="text-right tabular-nums">{row.calls.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums">{row.first.slice(0, 10)}</TableCell>
+                <TableCell className="text-right tabular-nums">{row.last.slice(0, 10)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      <p className="mt-6 text-sm font-medium">Fit scores by version</p>
+      {stats.score_versions.length === 0 ? (
+        <p className="mt-1 text-sm text-muted-foreground">No scores yet.</p>
+      ) : (
+        <Table className="mt-1">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Version</TableHead>
+              <TableHead>Model</TableHead>
+              <TableHead className="text-right">Scored</TableHead>
+              <TableHead className="text-right">Average</TableHead>
+              <TableHead className="text-right">Rated</TableHead>
+              <TableHead className="text-right">Rated good</TableHead>
+              <TableHead className="text-right">70+ that were good</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {stats.score_versions.map((row) => (
+              <TableRow key={`${row.prompt_version}-${row.model}`}>
+                <TableCell className="font-mono text-xs">{row.prompt_version ?? "before versions"}</TableCell>
+                <TableCell className="font-mono text-xs">{row.model ?? "–"}</TableCell>
+                <TableCell className="text-right tabular-nums">{row.scored.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums">{Math.round(row.average_score)}</TableCell>
+                <TableCell className="text-right tabular-nums">{row.rated}</TableCell>
+                <TableCell className="text-right tabular-nums">{share(row.good, row.rated)}</TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {share(row.predicted_good_correct, row.predicted_good)}
+                  {row.predicted_good > 0 && <span className="text-muted-foreground"> of {row.predicted_good}</span>}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      <p className="mt-6 text-sm font-medium">Week by week</p>
+      {stats.model_weeks.length === 0 ? (
+        <p className="mt-1 text-sm text-muted-foreground">No calls or scores yet.</p>
+      ) : (
+        <Table className="mt-1">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Week of</TableHead>
+              <TableHead className="text-right">Searches</TableHead>
+              <TableHead className="text-right">Cost per search</TableHead>
+              <TableHead className="text-right">Calls</TableHead>
+              <TableHead className="text-right">Failed or cut off</TableHead>
+              <TableHead className="text-right">Median time</TableHead>
+              <TableHead className="text-right">Cache hits</TableHead>
+              <TableHead className="text-right">Average score</TableHead>
+              <TableHead className="text-right">Rated good</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {stats.model_weeks.map((row) => {
+              const usage: RunUsage = {
+                input_tokens: row.search_usage.input_tokens ?? 0,
+                output_tokens: row.search_usage.output_tokens ?? 0,
+                cache_read_input_tokens: row.search_usage.cache_read_input_tokens ?? 0,
+                cache_creation_input_tokens: row.search_usage.cache_creation_input_tokens ?? 0,
+                web_search_requests: row.search_usage.web_search_requests ?? 0,
+              };
+              const problems = row.errors + row.broken;
+              return (
+                <TableRow key={row.week}>
+                  <TableCell className="tabular-nums">{row.week}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.searches}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.searches ? DOLLARS.format(runCost(usage) / row.searches) : "–"}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.calls.toLocaleString()}</TableCell>
+                  <TableCell className={cn("text-right tabular-nums", problems > 0 && "text-destructive")}>{share(problems, row.calls)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.median_ms === null ? "–" : seconds(row.median_ms)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.cache_share === null ? "–" : PERCENT.format(row.cache_share)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.average_score === null ? "–" : Math.round(row.average_score)}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {share(row.good, row.rated)}
+                    {row.rated > 0 && <span className="text-muted-foreground"> of {row.rated}</span>}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
+
+      <p className="mt-6 text-sm font-medium">Evaluation runs</p>
+      {stats.evals.length === 0 ? (
+        <p className="mt-1 text-sm text-muted-foreground">No evaluation runs yet. They run every Monday, or by hand from the Evals workflow.</p>
+      ) : (
+        <Table className="mt-1">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Ran</TableHead>
+              <TableHead>Eval</TableHead>
+              <TableHead>Version</TableHead>
+              <TableHead>Result</TableHead>
+              <TableHead className="text-right">Cost</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {stats.evals.map((run) => (
+              <TableRow key={`${run.eval}-${run.created_at}`}>
+                <TableCell className="tabular-nums">{utcTime(run.created_at)}</TableCell>
+                <TableCell>{run.eval === "labels" ? "Scoring vs. ratings" : run.eval === "ranking" ? "Picking jobs to score" : run.eval}</TableCell>
+                <TableCell className="font-mono text-xs">{run.prompt_version ?? "–"}</TableCell>
+                <TableCell className="max-w-96 whitespace-normal text-xs">{evalSummary(run)}</TableCell>
+                <TableCell className="text-right tabular-nums">{run.cost === null ? "–" : DOLLARS.format(Number(run.cost))}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </SectionCard>
   );
 }

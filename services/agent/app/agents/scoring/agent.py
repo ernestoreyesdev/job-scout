@@ -10,7 +10,7 @@ from app.agents.schemas import FitScore, JobDetails, RunStopped, Usage
 from app.agents.scoring.prompts import FIT_SYSTEM, LabeledJob, fit_blocks
 from app.db import Rest
 from app.sources.base import Posting
-from app.telemetry import ContextThreadPool
+from app.telemetry import ContextThreadPool, prompt_version
 
 logger = logging.getLogger("agent")
 
@@ -88,6 +88,8 @@ def score_and_save(
                 "fit_summary": fit.summary,
                 "strengths": fit.strengths,
                 "gaps": fit.gaps,
+                "score_model": model,
+                "score_prompt_version": prompt_version(FIT_SYSTEM, FitScore),
                 **({"in_tracker": False} if min_score is not None and fit.score < min_score else {}),
             },
             on_conflict="user_id,posting_id",

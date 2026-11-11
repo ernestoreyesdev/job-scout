@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import sys
@@ -56,6 +57,7 @@ class CallLog:
             "user_id": self.user_id,
             "step": STEPS.get(str(kwargs.get("system")), "other"),
             "model": str(kwargs.get("model", "")),
+            "prompt_version": prompt_version(kwargs.get("system"), kwargs.get("output_format")),
             "input_tokens": getattr(usage, "input_tokens", 0) or 0,
             "output_tokens": getattr(usage, "output_tokens", 0) or 0,
             "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", 0) or 0,
@@ -167,3 +169,15 @@ def configure_logging() -> None:
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
     logger.propagate = False
+
+
+def prompt_version(system: Any, output_format: Any = None) -> str | None:
+    """
+    The first 8 hex digits of a hash of a call's system prompt and, when there
+    is one, its structured output schema; changing either changes the version.
+    """
+    if not system:
+        return None
+    schema = output_format.model_json_schema() if hasattr(output_format, "model_json_schema") else None
+    text = json.dumps([system, schema], sort_keys=True, default=str)
+    return hashlib.sha256(text.encode()).hexdigest()[:8]

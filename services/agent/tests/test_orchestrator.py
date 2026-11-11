@@ -228,6 +228,7 @@ def test_scores_and_saves_every_match():
     assert [row["external_id"] for row in matched] == ["1", "3", "4"] and "description" not in matched[0]
     saved = user.inserted("applications")[0]
     assert saved["fit_score"] == 72 and saved["gaps"] == ["Kubernetes"] and "status" not in saved
+    assert saved["score_model"] == "claude-haiku-5-5" and len(saved["score_prompt_version"]) == 8
     assert (usage.input_tokens, usage.output_tokens) == (300, 60)
     assert progress[:3] == ["Gathering open jobs…", "Matching jobs to your search…", "Scoring jobs against your resume…"]
     assert result.kept == 3 and not any(table == "applications" for table, _, _ in user.updates)

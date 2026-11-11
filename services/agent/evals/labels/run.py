@@ -13,19 +13,22 @@ project's AGENT_ENCRYPTION_KEY to use the account's saved key.
 from collections import Counter
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 import anthropic
 import numpy as np
 
 from app.agents.orchestrator import MAX_EXAMPLES, MIN_EXAMPLES, labeled_job
-from app.agents.schemas import Usage
+from app.agents.schemas import FitScore, Usage
 from app.agents.scoring.agent import score_posting
-from app.agents.scoring.prompts import LabeledJob
+from app.agents.scoring.prompts import FIT_SYSTEM, LabeledJob
 from app.config import get_settings
 from app.crypto import decrypt
 from app.db import service_db
 from app.embeddings import embed_jobs, job_text
 from app.sources.base import Posting
+from app.telemetry import prompt_version
+from evals.results import save_result
 
 CUTS = (50, 60, 70, 80)
 HOLD_OUT_EVERY = 3
@@ -79,16 +82,20 @@ def auc(scored: Sequence[tuple[str, float]]) -> float:
     return wins / (len(good) * len(bad))
 
 
-def report(name: str, scored: list[tuple[str, int]]) -> None:
+def report(name: str, scored: list[tuple[str, int]]) -> dict[str, Any]:
+    """Prints one arm's results and returns them: mean scores, AUC, and precision and recall per cut."""
     good = [score for label, score in scored if label == "good"]
     bad = [score for label, score in scored if label == "bad"]
+    result: dict[str, Any] = {"mean_good": sum(good) / len(good), "mean_bad": sum(bad) / len(bad), "auc": auc(scored), "cuts": {}}
     print(f"\n{name}")
-    print(f"  mean score: good {sum(good) / len(good):.1f}, bad {sum(bad) / len(bad):.1f}   AUC {auc(scored):.2f}")
+    print(f"  mean score: good {result['mean_good']:.1f}, bad {result['mean_bad']:.1f}   AUC {result['auc']:.2f}")
     for cut in CUTS:
         tp = sum(1 for label, score in scored if score >= cut and label == "good")
         fp = sum(1 for label, score in scored if score >= cut and label == "bad")
-        precision = f"{tp / (tp + fp):.0%}" if tp + fp else "-"
-        print(f"  cut {cut}: precision {precision:>4}, recall {tp / len(good):.0%}")
+        precision = tp / (tp + fp) if tp + fp else None
+        result["cuts"][str(cut)] = {"precision": precision, "recall": tp / len(good)}
+        print(f"  cut {cut}: precision {'-' if precision is None else f'{precision:.0%}':>4}, recall {tp / len(good):.0%}")
+    return result
 
 
 def main() -> None:
@@ -102,6 +109,7 @@ def main() -> None:
     counts = Counter(row["user_id"] for row in labeled if row["user_id"] in resumes)
     if not counts:
         print("No account has both labeled jobs and a primary resume.")
+        save_result(db, "labels", {"skipped": "No account has both rated jobs and a primary resume."})
         return
     user_id = counts.most_common(1)[0][0]
     credentials = db.select(
@@ -126,6 +134,7 @@ def main() -> None:
     print(f"{len(rows)} labeled jobs with text: " + ", ".join(f"{label} {t} examples / {h} held out" for label, (t, h) in have.items()))
     if any(t < MIN_EXAMPLES or h < MIN_HELD_OUT for t, h in have.values()):
         print(f"Need at least {MIN_EXAMPLES + MIN_HELD_OUT} jobs with text per label. Mark more jobs good and bad, then rerun.")
+        save_result(db, "labels", {"skipped": f"Needs at least {MIN_EXAMPLES + MIN_HELD_OUT} rated jobs of each kind."})
         return
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -142,6 +151,7 @@ def main() -> None:
         )
         return row["fit_label"], fit.score, call_usage
 
+    results: dict[str, Any] = {}
     arms = (("Without examples", []), (f"With {len(examples)} recent examples", examples), (f"With {len(closest)} closest examples", closest))
     for name, with_examples in arms:
         # The first call runs alone so the cached prefix exists before the rest.
@@ -150,7 +160,7 @@ def main() -> None:
             calls = [first, *pool.map(score, held[1:], [with_examples] * (len(held) - 1))]
         for *_, call_usage in calls:
             usage.add(call_usage)
-        report(name, [(label, value) for label, value, _ in calls])
+        results[name] = report(name, [(label, value) for label, value, _ in calls])
     cost = sum(
         n * price / 1_000_000
         for n, price in zip(
@@ -159,6 +169,14 @@ def main() -> None:
         )
     )
     print(f"\nCost: ${cost:.3f} ({usage.input_tokens:,} input, {usage.output_tokens:,} output tokens)")
+    save_result(
+        db,
+        "labels",
+        {"held_out": len(held), "arms": results},
+        cost,
+        settings.scoring_model,
+        prompt_version(FIT_SYSTEM, FitScore),
+    )
 
 
 if __name__ == "__main__":

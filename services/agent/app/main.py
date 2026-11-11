@@ -37,6 +37,12 @@ RUN_TIME_LIMIT = timedelta(minutes=10)
 UNFINISHED = "in.(queued,running)"
 # Days of runs the admin page covers.
 STATS_DAYS = 30
+# Weeks the admin page's model quality trends cover.
+MODEL_WEEKS = 12
+# The score that counts as a predicted good fit when scores are checked against ratings.
+GOOD_SCORE = 70
+# Stop reasons that mean a Claude answer came back cut off or refused.
+BROKEN_STOPS = frozenset({"max_tokens", "refusal"})
 # A board refresh is refused when another started this recently.
 REFRESH_COOLDOWN = timedelta(hours=1)
 
@@ -512,11 +518,36 @@ def admin_stats(admin: Admin, settings: Config) -> dict[str, Any]:
     App-wide data for the admin page: every user, the last STATS_DAYS of runs,
     of Claude calls summed up by step, of board fetches by board and job system
     and of page load measurements by page,
-    the board refreshes with each board's fetch times and storage,
+    the last MODEL_WEEKS of model quality by week and by prompt version, the
+    latest evaluation runs, the board refreshes with each board's fetch times and storage,
     the company directory, every good or bad label, and jobs past "new".
     """
     service = service_db(settings)
     since = (datetime.now(UTC) - timedelta(days=STATS_DAYS)).isoformat()
+    model_since = (datetime.now(UTC) - timedelta(weeks=MODEL_WEEKS)).isoformat()
+    model_calls = select_all(
+        service,
+        "llm_calls",
+        {
+            "select": "step,model,prompt_version,stop_reason,error,duration_ms,input_tokens,cache_read_input_tokens,created_at",
+            "created_at": f"gte.{model_since}",
+            "order": "id",
+        },
+    )
+    scores = select_all(
+        service,
+        "applications",
+        {
+            "select": "fit_score,fit_label,score_model,score_prompt_version,created_at,updated_at",
+            "fit_score": "not.is.null",
+            "created_at": f"gte.{model_since}",
+            "order": "id",
+        },
+    )
+    searches = service.select(
+        "agent_runs",
+        {"select": "usage,created_at", "kind": "eq.search", "status": "eq.done", "created_at": f"gte.{model_since}"},
+    )
     refreshes = service.select(
         "board_refreshes",
         {
@@ -573,6 +604,13 @@ def admin_stats(admin: Admin, settings: Config) -> dict[str, Any]:
                 )
                 for fetch in run["board_fetches"] or []
             ]
+        ),
+        "model_weeks": model_weeks(model_calls, scores, searches),
+        "prompt_versions": prompt_versions(model_calls),
+        "score_versions": score_versions(scores),
+        "evals": service.select(
+            "eval_runs",
+            {"select": "eval,model,prompt_version,metrics,cost,created_at", "order": "created_at.desc", "limit": "20"},
         ),
         "refreshes": refreshes,
         "refresh_boards": refresh_board_rows(refreshes, service.rpc("board_storage", {})),
@@ -735,3 +773,107 @@ def run_refresh(settings: Settings) -> None:
         logger.exception("board refresh failed")
         return
     logger.info("board refresh finished", extra={key: value for key, value in summary.items() if key != "board_fetches"})
+
+
+def week_of(timestamp: str) -> str:
+    """The Monday that starts the week of an ISO timestamp, as "2026-11-09"."""
+    day = datetime.fromisoformat(timestamp).date()
+    return (day - timedelta(days=day.weekday())).isoformat()
+
+
+def model_weeks(
+    calls: list[dict[str, Any]], scores: list[dict[str, Any]], searches: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """
+    Per week, oldest first: Claude calls with their errors, cut-off or refused
+    answers, median time and cache share; finished searches with their summed
+    usage; and fit scores given and ratings made, for spotting drift.
+    """
+    weeks: dict[str, dict[str, Any]] = {}
+
+    def week(timestamp: str) -> dict[str, Any]:
+        return weeks.setdefault(
+            week_of(timestamp),
+            {"times": [], "calls": 0, "errors": 0, "broken": 0, "input": 0, "cached": 0, "searches": 0,
+             "usage": {}, "scored": 0, "score_total": 0, "rated": 0, "good": 0},
+        )
+
+    for call in calls:
+        row = week(call["created_at"])
+        row["calls"] += 1
+        row["errors"] += bool(call["error"])
+        row["broken"] += call["stop_reason"] in BROKEN_STOPS
+        row["times"].append(call["duration_ms"])
+        row["input"] += call["input_tokens"] + call["cache_read_input_tokens"]
+        row["cached"] += call["cache_read_input_tokens"]
+    for search in searches:
+        row = week(search["created_at"])
+        row["searches"] += 1
+        for field, value in (search["usage"] or {}).items():
+            row["usage"][field] = row["usage"].get(field, 0) + (value or 0)
+    for score in scores:
+        row = week(score["created_at"])
+        row["scored"] += 1
+        row["score_total"] += score["fit_score"]
+        if score["fit_label"]:
+            rated = week(score["updated_at"])
+            rated["rated"] += 1
+            rated["good"] += score["fit_label"] == "good"
+    return [
+        {
+            "week": key,
+            "calls": row["calls"],
+            "errors": row["errors"],
+            "broken": row["broken"],
+            "median_ms": sorted(row["times"])[len(row["times"]) // 2] if row["times"] else None,
+            "cache_share": row["cached"] / row["input"] if row["input"] else None,
+            "searches": row["searches"],
+            "search_usage": row["usage"],
+            "scored": row["scored"],
+            "average_score": row["score_total"] / row["scored"] if row["scored"] else None,
+            "rated": row["rated"],
+            "good": row["good"],
+        }
+        for key, row in sorted(weeks.items())
+    ]
+
+
+def prompt_versions(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Each step's prompt versions and models with their calls and when they were first and last used; newest first."""
+    groups: dict[tuple[str, str | None, str], list[str]] = {}
+    for call in calls:
+        groups.setdefault((call["step"], call["prompt_version"], call["model"]), []).append(call["created_at"])
+    rows = [
+        {"step": step, "prompt_version": version, "model": model, "calls": len(times), "first": min(times), "last": max(times)}
+        for (step, version, model), times in groups.items()
+    ]
+    return sorted(rows, key=lambda row: (row["step"], row["last"]), reverse=True)
+
+
+def score_versions(scores: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Fit scores by the prompt version and model that gave them: how many, their
+    average, how many were rated, how many of those good, and how many of the
+    rated jobs scoring GOOD_SCORE or more were rated good. Newest first.
+    """
+    groups: dict[tuple[str | None, str | None], list[dict[str, Any]]] = {}
+    for score in scores:
+        groups.setdefault((score["score_prompt_version"], score["score_model"]), []).append(score)
+    rows = []
+    for (version, model), group in groups.items():
+        rated = [row for row in group if row["fit_label"]]
+        predicted = [row for row in rated if row["fit_score"] >= GOOD_SCORE]
+        rows.append(
+            {
+                "prompt_version": version,
+                "model": model,
+                "scored": len(group),
+                "average_score": sum(row["fit_score"] for row in group) / len(group),
+                "rated": len(rated),
+                "good": sum(row["fit_label"] == "good" for row in rated),
+                "predicted_good": len(predicted),
+                "predicted_good_correct": sum(row["fit_label"] == "good" for row in predicted),
+                "last": max(row["created_at"] for row in group),
+            }
+        )
+    return sorted(rows, key=lambda row: row["last"], reverse=True)

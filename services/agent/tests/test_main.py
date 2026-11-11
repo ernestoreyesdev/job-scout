@@ -425,3 +425,51 @@ def fake_user(**fields: Any) -> CurrentUser:
 
 def fake_settings(**fields: Any) -> Settings:
     return cast(Settings, SimpleNamespace(**fields))
+
+
+def test_model_weeks_group_calls_searches_and_scores_by_week():
+    calls = [
+        {"created_at": "2026-11-10T09:00:00+00:00", "error": None, "stop_reason": "end_turn", "duration_ms": 100, "input_tokens": 20, "cache_read_input_tokens": 80},
+        {"created_at": "2026-11-11T09:00:00+00:00", "error": "overloaded", "stop_reason": None, "duration_ms": 300, "input_tokens": 100, "cache_read_input_tokens": 0},
+        {"created_at": "2026-11-03T09:00:00+00:00", "error": None, "stop_reason": "max_tokens", "duration_ms": 200, "input_tokens": 50, "cache_read_input_tokens": 0},
+    ]
+    searches = [{"created_at": "2026-11-12T09:00:00+00:00", "usage": {"input_tokens": 1000, "output_tokens": 10}}]
+    scores = [
+        {"created_at": "2026-11-10T09:00:00+00:00", "updated_at": "2026-11-10T10:00:00+00:00", "fit_score": 80, "fit_label": "good"},
+        {"created_at": "2026-11-10T09:00:00+00:00", "updated_at": "2026-11-10T09:00:00+00:00", "fit_score": 40, "fit_label": None},
+    ]
+
+    earlier, this = main.model_weeks(calls, scores, searches)
+
+    assert (earlier["week"], earlier["calls"], earlier["broken"]) == ("2026-11-02", 1, 1)
+    assert this["week"] == "2026-11-09"
+    assert (this["calls"], this["errors"], this["broken"], this["median_ms"]) == (2, 1, 0, 300)
+    assert this["cache_share"] == 80 / 200
+    assert (this["searches"], this["search_usage"]) == (1, {"input_tokens": 1000, "output_tokens": 10})
+    assert (this["scored"], this["average_score"], this["rated"], this["good"]) == (2, 60, 1, 1)
+
+
+def test_prompt_versions_list_each_steps_versions_with_their_use():
+    calls = [
+        {"step": "scoring", "prompt_version": "aaaa1111", "model": "haiku", "created_at": "2026-11-01T00:00:00+00:00"},
+        {"step": "scoring", "prompt_version": "aaaa1111", "model": "haiku", "created_at": "2026-11-05T00:00:00+00:00"},
+        {"step": "scoring", "prompt_version": "bbbb2222", "model": "haiku", "created_at": "2026-11-09T00:00:00+00:00"},
+    ]
+
+    newer, older = main.prompt_versions(calls)
+
+    assert (newer["prompt_version"], newer["calls"]) == ("bbbb2222", 1)
+    assert (older["calls"], older["first"], older["last"]) == (2, "2026-11-01T00:00:00+00:00", "2026-11-05T00:00:00+00:00")
+
+
+def test_score_versions_check_scores_against_ratings_per_version():
+    scores = [
+        {"score_prompt_version": "v1", "score_model": "haiku", "fit_score": 85, "fit_label": "good", "created_at": "2026-11-01"},
+        {"score_prompt_version": "v1", "score_model": "haiku", "fit_score": 75, "fit_label": "bad", "created_at": "2026-11-02"},
+        {"score_prompt_version": "v1", "score_model": "haiku", "fit_score": 30, "fit_label": None, "created_at": "2026-11-03"},
+    ]
+
+    [row] = main.score_versions(scores)
+
+    assert (row["scored"], row["average_score"], row["rated"], row["good"]) == (3, 190 / 3, 2, 1)
+    assert (row["predicted_good"], row["predicted_good_correct"]) == (2, 1)

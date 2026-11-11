@@ -12,6 +12,7 @@ SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and ANTHROPIC_API_KEY.
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from typing import Any
 
 import anthropic
 
@@ -25,8 +26,9 @@ from app.agents.orchestrator import (
     pick,
     with_descriptions,
 )
-from app.agents.schemas import SearchRule, Usage
+from app.agents.schemas import FitScore, SearchRule, Usage
 from app.agents.scoring.agent import score_posting
+from app.agents.scoring.prompts import FIT_SYSTEM
 from app.agents.titles.agent import related_titles
 from app.agents.triage.agent import shortlist
 from app.config import get_settings
@@ -36,6 +38,8 @@ from app.main import select_all
 from app.sources import describe
 from app.sources.base import Posting
 from app.sources.filters import matches_exclusions, matches_keywords, matches_location, matches_workplace, posted_within
+from app.telemetry import prompt_version
+from evals.results import save_result
 
 DEFAULT_CUT = 70
 # Haiku 5.5 prices per million tokens: input, output, cache read, cache write.
@@ -55,6 +59,7 @@ def main() -> None:
     run = next((r for r in runs if r["input"].get("score", True) and not r["input"].get("company")), None)
     if run is None:
         print("No finished scored search across all companies yet.")
+        save_result(db, "ranking", {"skipped": "No finished scored search across all companies yet."})
         return
     rule = SearchRule.model_validate(run["input"])
     resumes = db.select("resumes", {"select": "text", "user_id": f"eq.{run['user_id']}", "is_primary": "eq.true"})
@@ -97,6 +102,7 @@ def main() -> None:
     print(f"{len(rows):,} open jobs, {len(fresh):,} match and aren't tracked; each method picks {pool_size}")
     if len(fresh) <= pool_size:
         print("Every match fits in one pool, so both methods would score the same jobs.")
+        save_result(db, "ranking", {"skipped": "The latest search's matches fit in one pool."})
         return
 
     by_title = pick(by_title_fit(fresh, pool_size, client, settings, resume, usage, shortlist), pool_size, MAX_PER_COMPANY)
@@ -115,9 +121,11 @@ def main() -> None:
     for *_, call_usage in results:
         usage.add(call_usage)
 
+    methods: dict[str, Any] = {}
     for name, picked in (("Title shortlist", by_title), ("Resume similarity", by_resume)):
         values = [scores[posting_id] for posting_id, _ in picked if posting_id in scores]
         passing = sum(value >= cut for value in values)
+        methods[name] = {"passing": passing, "scored": len(values), "mean": sum(values) / len(values)}
         print(f"\n{name}")
         print(f"  {passing} of {len(values)} reach {cut}; mean score {sum(values) / len(values):.1f}")
         for posting_id, p in sorted(picked, key=lambda job: -scores.get(job[0], -1))[:5]:
@@ -132,6 +140,14 @@ def main() -> None:
         )
     )
     print(f"Cost: ${cost:.3f} ({usage.input_tokens:,} input, {usage.output_tokens:,} output tokens)")
+    save_result(
+        db,
+        "ranking",
+        {"cut": cut, "pool": pool_size, "matches": len(fresh), "in_both": len(both), "methods": methods},
+        cost,
+        settings.scoring_model,
+        prompt_version(FIT_SYSTEM, FitScore),
+    )
 
 
 if __name__ == "__main__":

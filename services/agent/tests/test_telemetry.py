@@ -3,10 +3,11 @@ from typing import Any
 
 import pytest
 
+from app.agents.schemas import FitScore, RelatedTitles
 from app.agents.scoring.prompts import FIT_SYSTEM
 from app.agents.titles.prompts import TITLES_SYSTEM
 from app.db import Rest
-from app.telemetry import CallLog, RecordingClient, timed
+from app.telemetry import CallLog, RecordingClient, prompt_version, timed
 
 
 class Messages:
@@ -111,3 +112,20 @@ def test_log_lines_are_json_with_the_current_run_even_from_a_worker_thread():
     [line] = [json.loads(line) for line in lines]
     assert (line["run_id"], line["level"], line["message"], line["board"]) == ("run-7", "warning", "fetching ashby/acme failed", "ashby/acme")
     assert line["time"].endswith("+00:00")
+
+
+def test_a_prompt_version_changes_with_the_prompt_or_its_output_schema():
+    version = prompt_version(FIT_SYSTEM, FitScore)
+
+    assert version == prompt_version(FIT_SYSTEM, FitScore) and len(version or "") == 8
+    assert version != prompt_version(FIT_SYSTEM + " ", FitScore)
+    assert version != prompt_version(FIT_SYSTEM, RelatedTitles)
+    assert prompt_version(None) is None
+
+
+def test_calls_are_recorded_with_their_prompt_version():
+    log = CallLog("user-1", "run-1")
+    RecordingClient(client(), log).beta.messages.parse(model="m", system=FIT_SYSTEM, output_format=FitScore, messages=[])
+
+    [row] = log.rows
+    assert row["prompt_version"] == prompt_version(FIT_SYSTEM, FitScore)
