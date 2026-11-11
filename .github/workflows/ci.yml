@@ -55,11 +55,11 @@ jobs:
     concurrency: production-migrations
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
         with:
           version: 3.1.0
-      - run: supabase db push --remote="$SUPABASE_PROJECT_ID" --password "$SUPABASE_DB_PASSWORD" --yes
+      # Signs in with the access token, which reaches the database over IPv4 from GitHub's runners.
+      - run: supabase db push --remote="$SUPABASE_PROJECT_ID" --yes
