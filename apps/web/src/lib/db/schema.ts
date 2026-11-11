@@ -231,6 +231,7 @@ export type AgentRunRow = {
   progress: string | null;
   usage: RunUsage | null;
   timings: Record<string, number> | null;
+  jobs_added: number | null;
   created_at: string;
   updated_at: string;
   finished_at: string | null;

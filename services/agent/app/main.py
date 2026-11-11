@@ -164,6 +164,7 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
             "error": None,
             "error_code": None,
             "progress": summarize(result),
+            "jobs_added": result.kept,
             "unreachable_boards": result.unreachable_boards,
             "board_fetches": result.board_fetches,
         }

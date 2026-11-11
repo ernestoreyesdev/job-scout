@@ -400,3 +400,17 @@ def test_refresh_board_rows_join_fetch_times_with_storage():
     assert (acme["median_ms"], acme["last_ms"], acme["failures"]) == (300, 300, 0)
     assert (acme["open_jobs"], acme["saved_jobs"], acme["bytes"]) == (10, 12, 4096)
     assert (rows[0]["failures"], rows[0]["bytes"]) == (1, 0)
+
+
+def test_a_finished_search_records_how_many_jobs_it_added(monkeypatch: pytest.MonkeyPatch):
+    db = RunRest()
+    monkeypatch.setattr(main, "user_db", lambda settings, token: db)
+    monkeypatch.setattr(main, "service_db", lambda settings: db)
+    monkeypatch.setattr(main, "decrypt", lambda ciphertext, key: "key")
+    result = SearchResult(companies=4, found=300, matched=40, already_tracked=0, scored=20, failed=0, kept=10)
+    monkeypatch.setattr(main, "orchestrate_search", lambda **kwargs: result)
+
+    main.run_search("run-1", SearchRule(keywords=["engineer"]), SimpleNamespace(id="u", access_token="t"), SimpleNamespace(agent_encryption_key="k"))
+
+    final = db.updates[-1][2]
+    assert (final["status"], final["jobs_added"]) == ("done", 10)

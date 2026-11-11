@@ -51,7 +51,9 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
   return (
     <>
       <PageReady />
-      {runs[0] && <RunStatus run={runs[0]} />}
+      {runs[0] && !(trackerTotal === 0 && runs[0].status === "done" && (runs[0].jobs_added ?? 0) > 0) && (
+        <RunStatus run={runs[0]} />
+      )}
       <RecentRuns runs={runs} />
       <section className="mt-8">
         {trackerTotal === 0 ? (
