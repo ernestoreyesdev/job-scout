@@ -1,13 +1,13 @@
 name: Smoke test
 
-# Runs when Vercel reports a finished production deployment, and fails when the live site or the agent behind it is down.
+# Runs when Vercel marks a commit on main as deployed, and fails when the live site or the agent behind it is down.
 on:
-  deployment_status:
+  status:
 
 jobs:
   smoke:
     name: Production smoke test
-    if: github.event.deployment_status.state == 'success' && startsWith(github.event.deployment.environment, 'Production')
+    if: github.event.context == 'Vercel' && github.event.state == 'success' && contains(github.event.branches.*.name, 'main')
     runs-on: ubuntu-latest
     env:
       SITE: https://nesty-job-finder.vercel.app
