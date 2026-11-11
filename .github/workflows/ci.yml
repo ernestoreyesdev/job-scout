@@ -55,11 +55,15 @@ jobs:
     concurrency: production-migrations
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      POOLER_HOST: aws-0-us-east-1.pooler.supabase.com
     steps:
       - uses: actions/checkout@v4
       - uses: supabase/setup-cli@v1
         with:
           version: 3.1.0
-      # Signs in with the access token, which reaches the database over IPv4 from GitHub's runners.
-      - run: supabase db push --remote="$SUPABASE_PROJECT_ID" --yes
+      # Connects through the project's connection pooler, which GitHub's runners reach over IPv4.
+      - run: |
+          password=$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["SUPABASE_DB_PASSWORD"], safe=""))')
+          supabase db push --remote="postgresql://postgres.$SUPABASE_PROJECT_ID:$password@$POOLER_HOST:5432/postgres" --yes
