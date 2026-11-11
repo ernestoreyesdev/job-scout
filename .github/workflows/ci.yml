@@ -35,7 +35,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npx turbo run lint typecheck test build
+      - run: npx turbo run lint typecheck test
+      # Its own step: next build and next typegen both write to .next, so running them together can collide.
+      - run: npx turbo run build
       - name: Audit dependencies for high-severity vulnerabilities
         run: npm audit --audit-level=high
 
