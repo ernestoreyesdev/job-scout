@@ -2,16 +2,19 @@
 Measures whether labeled examples improve fit scores: `uv run python -m
 evals.labels.run`. Takes the account with the most good/bad labels and a
 primary resume, holds out a third of each label, and scores the held-out jobs
-twice with the same call a search makes: once without examples and once with
-examples drawn only from the rest. A run costs about two scoring calls per
-held-out job. Point it at the hosted project by setting SUPABASE_URL,
-SUPABASE_SERVICE_ROLE_KEY and AGENT_ENCRYPTION_KEY for that project.
+three times with the same call a search makes: without examples, with the most
+recent examples, and with the examples nearest the held-out batch by embedding,
+all drawn only from the rest. A run costs about three scoring calls per
+held-out job. Point it at the hosted project by setting SUPABASE_URL and
+SUPABASE_SERVICE_ROLE_KEY for that project, plus ANTHROPIC_API_KEY or that
+project's AGENT_ENCRYPTION_KEY to use the account's saved key.
 """
 
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 
 import anthropic
+import numpy as np
 
 from app.agents.orchestrator import MAX_EXAMPLES, MIN_EXAMPLES, labeled_job
 from app.agents.schemas import Usage
@@ -19,6 +22,7 @@ from app.agents.scoring.agent import score_posting
 from app.agents.scoring.prompts import LabeledJob
 from app.config import get_settings
 from app.crypto import decrypt
+from app.embeddings import embed_jobs, job_text
 from app.db import service_db
 from app.sources.base import Posting
 
@@ -46,6 +50,23 @@ def examples_from(train: list[dict]) -> list[LabeledJob]:
     for label in ("good", "bad"):
         group = sorted((row for row in train if row["fit_label"] == label), key=lambda row: row["updated_at"], reverse=True)
         picked += [labeled_job(label, row["posting"]) for row in group[:MAX_EXAMPLES]]
+    return picked
+
+
+def closest_from(train: list[dict], held: list[dict]) -> list[LabeledJob]:
+    """Up to MAX_EXAMPLES of each label nearest the average embedding of the held-out jobs, as live scoring picks them."""
+    def vectors(rows: list[dict]) -> np.ndarray:
+        texts = [job_text(r["posting"]["title"], r["posting"]["company"], r["posting"]["location"], r["posting"]["description"]) for r in rows]
+        found = np.array(embed_jobs(texts), dtype=np.float32)
+        return found / np.linalg.norm(found, axis=1, keepdims=True)
+
+    anchor = vectors(held).mean(axis=0)
+    anchor /= np.linalg.norm(anchor)
+    similarity = vectors(train) @ anchor
+    picked: list[LabeledJob] = []
+    for label in ("good", "bad"):
+        group = sorted((i for i, row in enumerate(train) if row["fit_label"] == label), key=lambda i: -similarity[i])
+        picked += [labeled_job(label, train[i]["posting"]) for i in group[:MAX_EXAMPLES]]
     return picked
 
 
@@ -85,7 +106,8 @@ def main() -> None:
     credentials = db.select(
         "api_credentials", {"select": "ciphertext", "user_id": f"eq.{user_id}", "provider": "eq.anthropic"}
     )
-    api_key = decrypt(credentials[0]["ciphertext"], settings.agent_encryption_key) if credentials else settings.anthropic_api_key
+    # A key passed in ANTHROPIC_API_KEY wins, so a saved key encrypted elsewhere never needs decrypting.
+    api_key = settings.anthropic_api_key or (decrypt(credentials[0]["ciphertext"], settings.agent_encryption_key) if credentials else None)
     if not api_key:
         print("That account has no Anthropic key and ANTHROPIC_API_KEY is not set.")
         return
@@ -108,6 +130,9 @@ def main() -> None:
     client = anthropic.Anthropic(api_key=api_key)
     resume = resumes[user_id]
     examples = examples_from(train)
+    closest = closest_from(train, held)
+    if {(e.label, e.title, e.company) for e in closest} == {(e.label, e.title, e.company) for e in examples}:
+        print(f"Neither label has more than {MAX_EXAMPLES} jobs to pick from, so recent and closest pick the same jobs.")
     usage = Usage()
 
     def score(row: dict, with_examples: list[LabeledJob]) -> tuple[str, int, object]:
@@ -116,7 +141,8 @@ def main() -> None:
         )
         return row["fit_label"], fit.score, call_usage
 
-    for name, with_examples in (("Without examples", []), (f"With {len(examples)} examples", examples)):
+    arms = (("Without examples", []), (f"With {len(examples)} recent examples", examples), (f"With {len(closest)} closest examples", closest))
+    for name, with_examples in arms:
         # The first call runs alone so the cached prefix exists before the rest.
         first = score(held[0], with_examples)
         with ThreadPoolExecutor(max_workers=4) as pool:
