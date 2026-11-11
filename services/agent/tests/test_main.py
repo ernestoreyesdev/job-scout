@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -8,10 +8,13 @@ from fastapi import BackgroundTasks, HTTPException
 from app import main
 from app.agents.orchestrator import ImportResult, SearchResult
 from app.agents.schemas import FollowUpDraft, GapAnalysis, GapItem, SearchRule
+from app.auth import CurrentUser
+from app.config import Settings
+from app.db import Rest
 from app.sources.base import CompanyNotFound
 
 
-class FakeRest:
+class FakeRest(Rest):
     def __init__(self, conflict: bool = False, run_status: str = "queued"):
         self.conflict = conflict
         self.run_status = run_status
@@ -26,7 +29,7 @@ class FakeRest:
         self.run_status = patch.get("status", self.run_status)
         return [patch]
 
-    def insert(self, table: str, rows: Any, on_conflict: str | None = None) -> list[dict[str, Any]]:
+    def insert(self, table: str, rows: Any, on_conflict: str | None = None, select: str | None = None) -> list[dict[str, Any]]:
         if self.conflict:
             response = httpx.Response(409, request=httpx.Request("POST", "http://db/rest/v1/agent_runs"))
             raise httpx.HTTPStatusError("conflict", request=response.request, response=response)
@@ -36,8 +39,8 @@ class FakeRest:
 
 def start(monkeypatch: pytest.MonkeyPatch, db: FakeRest) -> dict[str, str]:
     monkeypatch.setattr(main, "user_db", lambda settings, token: db)
-    user = SimpleNamespace(id="user-1", access_token="token")
-    return main.start_search(SearchRule(keywords=["engineer"]), user, SimpleNamespace(), BackgroundTasks())
+    user = fake_user(id="user-1", access_token="token")
+    return main.start_search(SearchRule(keywords=["engineer"]), user, fake_settings(), BackgroundTasks())
 
 
 def test_starting_a_search_first_fails_runs_older_than_the_limit(monkeypatch: pytest.MonkeyPatch):
@@ -89,9 +92,9 @@ def test_a_company_that_isnt_found_fails_with_its_error_code(monkeypatch: pytest
         raise CompanyNotFound("Couldn't find job listings for Publix.")
 
     monkeypatch.setattr(main, "orchestrate_search", not_found)
-    settings = SimpleNamespace(agent_encryption_key="k")
+    settings = fake_settings(agent_encryption_key="k")
 
-    main.run_search("run-1", SearchRule(company="Publix", keywords=["engineer"]), SimpleNamespace(id="u", access_token="t"), settings)
+    main.run_search("run-1", SearchRule(company="Publix", keywords=["engineer"]), fake_user(id="u", access_token="t"), settings)
 
     final = db.updates[-1][2]
     assert (final["status"], final["error_code"]) == ("failed", "company_not_found")
@@ -140,8 +143,8 @@ def call_job_endpoint(monkeypatch: pytest.MonkeyPatch, endpoint: Any, db: JobRes
     monkeypatch.setattr(main, "make_client", lambda key: None)
     for name, fake in fakes.items():
         monkeypatch.setattr(main, name, fake)
-    settings = SimpleNamespace(agent_encryption_key="k", analysis_model="claude-haiku-5-5")
-    return endpoint("app-1", SimpleNamespace(id="u", access_token="t"), settings)
+    settings = fake_settings(agent_encryption_key="k", analysis_model="claude-haiku-5-5")
+    return endpoint("app-1", fake_user(id="u", access_token="t"), settings)
 
 
 POSTING = {
@@ -213,15 +216,15 @@ def test_follow_up_needs_an_applied_job(monkeypatch: pytest.MonkeyPatch):
 def test_stopping_a_run_marks_it_stopped_only_while_it_is_unfinished(monkeypatch: pytest.MonkeyPatch):
     db = FakeRest(run_status="running")
     monkeypatch.setattr(main, "user_db", lambda settings, token: db)
-    user = SimpleNamespace(id="user-1", access_token="token")
+    user = fake_user(id="user-1", access_token="token")
 
-    assert main.stop_run("run-1", user, SimpleNamespace()) == {"status": "stopped"}
+    assert main.stop_run("run-1", user, fake_settings()) == {"status": "stopped"}
     [(table, filters, patch)] = db.updates
     assert table == "agent_runs" and filters == {"id": "eq.run-1", "status": "in.(queued,running)"}
     assert patch["status"] == "stopped" and patch["progress"] == "Stopped." and patch["finished_at"]
 
     with pytest.raises(HTTPException) as finished:
-        main.stop_run("run-1", user, SimpleNamespace())
+        main.stop_run("run-1", user, fake_settings())
     assert finished.value.status_code == 409
 
 
@@ -241,7 +244,7 @@ def test_a_stopped_search_halts_at_its_next_progress_update_and_keeps_its_status
 
     monkeypatch.setattr(main, "orchestrate_search", search)
 
-    main.run_search("run-1", SearchRule(keywords=["engineer"]), SimpleNamespace(id="u", access_token="t"), SimpleNamespace(agent_encryption_key="k"))
+    main.run_search("run-1", SearchRule(keywords=["engineer"]), fake_user(id="u", access_token="t"), fake_settings(agent_encryption_key="k"))
 
     assert reached == [] and db.run_status == "stopped"
     final = db.updates[-1]
@@ -260,14 +263,14 @@ def test_admin_endpoints_refuse_users_without_the_admin_role():
     from app.auth import admin_user
 
     with pytest.raises(HTTPException) as refused:
-        admin_user(SimpleNamespace(id="u", access_token="t", admin=False))
+        admin_user(fake_user(id="u", access_token="t", admin=False))
     assert refused.value.status_code == 403
 
-    admin = SimpleNamespace(id="u", access_token="t", admin=True)
+    admin = fake_user(id="u", access_token="t", admin=True)
     assert admin_user(admin) is admin
 
 
-class KeyRest:
+class KeyRest(Rest):
     def __init__(self, personal: bool, shared: bool):
         self.personal, self.shared = personal, shared
 
@@ -279,7 +282,7 @@ class KeyRest:
 
 def test_runs_use_the_users_key_then_the_shared_key_then_the_setting(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(main, "decrypt", lambda ciphertext, key: f"{ciphertext}-key")
-    settings = SimpleNamespace(agent_encryption_key="k", anthropic_api_key="env-key")
+    settings = fake_settings(agent_encryption_key="k", anthropic_api_key="env-key")
 
     assert main.anthropic_key(KeyRest(personal=True, shared=True), "u", settings) == "personal-key"
     assert main.anthropic_key(KeyRest(personal=False, shared=True), "u", settings) == "shared-key"
@@ -308,7 +311,7 @@ def test_call_stats_sum_up_each_step():
 
 
 def test_select_all_pages_past_the_row_limit():
-    class Paged:
+    class Paged(Rest):
         def __init__(self):
             self.offsets: list[str] = []
 
@@ -350,7 +353,7 @@ def test_board_stats_sum_up_job_systems_and_list_the_slowest_boards():
     assert stats["slowest"][0]["median_ms"] == 11000
 
 
-class RefreshRest:
+class RefreshRest(Rest):
     def __init__(self, recent: bool):
         self.recent = recent
 
@@ -361,7 +364,7 @@ class RefreshRest:
 def start_refresh(monkeypatch: pytest.MonkeyPatch, secret: str | None, authorization: str | None, recent: bool = False):
     monkeypatch.setattr(main, "service_db", lambda settings: RefreshRest(recent))
     background = BackgroundTasks()
-    return main.start_refresh(SimpleNamespace(cron_secret=secret), background, authorization), background
+    return main.start_refresh(fake_settings(cron_secret=secret), background, authorization), background
 
 
 def test_a_refresh_needs_the_cron_secret(monkeypatch: pytest.MonkeyPatch):
@@ -410,7 +413,15 @@ def test_a_finished_search_records_how_many_jobs_it_added(monkeypatch: pytest.Mo
     result = SearchResult(companies=4, found=300, matched=40, already_tracked=0, scored=20, failed=0, kept=10)
     monkeypatch.setattr(main, "orchestrate_search", lambda **kwargs: result)
 
-    main.run_search("run-1", SearchRule(keywords=["engineer"]), SimpleNamespace(id="u", access_token="t"), SimpleNamespace(agent_encryption_key="k"))
+    main.run_search("run-1", SearchRule(keywords=["engineer"]), fake_user(id="u", access_token="t"), fake_settings(agent_encryption_key="k"))
 
     final = db.updates[-1][2]
     assert (final["status"], final["jobs_added"]) == ("done", 10)
+
+
+def fake_user(**fields: Any) -> CurrentUser:
+    return cast(CurrentUser, SimpleNamespace(**fields))
+
+
+def fake_settings(**fields: Any) -> Settings:
+    return cast(Settings, SimpleNamespace(**fields))

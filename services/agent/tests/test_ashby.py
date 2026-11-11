@@ -33,7 +33,7 @@ def test_fetch_normalizes_listed_jobs():
     assert posting.workplace_type == "hybrid"
     assert posting.url == JOB["jobUrl"]
     assert posting.description == "Train models."
-    assert posting.posted_at.isoformat() == "2025-04-05T00:03:20.653000+00:00"
+    assert posting.posted_at and posting.posted_at.isoformat() == "2025-04-05T00:03:20.653000+00:00"
 
 
 @respx.mock

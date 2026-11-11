@@ -41,7 +41,7 @@ def test_fetch_normalizes_positions():
     assert posting.url == "https://gokarla-gmbh.jobs.personio.de/job/2515695"
     assert posting.location == "Berlin/Remote; Berlin; Munich"
     assert posting.description == "About the Role\nBuild agents."
-    assert posting.posted_at.isoformat() == "2026-02-02T13:44:56+00:00"
+    assert posting.posted_at and posting.posted_at.isoformat() == "2026-02-02T13:44:56+00:00"
     assert posting.workplace_type == "remote"
 
 

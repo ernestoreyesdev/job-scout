@@ -1,4 +1,5 @@
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 
@@ -66,7 +67,7 @@ def matches_keywords(posting: Posting, keywords: list[str]) -> bool:
     return not keywords or any(keyword_pattern(keyword).search(posting.title) for keyword in keywords)
 
 
-def matches_workplace(posting: Posting, workplace_types: list[str]) -> bool:
+def matches_workplace(posting: Posting, workplace_types: Sequence[str]) -> bool:
     """
     No types matches everything. A job whose type the source doesn't state
     has an office location, so it counts as on-site or hybrid but not remote.

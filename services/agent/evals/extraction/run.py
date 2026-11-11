@@ -30,7 +30,7 @@ def same(field: str, expected: object, actual: object) -> bool:
     if expected is None or actual is None:
         return expected is None and actual is None
     if field.startswith("salary_") and isinstance(expected, int | float):
-        return abs(float(actual) - expected) <= abs(expected) * SALARY_TOLERANCE
+        return abs(float(actual) - expected) <= abs(expected) * SALARY_TOLERANCE  # pyright: ignore[reportArgumentType]
     if isinstance(expected, str):
         return str(expected).strip().lower() == str(actual).strip().lower()
     return expected == actual

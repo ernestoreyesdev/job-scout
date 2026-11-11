@@ -5,6 +5,7 @@ import pytest
 
 from app.agents.scoring.prompts import FIT_SYSTEM
 from app.agents.titles.prompts import TITLES_SYSTEM
+from app.db import Rest
 from app.telemetry import CallLog, RecordingClient, timed
 
 
@@ -21,11 +22,11 @@ class Messages:
     create = parse
 
 
-class Insert:
+class Insert(Rest):
     def __init__(self):
         self.rows: list[Any] = []
 
-    def insert(self, table: str, rows: Any, on_conflict: str | None = None) -> list[Any]:
+    def insert(self, table: str, rows: Any, on_conflict: str | None = None, select: str | None = None) -> list[Any]:
         self.rows.append((table, rows))
         return rows
 

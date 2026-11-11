@@ -77,7 +77,7 @@ def display_name(company: str) -> str:
     return name.title() if name == name.lower() else name
 
 
-def fetch_board(source: SourceName, board: str, company: str, sources: tuple[JobSource, ...] | None = None) -> list[Posting]:
+def fetch_board(source: str, board: str, company: str, sources: tuple[JobSource, ...] | None = None) -> list[Posting]:
     """Open postings on one known board; raises BoardNotFound when it no longer exists."""
     if sources is not None:
         return source_named(source, sources).fetch(board, company)
@@ -141,6 +141,6 @@ def describes_separately(source: str, sources: tuple[JobSource, ...] | None = No
     return type(source_named(source, sources)).describe is not JobSource.describe
 
 
-def fetch_live(source: SourceName, board: str, company: str) -> list[Posting]:
+def fetch_live(source: str, board: str, company: str) -> list[Posting]:
     """Open postings on one known board, fetched from its system even when a recent fetch is in memory."""
     return source_named(source).fetch(board, company)

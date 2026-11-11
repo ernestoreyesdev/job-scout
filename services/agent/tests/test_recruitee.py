@@ -33,7 +33,7 @@ def test_fetch_normalizes_published_offers():
     assert (posting.source, posting.board, posting.external_id) == ("recruitee", "bunq", "2800490")
     assert posting.company == "bunq" and posting.url == OFFER["careers_url"]
     assert posting.description == "Make life easy.\n\n- XGBoost"
-    assert posting.posted_at.isoformat() == "2026-10-28T13:21:58+00:00"
+    assert posting.posted_at and posting.posted_at.isoformat() == "2026-10-28T13:21:58+00:00"
     assert posting.workplace_type == "hybrid"
 
 

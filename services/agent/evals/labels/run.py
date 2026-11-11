@@ -11,6 +11,7 @@ project's AGENT_ENCRYPTION_KEY to use the account's saved key.
 """
 
 from collections import Counter
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 
 import anthropic
@@ -70,7 +71,7 @@ def closest_from(train: list[dict], held: list[dict]) -> list[LabeledJob]:
     return picked
 
 
-def auc(scored: list[tuple[str, int]]) -> float:
+def auc(scored: Sequence[tuple[str, float]]) -> float:
     """Chance that a random good job outscores a random bad one; ties count half."""
     good = [score for label, score in scored if label == "good"]
     bad = [score for label, score in scored if label == "bad"]

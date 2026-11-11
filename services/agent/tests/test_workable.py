@@ -32,7 +32,7 @@ def test_fetch_normalizes_jobs():
     assert remote.company == "Acme AI"
     assert remote.location == "Paris, Île-de-France, France; Germany"
     assert remote.description == "Train models & ship."
-    assert remote.posted_at.isoformat() == "2026-05-29T00:00:00+00:00"
+    assert remote.posted_at and remote.posted_at.isoformat() == "2026-05-29T00:00:00+00:00"
     assert remote.workplace_type == "remote" and onsite.workplace_type is None
 
 

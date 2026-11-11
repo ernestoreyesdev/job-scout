@@ -1,7 +1,8 @@
 import threading
+from collections.abc import Collection, Mapping
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -21,7 +22,8 @@ from app.agents.orchestrator import (
 from app.agents.schemas import CompanyName, FitScore, JobDetails, RunStopped, SearchRule, Usage
 from app.agents.scoring.agent import ScoringError
 from app.config import Settings
-from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, Posting
+from app.db import Rest
+from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, Posting, SourceName
 
 FIT = FitScore(
     score=72,
@@ -94,13 +96,13 @@ class FakeMessages:
         return SimpleNamespace(parsed_output=fit, stop_reason="end_turn", usage=SimpleNamespace(input_tokens=100, output_tokens=20))
 
 
-class FakeRest:
+class FakeRest(Rest):
     def __init__(
         self,
         tracked: list[str] | None = None,
-        companies: list[dict[str, str]] | None = None,
+        companies: list[dict[str, Any]] | None = None,
         hidden: list[str] | None = None,
-        discoveries: list[dict[str, str]] | None = None,
+        discoveries: list[dict[str, Any]] | None = None,
     ):
         self.tracked = tracked or []
         self.companies = companies or []
@@ -109,7 +111,9 @@ class FakeRest:
         self.tracked_postings: list[dict[str, Any]] = []
         self.labeled: list[dict[str, Any]] = []
         self.unembedded_labeled: list[dict[str, Any]] = []
-        self.unembedded: list[dict[str, str]] = []
+        self.unembedded: list[dict[str, Any]] = []
+        self.selects: list[tuple[str, dict[str, str]]] = []
+        self.rpc_results: dict[str, Any] = {}
         self.descriptions: list[dict[str, str]] = []
         self.stored: list[dict[str, Any]] = []
         self.ranked: list[dict[str, Any]] = []
@@ -120,6 +124,7 @@ class FakeRest:
         self.lock = threading.Lock()
 
     def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
+        self.selects.append((table, params))
         if table == "companies":
             return self.companies
         if table == "hidden_companies":
@@ -160,6 +165,8 @@ class FakeRest:
 
     def rpc(self, function: str, args: dict[str, Any]) -> Any:
         self.rpcs.append((function, args))
+        if function in self.rpc_results:
+            return self.rpc_results[function]
         if function == "rank_postings":
             return self.ranked
         return self.labeled if function == "nearest_labeled_jobs" else None
@@ -172,7 +179,7 @@ def run(
     *,
     rule: SearchRule | None = None,
     tracked: list[str] | None = None,
-    fail_titles: set[str] = frozenset(),
+    fail_titles: Collection[str] = frozenset(),
     jobs: list[Posting] = JOBS,
     messages: FakeMessages | None = None,
     **overrides: Any,
@@ -345,18 +352,19 @@ REMOTE_JOB = posting("1", "Software Engineer, Backend", workplace_type="remote")
 
 def directory_run(
     companies: list[dict[str, Any]],
-    discovered: list[tuple[str, str]],
-    boards: dict[str, list[Posting] | Exception],
+    discovered: list[tuple[SourceName, str]],
+    boards: Mapping[str, list[Posting]],
     hidden: list[str] | None = None,
     flaky: dict[str, int] | None = None,
     recent_discovery: bool = False,
     names: dict[tuple[str, str], str] | None = None,
-    kinds: dict[tuple[str, str], str] | None = None,
+    kinds: dict[tuple[str, str], Literal["employer", "staffing", "aggregator"]] | None = None,
     stored: list[dict[str, Any]] | None = None,
+    namer_calls: list[list[FoundBoard]] | None = None,
 ):
     fetched: list[tuple[str, str, str]] = []
     discover_calls: list[tuple[Any, ...]] = []
-    namer_calls: list[list[FoundBoard]] = []
+    named_boards = namer_calls if namer_calls is not None else []
     flaky = dict(flaky or {})
 
     def fetcher(source: str, board: str, name: str) -> list[Posting]:
@@ -373,7 +381,7 @@ def directory_run(
         return [FoundBoard(source, board, [f"Jobs at {board}"]) for source, board in discovered]
 
     def namer(client: Any, model: str, boards: list[FoundBoard], usage: Usage) -> dict[tuple[str, str], CompanyName]:
-        namer_calls.append(boards)
+        named_boards.append(boards)
         return {
             key: CompanyName(board=f"{key[0]}/{key[1]}", name=name, kind=(kinds or {}).get(key, "employer"))
             for key, name in (names or {}).items()
@@ -392,11 +400,10 @@ def directory_run(
         discover=discover,
         namer=namer,
     )
-    directory_run.namer_calls = namer_calls
     return outcome, fetched, discover_calls
 
 
-def company(board: str) -> dict[str, str]:
+def company(board: str) -> dict[str, Any]:
     return {
         "id": f"id-{board}",
         "source": "ashby",
@@ -553,11 +560,16 @@ def test_new_boards_get_names_from_claude_and_known_ones_are_not_renamed():
         cvs: [posting("7", "Software Engineer, CVS", source="workday", board=cvs, workplace_type="remote")],
     }
 
+    namer_calls: list[list[FoundBoard]] = []
     _, fetched, _ = directory_run(
-        [company("acme")], [("ashby", "acme"), ("workday", cvs)], boards, names={("workday", cvs): "CVS Health"}
+        [company("acme")],
+        [("ashby", "acme"), ("workday", cvs)],
+        boards,
+        names={("workday", cvs): "CVS Health"},
+        namer_calls=namer_calls,
     )
 
-    [named] = directory_run.namer_calls
+    [named] = namer_calls
     assert [(b.source, b.board) for b in named] == [("workday", cvs)]
     assert ("workday", cvs, "CVS Health") in fetched
 
@@ -1001,7 +1013,7 @@ def test_an_unreachable_hacker_news_is_skipped():
     def unreachable() -> list[HiringPost]:
         raise RuntimeError("timed out")
 
-    assert hiring_thread_postings(None, SETTINGS, FakeRest(), Usage(), progress.append, unreachable, None) == []
+    assert hiring_thread_postings(None, SETTINGS, FakeRest(), Usage(), progress.append, unreachable, lambda *args: []) == []
     assert progress == []
 
 
@@ -1318,22 +1330,17 @@ def test_embedding_missing_jobs_takes_the_newest_up_to_the_limit_and_saves_in_ch
     service.unembedded = [
         {"id": f"posting-{n}", "title": "Engineer", "company": "Acme", "location": None, "description": "Builds."} for n in range(3)
     ]
-    selects: list[dict[str, str]] = []
-    original = service.select
-    service.select = lambda table, params: selects.append(params) or original(table, params)
-
     count = orchestrator.embed_missing(service, fake_embed, 50)
 
     assert count == 3
-    [params] = selects
+    [(_, params)] = service.selects
     assert (params["embedding"], params["closed_at"], params["order"], params["limit"]) == ("is.null", "is.null", "created_at.desc", "50")
     assert [len(args["embeddings"]) for function, args in service.rpcs if function == "set_posting_embeddings"] == [2, 1]
 
 
 def test_a_refresh_fetches_every_board_and_records_itself():
     service = FakeRest(companies=[company("acme"), {**company("agency"), "kind": "staffing"}, company("gone")])
-    rpcs: list[str] = []
-    service.rpc = lambda function, args: rpcs.append(function) or 2
+    service.rpc_results = {"delete_stale_postings": 2}
 
     def fetcher(source: str, board: str, name: str) -> list[Posting]:
         if board == "gone":
@@ -1343,7 +1350,7 @@ def test_a_refresh_fetches_every_board_and_records_itself():
     summary = orchestrator.refresh_boards(service, fetcher)
 
     assert (summary["boards"], summary["jobs"], summary["deleted_jobs"], summary["failures"]) == (2, 2, 2, 0)
-    assert rpcs == ["delete_stale_postings"]
+    assert [function for function, _ in service.rpcs] == ["delete_stale_postings"]
     [refresh] = service.inserted("board_refreshes")
     assert refresh["started_at"]
     [(_, filters, patch)] = [update for update in service.updates if update[0] == "board_refreshes"]

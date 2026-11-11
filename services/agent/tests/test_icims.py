@@ -46,7 +46,7 @@ def test_fetch_reads_every_page_and_normalizes_cards():
     assert first.title == "Software Engineer & Lead" and first.company == "GDMS"
     assert first.url == "https://careers-gdms.icims.com/jobs/76097/role/job"
     assert first.location == "Pittsfield, MA, United States"
-    assert first.posted_at.isoformat() == "2026-11-02T12:00:00+00:00"
+    assert first.posted_at and first.posted_at.isoformat() == "2026-11-02T12:00:00+00:00"
     assert second.location == "Remote, United States" and second.workplace_type == "remote" and second.posted_at is None
 
 

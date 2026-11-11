@@ -54,7 +54,7 @@ class CallLog:
         row = {
             "run_id": self.run_id,
             "user_id": self.user_id,
-            "step": STEPS.get(kwargs.get("system"), "other"),
+            "step": STEPS.get(str(kwargs.get("system")), "other"),
             "model": str(kwargs.get("model", "")),
             "input_tokens": getattr(usage, "input_tokens", 0) or 0,
             "output_tokens": getattr(usage, "output_tokens", 0) or 0,

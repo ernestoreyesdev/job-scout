@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
 from app.agents.discovery.agent import FoundBoard, discover_boards, name_companies
 from app.agents.schemas import CompanyName, CompanyNames, Usage
@@ -50,7 +50,7 @@ def test_boards_come_from_search_result_urls_in_order_without_duplicates():
 
 
 class FakeParse:
-    def __init__(self, names: list[tuple[str, str]]):
+    def __init__(self, names: list[tuple[str, str, Literal["employer", "staffing", "aggregator"]]]):
         self.names = names
         self.calls: list[dict[str, Any]] = []
 

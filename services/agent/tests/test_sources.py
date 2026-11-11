@@ -3,13 +3,13 @@ from datetime import UTC, datetime
 import pytest
 
 from app.sources import board_from_url, board_hosts, display_name, find_company
-from app.sources.base import BoardNotFound, CompanyNotFound, JobSource, Posting
+from app.sources.base import BoardNotFound, CompanyNotFound, JobSource, Posting, SourceName
 from app.sources.filters import matches_exclusions, matches_location, matches_workplace, posted_within
 from app.sources.greenhouse import GreenhouseSource
 from app.sources.text import join_locations, workplace_from_location
 
 
-def posting(source: str, board: str) -> Posting:
+def posting(source: SourceName, board: str) -> Posting:
     return Posting(
         source=source,
         board=board,
@@ -29,7 +29,7 @@ class FakeSource(JobSource):
 
     def __init__(self, name: str, boards: dict[str, int]):
         super().__init__()
-        self.name = name
+        self.name = name  # pyright: ignore[reportAttributeAccessIssue]
         self.boards = boards
         self.calls: list[str] = []
 

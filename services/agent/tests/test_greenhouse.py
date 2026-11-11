@@ -32,7 +32,7 @@ def test_fetch_normalizes_jobs():
     assert posting.location == "Remote, US"
     assert posting.workplace_type == "remote"
     assert posting.description == "About\nBuild things & ship.\n- Python"
-    assert posting.posted_at.isoformat() == "2026-10-19T11:17:24-04:00"
+    assert posting.posted_at and posting.posted_at.isoformat() == "2026-10-19T11:17:24-04:00"
 
 
 @respx.mock
@@ -44,7 +44,7 @@ def test_fetch_falls_back_to_given_company_name():
 
     assert posting.company == "Acme Inc"
     assert posting.location is None
-    assert posting.posted_at.isoformat() == "2026-10-20T09:00:00-04:00"
+    assert posting.posted_at and posting.posted_at.isoformat() == "2026-10-20T09:00:00-04:00"
 
 
 @respx.mock

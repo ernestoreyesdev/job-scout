@@ -1,0 +1,18 @@
+name: Smoke test
+
+# Runs when Vercel reports a finished production deployment, and fails when the live site or the agent behind it is down.
+on:
+  deployment_status:
+
+jobs:
+  smoke:
+    name: Production smoke test
+    if: github.event.deployment_status.state == 'success' && startsWith(github.event.deployment.environment, 'Production')
+    runs-on: ubuntu-latest
+    env:
+      SITE: https://nesty-job-finder.vercel.app
+    steps:
+      - name: Sign-in page loads
+        run: curl --fail --silent --show-error --retry 3 --retry-delay 10 --retry-all-errors -o /dev/null "$SITE/login"
+      - name: Web app reaches the agent
+        run: curl --fail-with-body --silent --show-error --retry 3 --retry-delay 10 --retry-all-errors "$SITE/api/health"

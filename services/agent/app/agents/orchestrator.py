@@ -29,7 +29,7 @@ from app.sources import (
     find_company,
     is_complete,
 )
-from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, Posting
+from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, Posting, SourceName
 from app.sources.filters import matches_exclusions, matches_keywords, matches_location, matches_workplace, posted_within
 from app.telemetry import ContextThreadPool, timed
 
@@ -213,6 +213,8 @@ def run_search(
             board_fetches=fetches,
         )
 
+    if resume_id is None or resume_text is None:
+        raise ValueError("Scoring needs a resume.")
     pool_size = rule.limit * POOL_FACTOR
     rounds = MAX_SCORING_ROUNDS if rule.min_score is not None else 1
     if len(fresh) > pool_size * rounds:
@@ -695,7 +697,7 @@ def import_companies(
     known = {(c["source"], c["board"]) for c in service.select("companies", {"select": "source,board"})}
     lock = threading.Lock()
     by_name: dict[tuple[str, str], tuple[str, CompanyBoard]] = {}
-    by_url: dict[tuple[str, str], str] = {}
+    by_url: dict[tuple[SourceName, str], str] = {}
     not_found: list[str] = []
 
     def look_up(entry: str) -> None:
@@ -734,7 +736,7 @@ def import_companies(
     fetched = {f"{r.source}/{r.board}": r.postings for _, r in new_names.values()}
     boards: list[Board] = [(r.source, r.board, r.name, "import") for _, r in new_names.values()]
 
-    def fetch(key: tuple[str, str]) -> None:
+    def fetch(key: tuple[SourceName, str]) -> None:
         source, board = key
         name = named[key].name if key in named else default_name(source, board)
         try:
@@ -830,7 +832,7 @@ def one_per_job(postings: list[Posting]) -> list[Posting]:
     """
     chosen: dict[tuple[str, str], Posting] = {}
     for p in postings:
-        words = re.findall(r"[a-z0-9]+", p.title.lower())
+        words: list[str] = re.findall(r"[a-z0-9]+", p.title.lower())
         key = (compact(p.company), " ".join(TITLE_ABBREVIATIONS.get(word, word) for word in words))
         if key not in chosen or (chosen[key].source == "hackernews" and p.source != "hackernews"):
             chosen[key] = p

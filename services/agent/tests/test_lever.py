@@ -35,7 +35,7 @@ def test_fetch_normalizes_jobs():
     assert posting.description == (
         "We build payments.\n\nWhat you'll do\n- Ship APIs\n- Own services\n\nEqual opportunity employer."
     )
-    assert posting.posted_at.year == 2026
+    assert posting.posted_at and posting.posted_at.year == 2026
 
 
 @respx.mock
