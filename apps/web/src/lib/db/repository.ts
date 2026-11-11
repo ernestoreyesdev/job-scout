@@ -15,7 +15,7 @@ import type {
   ResumeRow,
   ThemeRow,
 } from "./schema";
-import { FOLLOW_UP_DAYS, GHOST_JOB_DAYS, SKIPPED_COMPANY_KINDS } from "./schema";
+import { FOLLOW_UP_DAYS, GHOST_JOB_DAYS, REPOST_DAYS, SKIPPED_COMPANY_KINDS } from "./schema";
 import type { FunnelJob, ScoredJob } from "../insights";
 
 export type JobFinderClient = SupabaseClient<Database>;
@@ -34,10 +34,6 @@ export type JobSignals = { openDays: number | null; reposted: boolean; daysSince
 export type TrackedJob = TrackedJobRow & { signals: JobSignals };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-function sameTitle(title: string): string {
-  return title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
 
 /** Narrows the Tracker or Jobs list; every field is optional. */
 export type JobFilters = {
@@ -163,13 +159,13 @@ export class JobFinderRepository {
     return { ...result, items: await this.withSignals(result.items) };
   }
 
-  /** Adds each job's date-based signals; reposts are found among other postings from the same companies. */
+  /** Adds each job's date-based signals; the database says which are reposts, as `reposted_postings` defines them. */
   private async withSignals(jobs: TrackedJobRow[]): Promise<TrackedJob[]> {
-    const companies = [...new Set(jobs.map((job) => job.posting.company))];
-    const { data: others, error } = companies.length
-      ? await this.client.from("postings").select("id, company, title, created_at").in("company", companies)
+    const { data: reposts, error } = jobs.length
+      ? await this.client.rpc("reposted_postings", { job_ids: jobs.map((job) => job.posting.id), days: REPOST_DAYS })
       : { data: [], error: null };
     if (error) throw error;
+    const reposted = new Set(reposts.map((row) => row.id));
     const now = Date.now();
     const days = (date: string) => Math.floor((now - new Date(date).getTime()) / DAY_MS);
     return jobs.map((job) => {
@@ -178,13 +174,7 @@ export class JobFinderRepository {
         ...job,
         signals: {
           openDays: job.posting.closed_at ? null : days(job.posting.posted_at ?? job.posting.created_at),
-          reposted: others.some(
-            (other) =>
-              other.id !== job.posting.id &&
-              other.company === job.posting.company &&
-              sameTitle(other.title) === sameTitle(job.posting.title) &&
-              other.created_at < job.posting.created_at,
-          ),
+          reposted: reposted.has(job.posting.id),
           daysSinceApplied: job.status === "applied" && applied ? days(applied.changed_at) : null,
         },
       };

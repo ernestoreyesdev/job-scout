@@ -41,6 +41,9 @@ export const GHOST_JOB_DAYS = 60;
 /** An application still "applied" this many days after it was marked so gets a follow-up reminder. */
 export const FOLLOW_UP_DAYS = 7;
 
+/** A posting counts as reposted when the same title went up at the company at least this many days earlier. */
+export const REPOST_DAYS = 15;
+
 export type ApplicationStatusRow = (typeof APPLICATION_STATUSES)[number];
 
 export type RunStatusRow = "queued" | "running" | "done" | "failed" | "stopped";
@@ -321,7 +324,9 @@ export type Database = {
       };
     };
     Views: { [_ in never]: never };
-    Functions: { [_ in never]: never };
+    Functions: {
+      reposted_postings: { Args: { job_ids: string[]; days: number }; Returns: { id: string }[] };
+    };
     Enums: {
       job_source: JobSourceRow;
       application_status: ApplicationStatusRow;
