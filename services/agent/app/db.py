@@ -22,9 +22,11 @@ class Rest:
         res.raise_for_status()
         return res.json()
 
-    def insert(self, table: str, rows: list[dict[str, Any]] | dict[str, Any], on_conflict: str | None = None) -> list[dict[str, Any]]:
+    def insert(
+        self, table: str, rows: list[dict[str, Any]] | dict[str, Any], on_conflict: str | None = None, select: str | None = None
+    ) -> list[dict[str, Any]]:
         prefer = ["return=representation"]
-        params = {}
+        params = {"select": select} if select else {}
         if on_conflict:
             prefer.append("resolution=merge-duplicates")
             params["on_conflict"] = on_conflict

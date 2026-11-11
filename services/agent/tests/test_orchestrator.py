@@ -1,5 +1,5 @@
 import threading
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -101,18 +101,17 @@ class FakeRest:
         companies: list[dict[str, str]] | None = None,
         hidden: list[str] | None = None,
         discoveries: list[dict[str, str]] | None = None,
-        snapshots: list[dict[str, Any]] | None = None,
     ):
         self.tracked = tracked or []
         self.companies = companies or []
         self.hidden = hidden or []
         self.discoveries = discoveries or []
-        self.snapshots = snapshots or []
-        self.snapshot_params: list[dict[str, str]] = []
         self.tracked_postings: list[dict[str, Any]] = []
         self.labeled: list[dict[str, Any]] = []
         self.unembedded_labeled: list[dict[str, Any]] = []
         self.unembedded: list[dict[str, str]] = []
+        self.descriptions: list[dict[str, str]] = []
+        self.stored: list[dict[str, Any]] = []
         self.rpcs: list[tuple[str, dict[str, Any]]] = []
         self.inserts: list[tuple[str, Any]] = []
         self.updates: list[tuple[str, dict[str, str], dict[str, Any]]] = []
@@ -126,11 +125,12 @@ class FakeRest:
             return [{"company_id": company_id, "hidden": True} for company_id in self.hidden]
         if table == "directory_discoveries":
             return self.discoveries
-        if table == "board_snapshots":
-            self.snapshot_params.append(params)
-            return self.snapshots
-        if table == "postings":
+        if table == "postings" and "embedding" in params:
             return self.unembedded
+        if table == "postings" and params.get("select") == "id,description":
+            return self.descriptions
+        if table == "postings":
+            return self.stored[int(params.get("offset", "0")) :][: int(params.get("limit", "1000"))]
         if "posting.embedding" in params:
             return self.unembedded_labeled
         if params.get("fit_label", "").startswith("eq."):
@@ -141,11 +141,13 @@ class FakeRest:
             return self.tracked_postings
         return [{"posting_id": posting_id} for posting_id in self.tracked]
 
-    def insert(self, table: str, rows: Any, on_conflict: str | None = None) -> list[dict[str, Any]]:
+    def insert(self, table: str, rows: Any, on_conflict: str | None = None, select: str | None = None) -> list[dict[str, Any]]:
         with self.lock:
             self.inserts.append((table, rows))
         if table == "postings":
-            return [{**row, "id": f"posting-{row['external_id']}"} for row in rows]
+            return [{**row, "id": f"posting-{row['external_id']}", "created_at": ""} for row in rows]
+        if table == "board_refreshes":
+            return [{**rows, "id": "refresh-1"}]
         return [rows]
 
     def update(self, table: str, filters: dict[str, str], patch: dict[str, Any]) -> list[dict[str, Any]]:
@@ -215,8 +217,10 @@ def test_scores_and_saves_every_match():
 
     assert (result.companies, result.found, result.matched, result.scored, result.failed) == (1, 4, 3, 3, 0)
     assert saved_ids(user) == ["posting-1", "posting-3", "posting-4"]
-    [postings] = service.inserted("postings")
-    assert [row["external_id"] for row in postings] == ["1", "3", "4"]
+    stored, matched = service.inserted("postings")
+    assert sorted(row["external_id"] for row in stored) == ["1", "2", "3", "4"]
+    assert all(row["last_seen_at"] and row["closed_at"] is None for row in stored)
+    assert [row["external_id"] for row in matched] == ["1", "3", "4"] and "description" not in matched[0]
     saved = user.inserted("applications")[0]
     assert saved["fit_score"] == 72 and saved["gaps"] == ["Kubernetes"] and "status" not in saved
     assert (usage.input_tokens, usage.output_tokens) == (300, 60)
@@ -350,7 +354,7 @@ def directory_run(
     recent_discovery: bool = False,
     names: dict[tuple[str, str], str] | None = None,
     kinds: dict[tuple[str, str], str] | None = None,
-    snapshots: list[dict[str, Any]] | None = None,
+    stored: list[dict[str, Any]] | None = None,
 ):
     fetched: list[tuple[str, str, str]] = []
     discover_calls: list[tuple[Any, ...]] = []
@@ -380,8 +384,8 @@ def directory_run(
     service = FakeRest(
         companies=companies,
         discoveries=[{"id": "recent", "keywords": ["software engineer"]}] if recent_discovery else [],
-        snapshots=snapshots,
     )
+    service.stored = stored or []
     outcome = run(
         rule=SearchRule(keywords=["software engineer"], workplace_types=["remote"]),
         service=service,
@@ -1051,7 +1055,7 @@ def test_the_same_job_from_two_sources_is_scored_once_from_its_board():
 def test_scoring_saves_the_facts_read_from_each_posting():
     _, _, _, service, _, _ = run(jobs=[posting("1", "Software Engineer, Backend")])
 
-    [(table, filters, patch)] = [update for update in service.updates if update[0] == "postings"]
+    [(table, filters, patch)] = [update for update in service.updates if update[0] == "postings" and "id" in update[1]]
     assert filters == {"id": "eq.posting-1"}
     assert (patch["salary_min"], patch["salary_max"], patch["years_experience"]) == (150000, 190000, 5)
     assert patch["tech_stack"] == ["Python"] and patch["workplace_type"] == "remote" and patch["details_extracted_at"]
@@ -1201,31 +1205,93 @@ def workday_company(board: str, open_jobs: int = 0) -> dict[str, Any]:
     return {**company(board), "source": "workday", "open_jobs": open_jobs}
 
 
-def test_a_fresh_workday_snapshot_is_used_instead_of_downloading_the_board():
-    snapshot = {"source": "workday", "board": "acme", "postings": [REMOTE_JOB.model_dump(mode="json")]}
+def test_a_recently_fetched_board_is_read_from_saved_jobs_instead_of_its_system():
+    checked = datetime.now(UTC).isoformat()
+    saved = {k: v for k, v in REMOTE_JOB.model_dump(mode="json").items() if k != "description"}
 
     (result, _, _, service, _, _), fetched, _ = directory_run(
-        [*full_directory(), workday_company("acme")], [], {}, snapshots=[snapshot]
+        [*full_directory(), {**workday_company("acme"), "checked_at": checked}], [], {}, stored=[{**saved, "board": "acme", "source": "workday"}]
     )
 
     assert not any(board == "acme" for _, board, _ in fetched)
     [fetch] = [f for f in result.board_fetches if f["board"] == "workday/acme"]
     assert (fetch["outcome"], fetch["jobs"]) == ("cached", 1)
-    [params] = service.snapshot_params
-    assert params["fetched_at"].startswith("gte.")
-    saved = [row for rows in service.inserted("companies") for row in rows]
-    assert not any(row["board"] == "acme" for row in saved)
+    assert result.matched == 1
+    saved_companies = [row for rows in service.inserted("companies") for row in rows]
+    assert not any(row["board"] == "acme" for row in saved_companies)
 
 
-def test_a_live_workday_fetch_saves_a_snapshot_and_other_systems_do_not():
-    (_, _, _, service, _, _), _, _ = directory_run(
-        [*full_directory("beta"), workday_company("acme.wd1/careers")],
-        [],
-        {"acme.wd1/careers": [REMOTE_JOB], "beta": [REMOTE_JOB]},
+def test_a_board_checked_too_long_ago_is_fetched_again():
+    checked = (datetime.now(UTC) - timedelta(hours=orchestrator.FRESH_BOARD_HOURS + 1)).isoformat()
+
+    _, fetched, _ = directory_run([*full_directory(), {**company("acme"), "checked_at": checked}], [], {"acme": [REMOTE_JOB]})
+
+    assert ("ashby", "acme", "Acme") in fetched
+
+
+def test_saved_jobs_keep_their_description_when_a_job_list_leaves_it_out():
+    service = FakeRest()
+    listed = posting("1", "Engineer", description="")
+
+    orchestrator.store_jobs(service, {"workday/acme": [listed], "ashby/beta": [posting("2", "Engineer")]})
+
+    described, bare = service.inserted("postings")
+    assert [row["external_id"] for row in described] == ["2"] and described[0]["description"]
+    assert [row["external_id"] for row in bare] == ["1"] and "description" not in bare[0]
+
+
+def test_a_complete_fetch_closes_the_jobs_its_board_no_longer_lists():
+    service = FakeRest()
+
+    orchestrator.store_jobs(service, {"ashby/acme": [posting("1", "Engineer")]})
+
+    [(table, filters, patch)] = service.updates
+    assert table == "postings" and (filters["source"], filters["board"], filters["closed_at"]) == ("eq.ashby", "eq.acme", "is.null")
+    assert filters["or"] == f"(last_seen_at.is.null,last_seen_at.lt.{patch['closed_at']})"
+
+
+def test_scoring_loads_saved_descriptions_before_asking_the_job_system():
+    service = FakeRest()
+    service.descriptions = [{"id": "posting-1", "description": "Saved description."}]
+    asked: list[str] = []
+
+    def describer(p: Posting) -> str:
+        asked.append(p.external_id)
+        return "Fetched description."
+
+    ready = orchestrator.with_descriptions(
+        [("posting-1", posting("1", "Engineer", description="")), ("posting-2", posting("2", "Engineer", description=""))],
+        service,
+        describer,
     )
 
-    [snapshot] = service.inserted("board_snapshots")
-    assert (snapshot["source"], snapshot["board"], len(snapshot["postings"])) == ("workday", "acme.wd1/careers", 1)
+    assert [(posting_id, p.description) for posting_id, p in ready] == [
+        ("posting-1", "Saved description."),
+        ("posting-2", "Fetched description."),
+    ]
+    assert asked == ["2"]
+
+
+def test_a_refresh_fetches_every_board_and_records_itself():
+    service = FakeRest(companies=[company("acme"), {**company("agency"), "kind": "staffing"}, company("gone")])
+    rpcs: list[str] = []
+    service.rpc = lambda function, args: rpcs.append(function) or 2
+
+    def fetcher(source: str, board: str, name: str) -> list[Posting]:
+        if board == "gone":
+            raise BoardNotFound(board)
+        return [posting(board, "Engineer")]
+
+    summary = orchestrator.refresh_boards(service, fetcher)
+
+    assert (summary["boards"], summary["jobs"], summary["deleted_jobs"], summary["failures"]) == (2, 2, 2, 0)
+    assert rpcs == ["delete_stale_postings"]
+    [refresh] = service.inserted("board_refreshes")
+    assert refresh["started_at"]
+    [(_, filters, patch)] = [update for update in service.updates if update[0] == "board_refreshes"]
+    assert filters["id"] == "eq.refresh-1" and patch["finished_at"]
+    assert {fetch["board"] for fetch in patch["board_fetches"]} == {"ashby/acme", "ashby/agency", "ashby/gone"}
+    assert ("companies", {"id": "eq.id-gone"}, {"missed_checks": 1}) in service.updates
 
 
 def test_the_biggest_boards_are_fetched_first(monkeypatch: pytest.MonkeyPatch):

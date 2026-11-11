@@ -1,3 +1,4 @@
+import hmac
 import io
 import logging
 from collections.abc import Callable
@@ -7,7 +8,7 @@ from typing import Annotated, Any
 import anthropic
 import httpx
 from docx import Document
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
 from pypdf import PdfReader
 
 from app.agents.orchestrator import (
@@ -15,6 +16,7 @@ from app.agents.orchestrator import (
     ImportResult,
     SearchResult,
     import_companies,
+    refresh_boards,
     rescore as orchestrate_rescore,
     run_search as orchestrate_search,
 )
@@ -35,6 +37,8 @@ RUN_TIME_LIMIT = timedelta(minutes=10)
 UNFINISHED = "in.(queued,running)"
 # Days of runs the admin page covers.
 STATS_DAYS = 30
+# A board refresh is refused when another started this recently.
+REFRESH_COOLDOWN = timedelta(hours=1)
 
 
 app = FastAPI(title="job-finder agent")
@@ -507,10 +511,19 @@ def admin_stats(admin: Admin, settings: Config) -> dict[str, Any]:
     App-wide data for the admin page: every user, the last STATS_DAYS of runs,
     of Claude calls summed up by step, of board fetches by board and job system
     and of page load measurements by page,
+    the board refreshes with each board's fetch times and storage,
     the company directory, every good or bad label, and jobs past "new".
     """
     service = service_db(settings)
     since = (datetime.now(UTC) - timedelta(days=STATS_DAYS)).isoformat()
+    refreshes = service.select(
+        "board_refreshes",
+        {
+            "select": "id,started_at,finished_at,boards,jobs,new_jobs,closed_jobs,deleted_jobs,failures,board_fetches",
+            "started_at": f"gte.{since}",
+            "order": "started_at.desc",
+        },
+    )
     return {
         "generated_at": datetime.now(UTC).isoformat(),
         "days": STATS_DAYS,
@@ -560,6 +573,8 @@ def admin_stats(admin: Admin, settings: Config) -> dict[str, Any]:
                 for fetch in run["board_fetches"] or []
             ]
         ),
+        "refreshes": refreshes,
+        "refresh_boards": refresh_board_rows(refreshes, service.rpc("board_storage", {})),
         "companies": service.select("companies", {"select": "name,source,board,kind,open_jobs,missed_checks"}),
         "labels": service.select("applications", {"select": "fit_score,fit_label", "fit_label": "not.is.null"}),
         "applications": service.select("applications", {"select": "user_id,status", "status": "neq.new"}),
@@ -663,3 +678,58 @@ def board_stats(fetches: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]
         "sources": sorted(sources, key=lambda row: row["total_ms"], reverse=True),
         "slowest": sorted(boards, key=lambda row: row["median_ms"], reverse=True)[:SLOW_BOARDS],
     }
+
+
+def refresh_board_rows(refreshes: list[dict[str, Any]], storage: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Each board's refresh fetches, newest refresh first, summed up with its saved
+    jobs and their storage: median and latest fetch time, failed fetches, open
+    and saved jobs, and bytes. Slowest median first.
+    """
+    fetches: dict[str, list[dict[str, Any]]] = {}
+    for refresh in refreshes:
+        for fetch in refresh["board_fetches"]:
+            fetches.setdefault(fetch["board"], []).append(fetch)
+    stored = {f"{row['source']}/{row['board']}": row for row in storage}
+    rows = []
+    for board in fetches.keys() | stored.keys():
+        runs = fetches.get(board, [])
+        times = sorted(run["ms"] for run in runs)
+        saved = stored.get(board, {})
+        rows.append(
+            {
+                "board": board,
+                "source": board.split("/", 1)[0],
+                "median_ms": times[len(times) // 2] if times else None,
+                "last_ms": runs[0]["ms"] if runs else None,
+                "last_outcome": runs[0]["outcome"] if runs else None,
+                "failures": sum(1 for run in runs if run["outcome"] != "ok"),
+                "open_jobs": saved.get("open_jobs", 0),
+                "saved_jobs": saved.get("jobs", 0),
+                "bytes": saved.get("bytes", 0),
+            }
+        )
+    return sorted(rows, key=lambda row: row["median_ms"] or -1, reverse=True)
+
+
+@app.post("/refresh", status_code=202)
+def start_refresh(settings: Config, background: BackgroundTasks, authorization: Annotated[str | None, Header()] = None) -> dict[str, str]:
+    """Starts the daily board refresh; the caller sends the cron secret, and a refresh within REFRESH_COOLDOWN is refused."""
+    if not settings.cron_secret:
+        raise HTTPException(status_code=503, detail="Board refresh isn't set up: CRON_SECRET is missing.")
+    if not hmac.compare_digest((authorization or "").encode(), f"Bearer {settings.cron_secret}".encode()):
+        raise HTTPException(status_code=401, detail="Not allowed.")
+    since = (datetime.now(UTC) - REFRESH_COOLDOWN).isoformat()
+    if service_db(settings).select("board_refreshes", {"select": "id", "started_at": f"gte.{since}", "limit": "1"}):
+        raise HTTPException(status_code=409, detail="A board refresh started less than an hour ago.")
+    background.add_task(run_refresh, settings)
+    return {"status": "started"}
+
+
+def run_refresh(settings: Settings) -> None:
+    try:
+        summary = refresh_boards(service_db(settings))
+    except Exception:
+        logger.exception("board refresh failed")
+        return
+    logger.info("board refresh finished", extra={key: value for key, value in summary.items() if key != "board_fetches"})

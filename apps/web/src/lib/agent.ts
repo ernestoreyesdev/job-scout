@@ -37,3 +37,11 @@ export async function callAgent<T>(path: string, init: { method: string; body?: 
 
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 }
+
+/** Asks the agent to start the daily board refresh, passing on the cron secret; returns the agent's status code. */
+export async function startBoardRefresh(authorization: string): Promise<number> {
+  const agentUrl = process.env.AGENT_URL;
+  if (!agentUrl) throw new Error("AGENT_URL is not configured.");
+  const response = await fetch(`${agentUrl}/refresh`, { method: "POST", headers: { Authorization: authorization }, cache: "no-store" });
+  return response.status;
+}

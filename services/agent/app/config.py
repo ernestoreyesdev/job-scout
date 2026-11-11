@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     scoring_effort: str = "low"
     discovery_model: str = "claude-haiku-5-5"
     analysis_model: str = "claude-haiku-5-5"
+    cron_secret: str | None = None
 
 
 @lru_cache

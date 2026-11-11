@@ -21,14 +21,13 @@ from app.config import Settings
 from app.db import Rest
 from app.embeddings import embed_jobs, job_text
 from app.sources import (
-    CACHE_SECONDS,
-    describes_separately,
     board_from_url,
     careers_url,
     default_name,
     describe,
     display_name,
     fetch_board,
+    fetch_live,
     find_company,
     is_complete,
 )
@@ -65,6 +64,11 @@ MAX_MISSED_CHECKS = 3
 # Most recent jobs per label shown to scoring, and how many of each label it takes before any are shown.
 MAX_EXAMPLES = 15
 MIN_EXAMPLES = 3
+# A board fetched this recently is read from postings instead of its system; the daily refresh keeps boards inside it.
+FRESH_BOARD_HOURS = 25
+# Jobs saved per request, and days a closed job nobody tracks is kept.
+STORE_CHUNK = 500
+STALE_JOB_DAYS = 30
 
 Board = tuple[str, str, str, str]
 
@@ -129,6 +133,7 @@ def run_search(
                     raise
                 report("Gathering open jobs…")
                 found = web_lookup(rule.company, client, settings, usage, fetcher, lookup)
+            store_jobs(service, {f"{found.source}/{found.board}": found.postings})
             save_companies(
                 service, [(found.source, found.board, found.name, "lookup")], {f"{found.source}/{found.board}": found.postings}
             )
@@ -179,7 +184,12 @@ def run_search(
 
     matched.sort(key=lambda p: p.posted_at or datetime.min.replace(tzinfo=UTC), reverse=True)
     matched = one_per_job(one_per_title(matched))
-    rows = service.insert("postings", [p.model_dump(mode="json") for p in matched], on_conflict="source,external_id")
+    rows = service.insert(
+        "postings",
+        [p.model_dump(mode="json", exclude={"description"}) for p in matched],
+        on_conflict="source,external_id",
+        select="id,source,external_id",
+    )
     ids = {(row["source"], row["external_id"]): row["id"] for row in rows}
     tracked = {row["posting_id"] for row in user.select("applications", {"select": "posting_id"})}
     fresh = [(ids[(p.source, p.external_id)], p) for p in matched if ids[(p.source, p.external_id)] not in tracked]
@@ -264,13 +274,13 @@ def directory_postings(
     """
     Open jobs at every directory company the user hasn't hidden, topping the
     directory up from the web while it's small or once a week. Staffing agencies
-    and aggregators count as hidden unless the user chose to show them. The
-    biggest boards start first; boards whose systems list jobs without
-    descriptions reuse a snapshot from the last CACHE_SECONDS. Returns
+    and aggregators count as hidden unless the user chose to show them. Boards
+    fetched within FRESH_BOARD_HOURS are read from postings; the rest are
+    fetched, biggest first, and their jobs saved. Returns
     the jobs, the companies checked, the boards ("source/board") that couldn't
     be reached, and how long each board's fetch took and how it ended.
     """
-    directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,kind,open_jobs"})
+    directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,kind,open_jobs,checked_at"})
     choices = {row["company_id"]: row["hidden"] for row in user.select("hidden_companies", {"select": "company_id,hidden"})}
     known = {(c["source"], c["board"]) for c in directory}
     boards: list[Board] = [
@@ -304,69 +314,34 @@ def directory_postings(
 
     sizes = {(c["source"], c["board"]): c.get("open_jobs") or 0 for c in directory}
     boards.sort(key=lambda entry: sizes.get((entry[0], entry[1]), 0), reverse=True)
-    snapshots = fresh_snapshots(service)
+    since = datetime.now(UTC) - timedelta(hours=FRESH_BOARD_HOURS)
+    fresh = {
+        f"{c['source']}/{c['board']}"
+        for c in directory
+        if c.get("checked_at") and datetime.fromisoformat(c["checked_at"]) >= since
+    }
     report("Gathering open jobs…")
-    lock = threading.Lock()
-    fetched: dict[str, list[Posting]] = {}
-    gone: list[str] = []
-    unreachable: list[str] = []
-    fetches: list[dict[str, Any]] = []
-    from_snapshot: set[str] = set()
-
-    def fetch(entry: Board) -> None:
-        source, board, name, _ = entry
-        key = f"{source}/{board}"
-        started = time.monotonic()
-
-        def record(outcome: str, jobs: int = 0) -> None:
-            ms = round((time.monotonic() - started) * 1000)
-            fetches.append({"board": key, "source": source, "ms": ms, "jobs": jobs, "outcome": outcome})
-
-        if key in snapshots:
-            with lock:
-                fetched[key] = snapshots[key]
-                from_snapshot.add(key)
-                record("cached", len(snapshots[key]))
-                report("Gathering open jobs…")
-            return
-        for attempt in range(2):
-            try:
-                postings = fetcher(source, board, name)
-                break
-            except BoardNotFound:
-                with lock:
-                    gone.append(key)
-                    record("gone")
-                return
-            except Exception as error:
-                logger.warning("fetching %s failed (attempt %d): %s", key, attempt + 1, error, extra={"board": key})
-                if attempt == 0:
-                    time.sleep(FETCH_RETRY_SECONDS)
-        else:
-            with lock:
-                unreachable.append(key)
-                record("unreachable")
-            return
-        if describes_separately(source):
-            save_snapshot(service, source, board, postings)
-        with lock:
-            fetched[key] = postings
-            record("ok", len(postings))
-            report("Gathering open jobs…")
-
-    with ContextThreadPool(max_workers=FETCH_CONCURRENCY) as pool:
-        list(pool.map(fetch, boards))
+    stored = stored_jobs(service, [entry for entry in boards if f"{entry[0]}/{entry[1]}" in fresh])
+    fetched, gone, unreachable, fetches = fetch_boards(
+        [entry for entry in boards if f"{entry[0]}/{entry[1]}" not in fresh], fetcher, report
+    )
+    store_jobs(service, fetched)
+    fetches += [
+        {"board": key, "source": key.split("/", 1)[0], "ms": 0, "jobs": len(jobs), "outcome": "cached"}
+        for key, jobs in stored.items()
+    ]
 
     live = [entry for entry in boards if f"{entry[0]}/{entry[1]}" in fetched]
-    save_companies(service, [entry for entry in live if f"{entry[0]}/{entry[1]}" not in from_snapshot], fetched)
+    save_companies(service, live, fetched)
     if any(entry[3] == "discovery" and (entry[0], entry[1]) not in known for entry in live):
         remove_duplicate_names(service)
     if kinds:
         record_kinds(service, {key: kind for key, kind in kinds.items() if f"{key[0]}/{key[1]}" in fetched})
     record_misses(service, [c for c in directory if f"{c['source']}/{c['board']}" in gone])
     mark_closed(user, service, fetched)
-    searched = [entry for entry in live if f"{entry[0]}/{entry[1]}" not in skipped]
-    postings = [p for key, found in fetched.items() if key not in skipped for p in found]
+    listed = {**stored, **fetched}
+    searched = [entry for entry in boards if f"{entry[0]}/{entry[1]}" in listed and f"{entry[0]}/{entry[1]}" not in skipped]
+    postings = [p for key, found in listed.items() if key not in skipped for p in found]
     return postings, len(searched), sorted(unreachable), fetches
 
 
@@ -434,12 +409,21 @@ def with_descriptions(
     todo: list[tuple[str, Posting]], service: Rest, describer: Callable[[Posting], str]
 ) -> list[tuple[str, Posting]]:
     """
-    Fills in descriptions that a system's job list left out and saves them.
-    A job whose description can't be fetched is dropped rather than scored blind.
+    Fills in descriptions from postings, then fetches the ones a system's job
+    list left out and saves them. A job whose description can't be fetched is
+    dropped rather than scored blind.
     """
+    missing = [posting_id for posting_id, posting in todo if not posting.description]
+    saved = (
+        {row["id"]: row["description"] for row in service.select("postings", {"select": "id,description", "id": f"in.({','.join(missing)})"})}
+        if missing
+        else {}
+    )
     ready: list[tuple[str, Posting]] = []
     described: list[Posting] = []
     for posting_id, posting in todo:
+        if not posting.description and saved.get(posting_id):
+            posting = posting.model_copy(update={"description": saved[posting_id]})
         if posting.description:
             ready.append((posting_id, posting))
             continue
@@ -873,30 +857,6 @@ def labeled_job(label: str, posting: dict[str, Any]) -> LabeledJob:
     )
 
 
-def fresh_snapshots(service: Rest) -> dict[str, list[Posting]]:
-    """Board snapshots saved within CACHE_SECONDS, by "source/board"."""
-    since = (datetime.now(UTC) - timedelta(seconds=CACHE_SECONDS)).isoformat()
-    rows = service.select("board_snapshots", {"select": "source,board,postings", "fetched_at": f"gte.{since}"})
-    return {f"{row['source']}/{row['board']}": [Posting.model_validate(p) for p in row["postings"]] for row in rows}
-
-
-def save_snapshot(service: Rest, source: str, board: str, postings: list[Posting]) -> None:
-    """Saves a board's job list for later searches; a failure is logged so it never fails the search."""
-    try:
-        service.insert(
-            "board_snapshots",
-            {
-                "source": source,
-                "board": board,
-                "postings": [p.model_dump(mode="json") for p in postings],
-                "fetched_at": datetime.now(UTC).isoformat(),
-            },
-            on_conflict="source,board",
-        )
-    except Exception as error:
-        logger.warning("saving the %s/%s snapshot failed: %s", source, board, error, extra={"board": f"{source}/{board}"})
-
-
 def save_embeddings(service: Rest, jobs: list[tuple[str, str]], embed: Callable[[list[str]], list[list[float]]]) -> None:
     """Embeds each (posting id, text) and saves the vectors in one call."""
     if not jobs:
@@ -944,3 +904,148 @@ def nearest_examples(
     save_embeddings(service, pending, embed)
     rows = user.rpc("nearest_labeled_jobs", {"job_ids": ids, "per_label": MAX_EXAMPLES})
     return [labeled_job(row["fit_label"], row["posting"]) for row in rows]
+
+
+def fetch_boards(
+    boards: list[Board], fetcher: Callable[[str, str, str], list[Posting]], report: Callable[[str], None]
+) -> tuple[dict[str, list[Posting]], list[str], list[str], list[dict[str, Any]]]:
+    """
+    Fetches boards FETCH_CONCURRENCY at a time, retrying a failed fetch once.
+    Returns the jobs by "source/board", the boards that are gone, the ones that
+    couldn't be reached, and how long each fetch took and how it ended.
+    """
+    lock = threading.Lock()
+    fetched: dict[str, list[Posting]] = {}
+    gone: list[str] = []
+    unreachable: list[str] = []
+    fetches: list[dict[str, Any]] = []
+
+    def fetch(entry: Board) -> None:
+        source, board, name, _ = entry
+        key = f"{source}/{board}"
+        started = time.monotonic()
+
+        def record(outcome: str, jobs: int = 0) -> None:
+            ms = round((time.monotonic() - started) * 1000)
+            fetches.append({"board": key, "source": source, "ms": ms, "jobs": jobs, "outcome": outcome})
+
+        for attempt in range(2):
+            try:
+                postings = fetcher(source, board, name)
+                break
+            except BoardNotFound:
+                with lock:
+                    gone.append(key)
+                    record("gone")
+                return
+            except Exception as error:
+                logger.warning("fetching %s failed (attempt %d): %s", key, attempt + 1, error, extra={"board": key})
+                if attempt == 0:
+                    time.sleep(FETCH_RETRY_SECONDS)
+        else:
+            with lock:
+                unreachable.append(key)
+                record("unreachable")
+            return
+        with lock:
+            fetched[key] = postings
+            record("ok", len(postings))
+            report("Gathering open jobs…")
+
+    with ContextThreadPool(max_workers=FETCH_CONCURRENCY) as pool:
+        list(pool.map(fetch, boards))
+
+    return fetched, gone, unreachable, fetches
+
+
+def store_jobs(service: Rest, fetched: dict[str, list[Posting]]) -> tuple[int, int]:
+    """
+    Saves every fetched job to postings as seen and open, keeping saved
+    descriptions a job list leaves out, and closes the jobs a complete fetch of
+    their board no longer lists. Returns how many jobs were new and how many closed.
+    """
+    seen = datetime.now(UTC).isoformat()
+    unique = {(p.source, p.external_id): p for postings in fetched.values() for p in postings}
+    rows = [
+        {**p.model_dump(mode="json", exclude=None if p.description else {"description"}), "last_seen_at": seen, "closed_at": None}
+        for p in unique.values()
+    ]
+    new = 0
+    for described in (True, False):
+        batch = [row for row in rows if ("description" in row) == described]
+        for i in range(0, len(batch), STORE_CHUNK):
+            saved = service.insert("postings", batch[i : i + STORE_CHUNK], on_conflict="source,external_id", select="created_at")
+            new += sum(1 for row in saved if row["created_at"] >= seen)
+    closed = 0
+    for key, postings in fetched.items():
+        source, board = key.split("/", 1)
+        if not is_complete(source, postings):
+            continue
+        closed += len(
+            service.update(
+                "postings",
+                {
+                    "select": "id",
+                    "source": f"eq.{source}",
+                    "board": f"eq.{board}",
+                    "closed_at": "is.null",
+                    "or": f"(last_seen_at.is.null,last_seen_at.lt.{seen})",
+                },
+                {"closed_at": seen},
+            )
+        )
+    return new, closed
+
+
+def stored_jobs(service: Rest, boards: list[Board]) -> dict[str, list[Posting]]:
+    """The open jobs saved for each board by "source/board", without descriptions, which scoring loads when needed."""
+    jobs: dict[str, list[Posting]] = {f"{source}/{board}": [] for source, board, _, _ in boards}
+    if not jobs:
+        return jobs
+    names = ",".join(f'"{board}"' for board in sorted({board for _, board, _, _ in boards}))
+    params = {
+        "select": "source,board,external_id,title,company,location,url,posted_at,workplace_type",
+        "board": f"in.({names})",
+        "closed_at": "is.null",
+        "order": "id",
+    }
+    page = 1000
+    offset = 0
+    while True:
+        rows = service.select("postings", {**params, "limit": str(page), "offset": str(offset)})
+        for row in rows:
+            key = f"{row['source']}/{row['board']}"
+            if key in jobs:
+                jobs[key].append(Posting.model_validate({**row, "description": ""}))
+        if len(rows) < page:
+            return jobs
+        offset += page
+
+
+def refresh_boards(service: Rest, fetcher: Callable[[str, str, str], list[Posting]] = fetch_live) -> dict[str, Any]:
+    """
+    Fetches every directory board from its system, saves the jobs, closes the
+    ones no longer listed, deletes jobs closed STALE_JOB_DAYS ago that nobody
+    tracks, and records the refresh in board_refreshes. Returns that record.
+    """
+    [refresh] = service.insert("board_refreshes", {"started_at": datetime.now(UTC).isoformat()}, select="id")
+    directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,open_jobs"})
+    directory.sort(key=lambda c: c.get("open_jobs") or 0, reverse=True)
+    boards: list[Board] = [(c["source"], c["board"], c["name"], c["found_by"]) for c in directory]
+    fetched, gone, unreachable, fetches = fetch_boards(boards, fetcher, lambda _: None)
+    new, closed = store_jobs(service, fetched)
+    save_companies(service, [entry for entry in boards if f"{entry[0]}/{entry[1]}" in fetched], fetched)
+    record_misses(service, [c for c in directory if f"{c['source']}/{c['board']}" in gone])
+    deleted = service.rpc("delete_stale_postings", {"days": STALE_JOB_DAYS})
+    summary = {
+        "finished_at": datetime.now(UTC).isoformat(),
+        "boards": len(fetched),
+        "jobs": sum(len(postings) for postings in fetched.values()),
+        "new_jobs": new,
+        "closed_jobs": closed,
+        "deleted_jobs": deleted,
+        "failures": len(unreachable),
+        "board_fetches": fetches,
+    }
+    service.update("board_refreshes", {"id": f"eq.{refresh['id']}", "select": "id"}, summary)
+    return summary

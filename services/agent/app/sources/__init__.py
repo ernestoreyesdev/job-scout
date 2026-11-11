@@ -139,3 +139,8 @@ def is_complete(source: str, postings: list[Posting], sources: tuple[JobSource, 
 def describes_separately(source: str, sources: tuple[JobSource, ...] | None = None) -> bool:
     """True when a system's job list leaves descriptions out and describe() fetches them per job."""
     return type(source_named(source, sources)).describe is not JobSource.describe
+
+
+def fetch_live(source: SourceName, board: str, company: str) -> list[Posting]:
+    """Open postings on one known board, fetched from its system even when a recent fetch is in memory."""
+    return source_named(source).fetch(board, company)

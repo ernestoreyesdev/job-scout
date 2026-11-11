@@ -348,3 +348,55 @@ def test_board_stats_sum_up_job_systems_and_list_the_slowest_boards():
     assert (lever["fetches"], lever["failures"]) == (2, 1)
     assert [row["board"] for row in stats["slowest"]] == ["workday/acme", "lever/beta", "lever/gone"]
     assert stats["slowest"][0]["median_ms"] == 11000
+
+
+class RefreshRest:
+    def __init__(self, recent: bool):
+        self.recent = recent
+
+    def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
+        return [{"id": "refresh-1"}] if self.recent else []
+
+
+def start_refresh(monkeypatch: pytest.MonkeyPatch, secret: str | None, authorization: str | None, recent: bool = False):
+    monkeypatch.setattr(main, "service_db", lambda settings: RefreshRest(recent))
+    background = BackgroundTasks()
+    return main.start_refresh(SimpleNamespace(cron_secret=secret), background, authorization), background
+
+
+def test_a_refresh_needs_the_cron_secret(monkeypatch: pytest.MonkeyPatch):
+    for secret, authorization, status in ((None, "Bearer x", 503), ("a" * 32, None, 401), ("a" * 32, "Bearer wrong", 401)):
+        with pytest.raises(HTTPException) as refused:
+            start_refresh(monkeypatch, secret, authorization)
+        assert refused.value.status_code == status
+
+
+def test_a_refresh_is_refused_within_an_hour_of_the_last_one(monkeypatch: pytest.MonkeyPatch):
+    with pytest.raises(HTTPException) as refused:
+        start_refresh(monkeypatch, "a" * 32, f"Bearer {'a' * 32}", recent=True)
+
+    assert refused.value.status_code == 409
+
+
+def test_a_refresh_with_the_secret_starts_in_the_background(monkeypatch: pytest.MonkeyPatch):
+    result, background = start_refresh(monkeypatch, "a" * 32, f"Bearer {'a' * 32}")
+
+    assert result == {"status": "started"}
+    [task] = background.tasks
+    assert task.func is main.run_refresh
+
+
+def test_refresh_board_rows_join_fetch_times_with_storage():
+    refreshes = [
+        {"board_fetches": [{"board": "ashby/acme", "ms": 300, "outcome": "ok"}, {"board": "lever/beta", "ms": 900, "outcome": "unreachable"}]},
+        {"board_fetches": [{"board": "ashby/acme", "ms": 100, "outcome": "ok"}]},
+    ]
+    storage = [{"source": "ashby", "board": "acme", "jobs": 12, "open_jobs": 10, "bytes": 4096}]
+
+    rows = main.refresh_board_rows(refreshes, storage)
+
+    assert [row["board"] for row in rows] == ["lever/beta", "ashby/acme"]
+    acme = rows[1]
+    assert (acme["median_ms"], acme["last_ms"], acme["failures"]) == (300, 300, 0)
+    assert (acme["open_jobs"], acme["saved_jobs"], acme["bytes"]) == (10, 12, 4096)
+    assert (rows[0]["failures"], rows[0]["bytes"]) == (1, 0)

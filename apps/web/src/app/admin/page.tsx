@@ -57,6 +57,28 @@ type AdminStats = {
     slowest: (BoardFetches & { board: string; source: string })[];
   };
   vitals: { page: string; metric: (typeof WEB_VITALS)[number]; count: number; median: number; p75: number }[];
+  refreshes: {
+    id: string;
+    started_at: string;
+    finished_at: string | null;
+    boards: number;
+    jobs: number;
+    new_jobs: number;
+    closed_jobs: number;
+    deleted_jobs: number;
+    failures: number;
+  }[];
+  refresh_boards: {
+    board: string;
+    source: string;
+    median_ms: number | null;
+    last_ms: number | null;
+    last_outcome: string | null;
+    failures: number;
+    open_jobs: number;
+    saved_jobs: number;
+    bytes: number;
+  }[];
   companies: { name: string; source: string; board: string; kind: CompanyKindRow | null; open_jobs: number; missed_checks: number }[];
   labels: { fit_score: number | null; fit_label: FitLabelRow | null }[];
   applications: { user_id: string; status: ApplicationStatusRow }[];
@@ -165,6 +187,8 @@ async function AdminData() {
       <SpeedSection runs={searches} />
 
       <BoardSection boards={stats.boards} companies={stats.companies} days={stats.days} />
+
+      <RefreshSection refreshes={stats.refreshes} boards={stats.refresh_boards} companies={stats.companies} days={stats.days} />
 
       <SectionCard
         title="Claude calls by step"
@@ -465,7 +489,7 @@ function BoardSection({ boards, companies, days }: { boards: AdminStats["boards"
   return (
     <SectionCard
       title="Board fetches"
-      description={`Every board searches checked over the last ${days} days, timed from the first request to the last page, retry included. Workday-type boards reuse a job list saved within the last 6 hours when there is one.`}
+      description={`Every board searches checked over the last ${days} days, timed from the first request to the last page, retry included. Boards refreshed within the last 25 hours are read from saved jobs and count as from cache.`}
     >
       {boards.sources.length === 0 ? (
         <p className="text-sm text-muted-foreground">No board fetches recorded yet. Searches across all companies record them from now on.</p>
@@ -527,6 +551,118 @@ function BoardSection({ boards, companies, days }: { boards: AdminStats["boards"
           </Table>
           <p className="mt-3 text-xs text-muted-foreground">
             Boards download at the same time, a few at once, so the step takes less than the total time added up.
+          </p>
+        </>
+      )}
+    </SectionCard>
+  );
+}
+
+/** "2026-11-11 10:04 UTC". */
+function utcTime(iso: string): string {
+  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+}
+
+/** "640 KB" or "12.3 MB". */
+function size(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
+}
+
+/**
+ * The daily board refreshes, newest first, and every board's refresh fetch times with the jobs it has saved and the
+ * database space they take; slowest boards first.
+ */
+function RefreshSection({
+  refreshes,
+  boards,
+  companies,
+  days,
+}: {
+  refreshes: AdminStats["refreshes"];
+  boards: AdminStats["refresh_boards"];
+  companies: AdminStats["companies"];
+  days: number;
+}) {
+  const names = new Map(companies.map((company) => [`${company.source}/${company.board}`, company.name]));
+  const totalBytes = boards.reduce((sum, row) => sum + row.bytes, 0);
+
+  return (
+    <SectionCard
+      title="Board refresh"
+      description={`Every directory board is fetched once a day and its jobs saved, so searches read them from the database. Refreshes over the last ${days} days.`}
+    >
+      {refreshes.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No refreshes yet. The first one runs at 10:00 UTC.</p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Started</TableHead>
+              <TableHead className="text-right">Took</TableHead>
+              <TableHead className="text-right">Boards</TableHead>
+              <TableHead className="text-right">Jobs</TableHead>
+              <TableHead className="text-right">New</TableHead>
+              <TableHead className="text-right">Closed</TableHead>
+              <TableHead className="text-right">Deleted</TableHead>
+              <TableHead className="text-right">Failed</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {refreshes.map((row) => (
+              <TableRow key={row.id}>
+                <TableCell className="tabular-nums">{utcTime(row.started_at)}</TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {row.finished_at ? seconds(new Date(row.finished_at).getTime() - new Date(row.started_at).getTime()) : "Unfinished"}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">{row.boards}</TableCell>
+                <TableCell className="text-right tabular-nums">{row.jobs.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums">{row.new_jobs.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums">{row.closed_jobs.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums">{row.deleted_jobs.toLocaleString()}</TableCell>
+                <TableCell className={cn("text-right tabular-nums", row.failures > 0 && "text-destructive")}>{row.failures}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+      {boards.length > 0 && (
+        <>
+          <p className="mt-6 text-sm font-medium">By board, {size(totalBytes)} saved in all</p>
+          <Table className="mt-1">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Company</TableHead>
+                <TableHead>Board</TableHead>
+                <TableHead className="text-right">Median</TableHead>
+                <TableHead className="text-right">Last</TableHead>
+                <TableHead className="text-right">Failed</TableHead>
+                <TableHead className="text-right">Open jobs</TableHead>
+                <TableHead className="text-right">Saved jobs</TableHead>
+                <TableHead className="text-right">Space</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {boards.map((row) => (
+                <TableRow key={row.board}>
+                  <TableCell>{names.get(row.board) ?? "–"}</TableCell>
+                  <TableCell className="max-w-56 truncate font-mono text-xs" title={row.board}>
+                    {row.board}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{row.median_ms === null ? "–" : seconds(row.median_ms)}</TableCell>
+                  <TableCell className={cn("text-right tabular-nums", row.last_outcome !== null && row.last_outcome !== "ok" && "text-destructive")}>
+                    {row.last_ms === null ? "–" : row.last_outcome === "ok" ? seconds(row.last_ms) : row.last_outcome}
+                  </TableCell>
+                  <TableCell className={cn("text-right tabular-nums", row.failures > 0 && "text-destructive")}>{row.failures}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.open_jobs.toLocaleString()}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.saved_jobs.toLocaleString()}</TableCell>
+                  <TableCell className="text-right tabular-nums">{size(row.bytes)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Fetching boards costs nothing per call. What they use is the refresh&apos;s time, against Vercel&apos;s 300-second
+            limit, and database space, against Supabase&apos;s 500 MB free plan.
           </p>
         </>
       )}
