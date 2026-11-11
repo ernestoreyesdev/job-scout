@@ -112,6 +112,7 @@ class FakeRest:
         self.unembedded: list[dict[str, str]] = []
         self.descriptions: list[dict[str, str]] = []
         self.stored: list[dict[str, Any]] = []
+        self.ranked: list[dict[str, Any]] = []
         self.rpcs: list[tuple[str, dict[str, Any]]] = []
         self.inserts: list[tuple[str, Any]] = []
         self.updates: list[tuple[str, dict[str, str], dict[str, Any]]] = []
@@ -159,6 +160,8 @@ class FakeRest:
 
     def rpc(self, function: str, args: dict[str, Any]) -> Any:
         self.rpcs.append((function, args))
+        if function == "rank_postings":
+            return self.ranked
         return self.labeled if function == "nearest_labeled_jobs" else None
 
     def inserted(self, table: str) -> list[Any]:
@@ -190,7 +193,6 @@ def run(
         usage=usage,
         report=overrides.pop("report", progress.append),
         finder=overrides.pop("finder", lambda company: CompanyBoard("ashby", "acme", "Acme", jobs)),
-        triage=overrides.pop("triage", newest_first),
         namer=overrides.pop("namer", lambda client, model, boards, usage: {}),
         read_posts=overrides.pop("read_posts", lambda: []),
         expander=overrides.pop("expander", lambda client, model, keywords, usage: []),
@@ -202,10 +204,6 @@ def run(
 
 def fake_embed(texts: list[str]) -> list[list[float]]:
     return [[float(len(text))] for text in texts]
-
-
-def newest_first(client: Any, model: str, resume_text: str, postings: list[Posting], count: int, usage: Usage) -> list[int]:
-    return list(range(min(count, len(postings))))
 
 
 def saved_ids(user: FakeRest) -> list[str]:
@@ -724,34 +722,42 @@ def test_new_staffing_boards_are_saved_with_their_kind_but_not_searched():
     assert saved_ids(user) == ["posting-1"] and result.companies == 1
 
 
-def test_a_large_match_set_is_shortlisted_by_title_before_scoring():
+def test_a_large_match_set_is_ranked_by_resume_similarity_before_scoring():
     jobs = [posting(str(n), f"Software Engineer {n}") for n in range(1, 8)]
-    calls: list[tuple[int, int]] = []
-
-    def triage(client: Any, model: str, resume_text: str, postings: list[Posting], count: int, usage: Usage) -> list[int]:
-        calls.append((len(postings), count))
-        return [6, 4]
+    service = FakeRest()
+    service.ranked = [{"id": "posting-6", "similarity": 0.9}, {"id": "posting-4", "similarity": 0.8}]
 
     result, _, user, _, progress, _ = run(
-        rule=SearchRule(company="Acme", keywords=["software engineer"], limit=1), jobs=jobs, triage=triage
+        rule=SearchRule(company="Acme", keywords=["software engineer"], limit=1), jobs=jobs, service=service
     )
 
-    assert calls == [(7, 4)]
+    [(_, args)] = [call for call in service.rpcs if call[0] == "rank_postings"]
+    assert sorted(args["job_ids"]) == sorted(f"posting-{n}" for n in range(1, 8)) and args["sections"]
     assert progress.count("Matching jobs to your search…") == 2
-    assert saved_ids(user) == ["posting-5", "posting-7"] and result.kept == 1
+    assert saved_ids(user) == ["posting-4", "posting-6"] and result.kept == 1
 
 
-def test_no_shortlisting_when_the_matches_fit_in_the_pool():
-    calls: list[int] = []
+def test_jobs_without_an_embedding_follow_the_ranked_ones_in_their_order():
+    service = FakeRest()
+    service.ranked = [{"id": "c", "similarity": 0.9}]
+    fresh = [(posting_id, posting(posting_id, "Engineer")) for posting_id in ("a", "b", "c")]
 
-    run(triage=lambda *args: calls.append(1) or [])
+    ranked = orchestrator.by_resume_fit(fresh, "Python developer.", service, fake_embed)
 
-    assert calls == []
+    assert [posting_id for posting_id, _ in ranked] == ["c", "a", "b"]
 
 
-def test_more_matches_than_one_shortlist_holds_are_shortlisted_in_batches(monkeypatch: pytest.MonkeyPatch):
+def test_no_ranking_when_the_matches_fit_in_the_pool():
+    service = FakeRest()
+
+    run(service=service)
+
+    assert not any(function == "rank_postings" for function, _ in service.rpcs)
+
+
+def test_the_title_shortlist_runs_in_batches(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(orchestrator, "MAX_TRIAGE", 3)
-    jobs = [posting(str(n), f"Software Engineer {n}") for n in range(1, 8)]
+    fresh = [(f"posting-{n}", posting(str(n), f"Software Engineer {n}")) for n in range(1, 8)]
     calls: list[list[str]] = []
     lock = threading.Lock()
 
@@ -761,14 +767,13 @@ def test_more_matches_than_one_shortlist_holds_are_shortlisted_in_batches(monkey
         usage.input_tokens += 10
         return [len(postings) - 1]
 
-    result, _, user, _, _, usage = run(
-        rule=SearchRule(company="Acme", keywords=["software engineer"], limit=1), jobs=jobs, triage=triage
-    )
+    usage = Usage()
+    picked = orchestrator.by_title_fit(fresh, 1, None, SETTINGS, "Python developer.", usage, triage)
 
     batches, final = sorted(calls[:-1]), calls[-1]
     assert batches == [["1", "2", "3"], ["4", "5", "6"], ["7"]]
     assert final == ["3", "6", "7"]
-    assert saved_ids(user) == ["posting-7"] and usage.input_tokens >= 40
+    assert [posting_id for posting_id, _ in picked] == ["posting-7"] and usage.input_tokens >= 40
 
 
 def test_a_company_found_by_name_is_labeled_once():
@@ -1192,6 +1197,41 @@ def test_jobs_below_the_min_score_leave_the_tracker_even_under_the_limit():
     assert hidden_ids(user) == ["posting-3", "posting-4"]
 
 
+def test_jobs_below_the_min_score_never_reach_the_tracker_while_scoring():
+    jobs = [posting(str(n), f"Software Engineer {n}") for n in range(1, 3)]
+    messages = FakeMessages(set(), scores={"Engineer 1": 82, "Engineer 2": 40})
+
+    _, _, user, _, _, _ = run(
+        rule=SearchRule(company="Acme", keywords=["software engineer"], limit=3, min_score=70), jobs=jobs, messages=messages
+    )
+
+    saved = {row["posting_id"]: row for row in user.inserted("applications")}
+    assert saved["posting-2"]["in_tracker"] is False and "in_tracker" not in saved["posting-1"]
+
+
+def test_a_min_score_search_scores_more_jobs_until_enough_pass():
+    jobs = [posting(str(n), f"Software Engineer {n}") for n in range(1, 10)]
+    scores = {f"Engineer {n}": 40 for n in range(1, 10)} | {"Engineer 1": 80, "Engineer 5": 75, "Engineer 6": 72, "Engineer 9": 90}
+    messages = FakeMessages(set(), scores=scores)
+
+    result, messages, user, _, progress, _ = run(
+        rule=SearchRule(company="Acme", keywords=["software engineer"], limit=2, min_score=70), jobs=jobs, messages=messages
+    )
+
+    assert (result.scored, result.kept) == (8, 2)
+    assert not any("Software Engineer 9" in call["messages"][0]["content"][1]["text"] for call in messages.calls)
+    assert "Scoring more jobs to reach your minimum score…" in progress
+
+
+def test_a_min_score_search_stops_after_its_last_round():
+    jobs = [posting(str(n), f"Software Engineer {n}") for n in range(1, 10)]
+    messages = FakeMessages(set(), scores={f"Engineer {n}": 40 for n in range(1, 10)})
+
+    result, *_ = run(rule=SearchRule(company="Acme", keywords=["software engineer"], limit=1, min_score=70), jobs=jobs, messages=messages)
+
+    assert (result.scored, result.kept) == (6, 0)
+
+
 def test_a_search_records_how_long_each_step_took():
     timings: dict[str, int] = {}
 
@@ -1270,6 +1310,24 @@ def test_scoring_loads_saved_descriptions_before_asking_the_job_system():
         ("posting-2", "Fetched description."),
     ]
     assert asked == ["2"]
+
+
+def test_embedding_missing_jobs_takes_the_newest_up_to_the_limit_and_saves_in_chunks(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(orchestrator, "EMBED_CHUNK", 2)
+    service = FakeRest()
+    service.unembedded = [
+        {"id": f"posting-{n}", "title": "Engineer", "company": "Acme", "location": None, "description": "Builds."} for n in range(3)
+    ]
+    selects: list[dict[str, str]] = []
+    original = service.select
+    service.select = lambda table, params: selects.append(params) or original(table, params)
+
+    count = orchestrator.embed_missing(service, fake_embed, 50)
+
+    assert count == 3
+    [params] = selects
+    assert (params["embedding"], params["closed_at"], params["order"], params["limit"]) == ("is.null", "is.null", "created_at.desc", "50")
+    assert [len(args["embeddings"]) for function, args in service.rpcs if function == "set_posting_embeddings"] == [2, 1]
 
 
 def test_a_refresh_fetches_every_board_and_records_itself():

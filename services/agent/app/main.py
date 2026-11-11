@@ -520,7 +520,7 @@ def admin_stats(admin: Admin, settings: Config) -> dict[str, Any]:
     refreshes = service.select(
         "board_refreshes",
         {
-            "select": "id,started_at,finished_at,boards,jobs,new_jobs,closed_jobs,deleted_jobs,failures,board_fetches",
+            "select": "id,started_at,finished_at,boards,jobs,new_jobs,closed_jobs,embedded_jobs,deleted_jobs,failures,board_fetches",
             "started_at": f"gte.{since}",
             "order": "started_at.desc",
         },
@@ -684,8 +684,8 @@ def board_stats(fetches: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]
 def refresh_board_rows(refreshes: list[dict[str, Any]], storage: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Each board's refresh fetches, newest refresh first, summed up with its saved
-    jobs and their storage: median and latest fetch time, failed fetches, open
-    and saved jobs, and bytes. Slowest median first.
+    jobs and their storage: median and latest fetch time, failed fetches, open,
+    embedded and saved jobs, and bytes. Slowest median first.
     """
     fetches: dict[str, list[dict[str, Any]]] = {}
     for refresh in refreshes:
@@ -706,6 +706,7 @@ def refresh_board_rows(refreshes: list[dict[str, Any]], storage: list[dict[str, 
                 "last_outcome": runs[0]["outcome"] if runs else None,
                 "failures": sum(1 for run in runs if run["outcome"] != "ok"),
                 "open_jobs": saved.get("open_jobs", 0),
+                "embedded": saved.get("embedded", 0),
                 "saved_jobs": saved.get("jobs", 0),
                 "bytes": saved.get("bytes", 0),
             }

@@ -64,12 +64,13 @@ def score_and_save(
     usage: Usage,
     report: Callable[[str], None],
     examples: Sequence[LabeledJob] = (),
+    min_score: int | None = None,
 ) -> ScoringResult:
     """
     Scores each (posting id, posting) pair and saves it to the user's tracker as
-    soon as it's scored, along with the facts read from the posting. The first
-    job is scored alone so the cached resume prefix exists before the parallel
-    calls start.
+    soon as it's scored, along with the facts read from the posting; a job
+    scoring below `min_score` is saved off the Tracker. The first job is scored
+    alone so the cached resume prefix exists before the parallel calls start.
     """
     lock = threading.Lock()
     done = {"scored": 0, "failed": 0}
@@ -87,6 +88,7 @@ def score_and_save(
                 "fit_summary": fit.summary,
                 "strengths": fit.strengths,
                 "gaps": fit.gaps,
+                **({"in_tracker": False} if min_score is not None and fit.score < min_score else {}),
             },
             on_conflict="user_id,posting_id",
         )

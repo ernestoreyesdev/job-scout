@@ -12,14 +12,13 @@ from typing import Any
 
 from app.agents.discovery.agent import FoundBoard, discover_boards, find_company_boards, name_companies
 from app.agents.hiring_threads.agent import HiringPost, extract_jobs, recent_posts
-from app.agents.triage.agent import shortlist
 from app.agents.titles.agent import related_titles
 from app.agents.schemas import CompanyName, SearchRule, Usage
 from app.agents.scoring.agent import score_and_save
 from app.agents.scoring.prompts import LabeledJob
 from app.config import Settings
 from app.db import Rest
-from app.embeddings import embed_jobs, job_text
+from app.embeddings import embed_jobs, job_text, resume_chunks
 from app.sources import (
     board_from_url,
     careers_url,
@@ -57,6 +56,8 @@ SKIPPED_KINDS = frozenset({"staffing", "aggregator"})
 MAX_PER_COMPANY = 3
 # A search scores this many times its job limit and keeps the best-scoring ones.
 POOL_FACTOR = 2
+# With a min score, a search scores another pool while fewer jobs than its limit pass, up to this many pools.
+MAX_SCORING_ROUNDS = 3
 FETCH_CONCURRENCY = 16
 FETCH_RETRY_SECONDS = 2.0
 # Consecutive searches that find a board gone before it leaves the directory.
@@ -69,6 +70,9 @@ FRESH_BOARD_HOURS = 25
 # Jobs saved per request, and days a closed job nobody tracks is kept.
 STORE_CHUNK = 500
 STALE_JOB_DAYS = 30
+# Jobs without an embedding that a daily refresh embeds, newest first, and how many are saved per request.
+EMBED_PER_REFRESH = 1000
+EMBED_CHUNK = 200
 
 Board = tuple[str, str, str, str]
 
@@ -107,7 +111,6 @@ def run_search(
     describer: Callable[[Posting], str] = describe,
     lookup: Callable[..., list[FoundBoard]] = find_company_boards,
     namer: Callable[..., dict[tuple[str, str], CompanyName]] = name_companies,
-    triage: Callable[..., list[int]] = shortlist,
     read_posts: Callable[[], list[HiringPost]] = recent_posts,
     extractor: Callable[..., list[Posting]] = extract_jobs,
     expander: Callable[..., list[str]] = related_titles,
@@ -218,39 +221,55 @@ def run_search(
         )
 
     pool_size = rule.limit * POOL_FACTOR
-    if len(fresh) > pool_size:
+    rounds = MAX_SCORING_ROUNDS if rule.min_score is not None else 1
+    if len(fresh) > pool_size * rounds:
         report("Matching jobs to your search…")
         with timed(timings, "shortlist"):
-            fresh = by_title_fit(fresh, pool_size, client, settings, resume_text, usage, triage)
-    pool = pick(fresh, pool_size, per_company)
-    todo = with_descriptions(pool, service, describer)
-    report("Scoring jobs against your resume…")
-    with timed(timings, "examples"):
-        examples = labeled_examples(user, service, todo, embed)
-
-    with timed(timings, "scoring"):
-        scoring = score_and_save(
-            client=client,
-            model=settings.scoring_model,
-            effort=settings.scoring_effort,
-            todo=todo,
-            resume_id=resume_id,
-            resume_text=resume_text,
-            user_id=user_id,
-            user=user,
-            service=service,
-            usage=usage,
-            report=report,
-            examples=examples,
-        )
-    kept = keep_best(user, todo, scoring.scores, rule.limit, rule.min_score)
+            fresh = by_resume_fit(fresh, resume_text, service, embed)
+    todo: list[tuple[str, Posting]] = []
+    scores: dict[str, int] = {}
+    scored = failed = picked = 0
+    examples: list[LabeledJob] = []
+    for round_number in range(rounds):
+        chosen = pick(fresh, pool_size * (round_number + 1), per_company)
+        if len(chosen) == picked:
+            break
+        batch = with_descriptions(chosen[picked:], service, describer)
+        picked = len(chosen)
+        report("Scoring jobs against your resume…" if round_number == 0 else "Scoring more jobs to reach your minimum score…")
+        if round_number == 0:
+            with timed(timings, "examples"):
+                examples = labeled_examples(user, service, batch, embed)
+        with timed(timings, "scoring"):
+            scoring = score_and_save(
+                client=client,
+                model=settings.scoring_model,
+                effort=settings.scoring_effort,
+                todo=batch,
+                resume_id=resume_id,
+                resume_text=resume_text,
+                user_id=user_id,
+                user=user,
+                service=service,
+                usage=usage,
+                report=report,
+                examples=examples,
+                min_score=rule.min_score,
+            )
+        todo += batch
+        scores.update(scoring.scores)
+        scored += scoring.scored
+        failed += scoring.failed
+        if rule.min_score is None or sum(score >= rule.min_score for score in scores.values()) >= rule.limit:
+            break
+    kept = keep_best(user, todo, scores, rule.limit, rule.min_score)
     return SearchResult(
         companies,
         len(everything),
         len(matched),
         already_tracked,
-        scoring.scored,
-        scoring.failed,
+        scored,
+        failed,
         len(unreachable),
         kept=kept,
         min_score=rule.min_score,
@@ -1022,11 +1041,16 @@ def stored_jobs(service: Rest, boards: list[Board]) -> dict[str, list[Posting]]:
         offset += page
 
 
-def refresh_boards(service: Rest, fetcher: Callable[[str, str, str], list[Posting]] = fetch_live) -> dict[str, Any]:
+def refresh_boards(
+    service: Rest,
+    fetcher: Callable[[str, str, str], list[Posting]] = fetch_live,
+    embed: Callable[[list[str]], list[list[float]]] = embed_jobs,
+) -> dict[str, Any]:
     """
     Fetches every directory board from its system, saves the jobs, closes the
-    ones no longer listed, deletes jobs closed STALE_JOB_DAYS ago that nobody
-    tracks, and records the refresh in board_refreshes. Returns that record.
+    ones no longer listed, embeds up to EMBED_PER_REFRESH new ones, deletes jobs
+    closed STALE_JOB_DAYS ago that nobody tracks, and records the refresh in
+    board_refreshes. Returns that record.
     """
     [refresh] = service.insert("board_refreshes", {"started_at": datetime.now(UTC).isoformat()}, select="id")
     directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,open_jobs"})
@@ -1036,6 +1060,7 @@ def refresh_boards(service: Rest, fetcher: Callable[[str, str, str], list[Postin
     new, closed = store_jobs(service, fetched)
     save_companies(service, [entry for entry in boards if f"{entry[0]}/{entry[1]}" in fetched], fetched)
     record_misses(service, [c for c in directory if f"{c['source']}/{c['board']}" in gone])
+    embedded = embed_missing(service, embed, EMBED_PER_REFRESH)
     deleted = service.rpc("delete_stale_postings", {"days": STALE_JOB_DAYS})
     summary = {
         "finished_at": datetime.now(UTC).isoformat(),
@@ -1043,9 +1068,44 @@ def refresh_boards(service: Rest, fetcher: Callable[[str, str, str], list[Postin
         "jobs": sum(len(postings) for postings in fetched.values()),
         "new_jobs": new,
         "closed_jobs": closed,
+        "embedded_jobs": embedded,
         "deleted_jobs": deleted,
         "failures": len(unreachable),
         "board_fetches": fetches,
     }
     service.update("board_refreshes", {"id": f"eq.{refresh['id']}", "select": "id"}, summary)
     return summary
+
+
+def by_resume_fit(
+    fresh: list[tuple[str, Posting]], resume_text: str, service: Rest, embed: Callable[[list[str]], list[list[float]]]
+) -> list[tuple[str, Posting]]:
+    """
+    Reorders matches by how close each job is to the nearest section of the
+    resume, best first; jobs without an embedding yet follow in their order.
+    """
+    sections = embed(resume_chunks(resume_text))
+    rows = service.rpc("rank_postings", {"job_ids": [posting_id for posting_id, _ in fresh], "sections": sections})
+    order = {row["id"]: rank for rank, row in enumerate(rows)}
+    return sorted(fresh, key=lambda job: order.get(job[0], len(order)))
+
+
+def embed_missing(service: Rest, embed: Callable[[list[str]], list[list[float]]], limit: int) -> int:
+    """Embeds up to `limit` open jobs that have no embedding, newest first; returns how many."""
+    rows = service.select(
+        "postings",
+        {
+            "select": "id,title,company,location,description",
+            "embedding": "is.null",
+            "closed_at": "is.null",
+            "order": "created_at.desc",
+            "limit": str(limit),
+        },
+    )
+    for i in range(0, len(rows), EMBED_CHUNK):
+        save_embeddings(
+            service,
+            [(row["id"], job_text(row["title"], row["company"], row["location"], row["description"])) for row in rows[i : i + EMBED_CHUNK]],
+            embed,
+        )
+    return len(rows)

@@ -34,3 +34,19 @@ def default_model() -> FastEmbedEmbeddings:
 
 def embed_jobs(texts: list[str]) -> list[list[float]]:
     return default_model().embed_documents(texts)
+
+
+def resume_chunks(text: str, max_chars: int = 1500) -> list[str]:
+    """The resume split at line breaks into pieces of up to max_chars, each short enough for the model to read whole."""
+    chunks: list[str] = []
+    current = ""
+    for line in (line.strip() for line in text.splitlines()):
+        if not line:
+            continue
+        if current and len(current) + 1 + len(line) > max_chars:
+            chunks.append(current)
+            current = ""
+        current = f"{current}\n{line}" if current else line[:max_chars]
+    if current:
+        chunks.append(current)
+    return chunks

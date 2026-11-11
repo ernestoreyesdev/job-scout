@@ -65,6 +65,7 @@ type AdminStats = {
     jobs: number;
     new_jobs: number;
     closed_jobs: number;
+    embedded_jobs: number;
     deleted_jobs: number;
     failures: number;
   }[];
@@ -76,6 +77,7 @@ type AdminStats = {
     last_outcome: string | null;
     failures: number;
     open_jobs: number;
+    embedded: number;
     saved_jobs: number;
     bytes: number;
   }[];
@@ -585,6 +587,7 @@ function RefreshSection({
 }) {
   const names = new Map(companies.map((company) => [`${company.source}/${company.board}`, company.name]));
   const totalBytes = boards.reduce((sum, row) => sum + row.bytes, 0);
+  const unembedded = boards.reduce((sum, row) => sum + row.open_jobs - row.embedded, 0);
 
   return (
     <SectionCard
@@ -603,6 +606,7 @@ function RefreshSection({
               <TableHead className="text-right">Jobs</TableHead>
               <TableHead className="text-right">New</TableHead>
               <TableHead className="text-right">Closed</TableHead>
+              <TableHead className="text-right">Embedded</TableHead>
               <TableHead className="text-right">Deleted</TableHead>
               <TableHead className="text-right">Failed</TableHead>
             </TableRow>
@@ -618,6 +622,7 @@ function RefreshSection({
                 <TableCell className="text-right tabular-nums">{row.jobs.toLocaleString()}</TableCell>
                 <TableCell className="text-right tabular-nums">{row.new_jobs.toLocaleString()}</TableCell>
                 <TableCell className="text-right tabular-nums">{row.closed_jobs.toLocaleString()}</TableCell>
+                <TableCell className="text-right tabular-nums">{row.embedded_jobs.toLocaleString()}</TableCell>
                 <TableCell className="text-right tabular-nums">{row.deleted_jobs.toLocaleString()}</TableCell>
                 <TableCell className={cn("text-right tabular-nums", row.failures > 0 && "text-destructive")}>{row.failures}</TableCell>
               </TableRow>
@@ -628,6 +633,12 @@ function RefreshSection({
       {boards.length > 0 && (
         <>
           <p className="mt-6 text-sm font-medium">By board, {size(totalBytes)} saved in all</p>
+          {unembedded > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {unembedded.toLocaleString()} open {unembedded === 1 ? "job has" : "jobs have"} no embedding yet, so searches rank{" "}
+              {unembedded === 1 ? "it" : "them"} after the rest. Each refresh embeds up to 1,000.
+            </p>
+          )}
           <Table className="mt-1">
             <TableHeader>
               <TableRow>
@@ -637,6 +648,7 @@ function RefreshSection({
                 <TableHead className="text-right">Last</TableHead>
                 <TableHead className="text-right">Failed</TableHead>
                 <TableHead className="text-right">Open jobs</TableHead>
+                <TableHead className="text-right">Embedded</TableHead>
                 <TableHead className="text-right">Saved jobs</TableHead>
                 <TableHead className="text-right">Space</TableHead>
               </TableRow>
@@ -654,6 +666,9 @@ function RefreshSection({
                   </TableCell>
                   <TableCell className={cn("text-right tabular-nums", row.failures > 0 && "text-destructive")}>{row.failures}</TableCell>
                   <TableCell className="text-right tabular-nums">{row.open_jobs.toLocaleString()}</TableCell>
+                  <TableCell className={cn("text-right tabular-nums", row.embedded < row.open_jobs && "text-amber-600 dark:text-amber-400")}>
+                    {row.embedded.toLocaleString()}
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">{row.saved_jobs.toLocaleString()}</TableCell>
                   <TableCell className="text-right tabular-nums">{size(row.bytes)}</TableCell>
                 </TableRow>

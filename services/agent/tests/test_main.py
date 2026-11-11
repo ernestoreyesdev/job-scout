@@ -391,14 +391,14 @@ def test_refresh_board_rows_join_fetch_times_with_storage():
         {"board_fetches": [{"board": "ashby/acme", "ms": 300, "outcome": "ok"}, {"board": "lever/beta", "ms": 900, "outcome": "unreachable"}]},
         {"board_fetches": [{"board": "ashby/acme", "ms": 100, "outcome": "ok"}]},
     ]
-    storage = [{"source": "ashby", "board": "acme", "jobs": 12, "open_jobs": 10, "bytes": 4096}]
+    storage = [{"source": "ashby", "board": "acme", "jobs": 12, "open_jobs": 10, "embedded": 7, "bytes": 4096}]
 
     rows = main.refresh_board_rows(refreshes, storage)
 
     assert [row["board"] for row in rows] == ["lever/beta", "ashby/acme"]
     acme = rows[1]
     assert (acme["median_ms"], acme["last_ms"], acme["failures"]) == (300, 300, 0)
-    assert (acme["open_jobs"], acme["saved_jobs"], acme["bytes"]) == (10, 12, 4096)
+    assert (acme["open_jobs"], acme["embedded"], acme["saved_jobs"], acme["bytes"]) == (10, 7, 12, 4096)
     assert (rows[0]["failures"], rows[0]["bytes"]) == (1, 0)
 
 
