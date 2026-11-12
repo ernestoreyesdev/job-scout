@@ -1,0 +1,5 @@
+# Vercel environment variable IDs used by Terraform import blocks, not secret values.
+84ebe1643e53dbfb2fe44b12a965150eabd035e9:infra/terraform/imports.tf:generic-api-key:21
+84ebe1643e53dbfb2fe44b12a965150eabd035e9:infra/terraform/imports.tf:generic-api-key:23
+84ebe1643e53dbfb2fe44b12a965150eabd035e9:infra/terraform/imports.tf:generic-api-key:24
+84ebe1643e53dbfb2fe44b12a965150eabd035e9:infra/terraform/imports.tf:generic-api-key:25
