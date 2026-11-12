@@ -1,0 +1,35 @@
+name: Terraform
+
+# Plans infrastructure changes on pull requests and applies them on main. Run it by hand after changing a value in
+# Terraform Cloud, since that changes nothing in the repo.
+on:
+  push:
+    branches: [main]
+    paths: ["infra/terraform/**", ".github/workflows/terraform.yml"]
+  pull_request:
+    paths: ["infra/terraform/**", ".github/workflows/terraform.yml"]
+  workflow_dispatch:
+
+jobs:
+  terraform:
+    name: Plan or apply infrastructure
+    runs-on: ubuntu-latest
+    concurrency: production-infrastructure
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.17.2
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+      - run: terraform fmt -check
+      - run: terraform init -input=false
+      - run: terraform validate
+      - name: Plan
+        if: github.event_name == 'pull_request'
+        run: terraform plan -input=false
+      - name: Apply
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: terraform apply -input=false -auto-approve

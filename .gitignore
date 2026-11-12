@@ -19,5 +19,8 @@ __pycache__/
 infra/supabase/.branches/
 infra/supabase/.temp/
 
+# Terraform providers and local state
+infra/terraform/.terraform/
+
 # Extraction eval inputs, read from the local database
 services/agent/evals/extraction/postings.local.json

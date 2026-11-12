@@ -1,0 +1,6 @@
+vercel_team_id           = "team_yrLXeolzT3m71FiUHRlyTheL"
+vercel_project_id        = "prj_4P9MP0y2FD3keazPrXGxbhISp11w"
+supabase_organization_id = "cedctxuivzxhehofnlve"
+supabase_region          = "us-east-1"
+github_owner             = "ernestoreyesdev"
+github_repository        = "job-finder"
