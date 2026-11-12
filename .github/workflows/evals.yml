@@ -21,7 +21,7 @@ jobs:
       SUPABASE_ANON_KEY: unused
       AGENT_ENCRYPTION_KEY: unused
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
