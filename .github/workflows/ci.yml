@@ -61,8 +61,8 @@ jobs:
       - uses: supabase/setup-cli@v1
         with:
           version: 3.1.0
-      - run: supabase db start
-      - run: supabase db reset
+      - run: supabase db start --workdir infra
+      - run: supabase db reset --workdir infra
 
   # Applies new migrations to the hosted database once every check passes; Vercel's Deployment Checks hold the
   # production deploy until this job succeeds, so new code goes live after its migrations.
@@ -85,4 +85,4 @@ jobs:
       # Connects through the project's connection pooler, which GitHub's runners reach over IPv4.
       - run: |
           password=$(python3 -c 'import os, urllib.parse; print(urllib.parse.quote(os.environ["SUPABASE_DB_PASSWORD"], safe=""))')
-          supabase db push --remote="postgresql://postgres.$SUPABASE_PROJECT_ID:$password@$POOLER_HOST:5432/postgres" --yes
+          supabase db push --workdir infra --remote="postgresql://postgres.$SUPABASE_PROJECT_ID:$password@$POOLER_HOST:5432/postgres" --yes

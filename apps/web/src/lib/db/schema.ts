@@ -1,5 +1,5 @@
 /**
- * Row shapes for the tables in `supabase/migrations`. Hand-written rather than
+ * Row shapes for the tables in `infra/supabase/migrations`. Hand-written rather than
  * generated so the app builds without the Supabase CLI; keep in step with the
  * migrations.
  *

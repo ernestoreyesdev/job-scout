@@ -14,7 +14,7 @@ The agent reads open jobs from applicant tracking systems (ATS): their public jo
 | `app/sources/text.py` | Helpers adapters share: `html_to_text`, `join_locations`, `workplace_from_location`, `country_name`, `with_country`, `job_posting_ld` (a job page's schema.org JobPosting) |
 | `app/agents/hiring_threads/` | Hacker News "Who is hiring?" posts: reading the threads and the Haiku call that lists each post's roles. Not a `JobSource` (see below) |
 | `app/sources/filters.py` | Search filters applied after fetching: `matches_keywords`, `matches_workplace`, `matches_location`, `remote_in_us` |
-| `supabase/migrations/*` | The `job_source` enum lists every system a posting or company row can come from |
+| `infra/supabase/migrations/*` | The `job_source` enum lists every system a posting or company row can come from |
 
 ### Layers
 

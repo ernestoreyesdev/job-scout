@@ -16,8 +16,8 @@ __pycache__/
 *.docx
 
 # Supabase local state
-supabase/.branches/
-supabase/.temp/
+infra/supabase/.branches/
+infra/supabase/.temp/
 
 # Extraction eval inputs, read from the local database
 services/agent/evals/extraction/postings.local.json
