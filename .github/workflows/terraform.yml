@@ -15,6 +15,9 @@ jobs:
     name: Plan or apply infrastructure
     runs-on: ubuntu-latest
     concurrency: production-infrastructure
+    # Dependabot's pull requests get no Actions secrets, so they only check the configuration.
+    env:
+      HAS_TOKEN: ${{ secrets.TF_API_TOKEN != '' }}
     defaults:
       run:
         working-directory: infra/terraform
@@ -25,10 +28,15 @@ jobs:
           terraform_version: 1.17.2
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
       - run: terraform fmt -check
-      - run: terraform init -input=false
+      - name: Init
+        if: env.HAS_TOKEN == 'true'
+        run: terraform init -input=false
+      - name: Init without Terraform Cloud
+        if: env.HAS_TOKEN != 'true'
+        run: terraform init -input=false -backend=false
       - run: terraform validate
       - name: Plan
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && env.HAS_TOKEN == 'true'
         run: terraform plan -input=false
       - name: Apply
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
