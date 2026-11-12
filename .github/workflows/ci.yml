@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: 3.1.0
       - run: supabase db start --workdir infra
@@ -79,7 +79,7 @@ jobs:
       POOLER_HOST: aws-0-us-east-1.pooler.supabase.com
     steps:
       - uses: actions/checkout@v7
-      - uses: supabase/setup-cli@v1
+      - uses: supabase/setup-cli@v3
         with:
           version: 3.1.0
       # Connects through the project's connection pooler, which GitHub's runners reach over IPv4.
