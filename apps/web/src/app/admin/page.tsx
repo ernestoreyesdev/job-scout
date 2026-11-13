@@ -7,7 +7,6 @@ import { SectionCard } from "@/components/section-card";
 import { StatTile } from "@/components/stat-tile";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageReady } from "@/components/web-vitals";
-import { callAgent } from "@/lib/agent";
 import type { AgentRunRow, ApplicationStatusRow, CompanyKindRow, FitLabelRow, RunUsage, WEB_VITALS } from "@/lib/db";
 import { MIN_LABELED, accuracyByCut, runCost, summarizeCosts } from "@/lib/insights";
 import { getAdminSource } from "@/lib/repository";
@@ -47,6 +46,7 @@ type AdminStats = {
   generated_at: string;
   days: number;
   max_missed_checks: number;
+  key_hint: string | null;
   users: { id: string; email: string | null; created_at: string | null; last_sign_in_at: string | null }[];
   runs: (Pick<AgentRunRow, "id" | "user_id" | "kind" | "status" | "error" | "error_code" | "created_at" | "finished_at" | "usage" | "timings"> & {
     unreachable_boards: string[];
@@ -126,11 +126,9 @@ export default function AdminPage() {
 }
 
 async function AdminData() {
-  await getAdminSource();
-  const [key, stats] = await Promise.all([
-    callAgent<{ hint: string | null; fallback: boolean }>("/admin/anthropic-key", { method: "GET" }),
-    callAgent<AdminStats>("/admin/stats", { method: "GET" }),
-  ]);
+  const { repository } = await getAdminSource();
+  const stats = await repository.getAdminStats<AdminStats>();
+  const key = { hint: stats.key_hint, fallback: Boolean(process.env.ANTHROPIC_API_KEY) };
   const now = new Date(stats.generated_at).getTime();
   const activeSince = now - ACTIVE_DAYS * DAY_MS;
   const searches = stats.runs.filter((run) => run.kind === "search");

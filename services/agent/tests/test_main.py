@@ -289,86 +289,6 @@ def test_runs_use_the_users_key_then_the_shared_key_then_the_setting(monkeypatch
     assert main.anthropic_key(KeyRest(personal=False, shared=False), "u", settings) == "env-key"
 
 
-def test_call_stats_sum_up_each_step():
-    def call(step: str, ms: int, error: str | None = None) -> dict[str, Any]:
-        return {
-            "step": step,
-            "duration_ms": ms,
-            "error": error,
-            "input_tokens": 100,
-            "output_tokens": 10,
-            "cache_read_input_tokens": 50,
-            "cache_creation_input_tokens": 0,
-            "web_search_requests": 0,
-        }
-
-    stats = main.call_stats([call("scoring", 900), call("scoring", 1200), call("scoring", 3000, "overloaded"), call("titles", 400)])
-
-    scoring, titles = stats
-    assert (scoring["step"], scoring["calls"], scoring["errors"], scoring["median_ms"], scoring["p95_ms"]) == ("scoring", 3, 1, 1200, 3000)
-    assert (scoring["input_tokens"], scoring["cache_read_input_tokens"]) == (300, 150)
-    assert (titles["calls"], titles["median_ms"]) == (1, 400)
-
-
-def test_select_all_pages_past_the_row_limit():
-    class Paged(Rest):
-        def __init__(self):
-            self.offsets: list[str] = []
-
-        def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
-            self.offsets.append(params["offset"])
-            start = int(params["offset"])
-            return [{"n": n} for n in range(start, min(start + int(params["limit"]), 5))]
-
-    service = Paged()
-    assert len(main.select_all(service, "llm_calls", {"order": "id"}, page=2)) == 5
-    assert service.offsets == ["0", "2", "4"]
-
-
-def test_vital_stats_give_the_median_and_75th_percentile_per_page_and_metric():
-    rows = [{"page": "/tracker", "metric": "LCP", "value": v} for v in (800, 1200, 2000, 3500)]
-    rows += [{"page": "/tracker", "metric": "TTFB", "value": 300}, {"page": "/jobs", "metric": "LCP", "value": 900}]
-
-    stats = {(row["page"], row["metric"]): row for row in main.vital_stats(rows)}
-
-    lcp = stats[("/tracker", "LCP")]
-    assert (lcp["count"], lcp["median"], lcp["p75"]) == (4, 2000, 3500)
-    assert main.vital_stats(rows)[0]["page"] == "/tracker"
-
-
-def test_board_stats_sum_up_job_systems_and_list_the_slowest_boards():
-    fetches = [
-        {"board": "workday/acme", "source": "workday", "ms": 9000, "jobs": 1800, "outcome": "ok"},
-        {"board": "workday/acme", "source": "workday", "ms": 11000, "jobs": 1850, "outcome": "ok"},
-        {"board": "lever/beta", "source": "lever", "ms": 400, "jobs": 30, "outcome": "ok"},
-        {"board": "lever/gone", "source": "lever", "ms": 200, "jobs": 0, "outcome": "gone"},
-    ]
-
-    stats = main.board_stats(fetches)
-
-    workday, lever = stats["sources"]
-    assert (workday["source"], workday["fetches"], workday["total_ms"], workday["jobs"]) == ("workday", 2, 20000, 1850)
-    assert (lever["fetches"], lever["failures"]) == (2, 1)
-    assert [row["board"] for row in stats["slowest"]] == ["workday/acme", "lever/beta", "lever/gone"]
-    assert stats["slowest"][0]["median_ms"] == 11000
-
-
-def test_refresh_board_rows_join_fetch_times_with_the_directory():
-    refreshes = [
-        {"board_fetches": [{"board": "ashby/acme", "ms": 300, "outcome": "ok"}, {"board": "lever/beta", "ms": 900, "outcome": "unreachable"}]},
-        {"board_fetches": [{"board": "ashby/acme", "ms": 100, "outcome": "ok"}]},
-    ]
-    companies = [{"source": "ashby", "board": "acme", "open_jobs": 10}, {"source": "greenhouse", "board": "new", "open_jobs": None}]
-
-    rows = main.refresh_board_rows(refreshes, companies)
-
-    assert [row["board"] for row in rows] == ["lever/beta", "ashby/acme", "greenhouse/new"]
-    acme = rows[1]
-    assert (acme["median_ms"], acme["last_ms"], acme["failures"], acme["open_jobs"]) == (300, 300, 0, 10)
-    assert (rows[0]["failures"], rows[0]["open_jobs"]) == (1, 0)
-    assert (rows[2]["median_ms"], rows[2]["open_jobs"]) == (None, 0)
-
-
 def test_a_finished_search_records_how_many_jobs_it_added(monkeypatch: pytest.MonkeyPatch):
     db = RunRest()
     monkeypatch.setattr(main, "user_db", lambda settings, token: db)
@@ -389,54 +309,6 @@ def fake_user(**fields: Any) -> CurrentUser:
 
 def fake_settings(**fields: Any) -> Settings:
     return cast(Settings, SimpleNamespace(**fields))
-
-
-def test_model_weeks_group_calls_searches_and_scores_by_week():
-    calls = [
-        {"created_at": "2026-11-10T09:00:00+00:00", "error": None, "stop_reason": "end_turn", "duration_ms": 100, "input_tokens": 20, "cache_read_input_tokens": 80},
-        {"created_at": "2026-11-11T09:00:00+00:00", "error": "overloaded", "stop_reason": None, "duration_ms": 300, "input_tokens": 100, "cache_read_input_tokens": 0},
-        {"created_at": "2026-11-03T09:00:00+00:00", "error": None, "stop_reason": "max_tokens", "duration_ms": 200, "input_tokens": 50, "cache_read_input_tokens": 0},
-    ]
-    searches = [{"created_at": "2026-11-12T09:00:00+00:00", "usage": {"input_tokens": 1000, "output_tokens": 10}}]
-    scores = [
-        {"created_at": "2026-11-10T09:00:00+00:00", "updated_at": "2026-11-10T10:00:00+00:00", "fit_score": 80, "fit_label": "good"},
-        {"created_at": "2026-11-10T09:00:00+00:00", "updated_at": "2026-11-10T09:00:00+00:00", "fit_score": 40, "fit_label": None},
-    ]
-
-    earlier, this = main.model_weeks(calls, scores, searches)
-
-    assert (earlier["week"], earlier["calls"], earlier["broken"]) == ("2026-11-02", 1, 1)
-    assert this["week"] == "2026-11-09"
-    assert (this["calls"], this["errors"], this["broken"], this["median_ms"]) == (2, 1, 0, 300)
-    assert this["cache_share"] == 80 / 200
-    assert (this["searches"], this["search_usage"]) == (1, {"input_tokens": 1000, "output_tokens": 10})
-    assert (this["scored"], this["average_score"], this["rated"], this["good"]) == (2, 60, 1, 1)
-
-
-def test_prompt_versions_list_each_steps_versions_with_their_use():
-    calls = [
-        {"step": "scoring", "prompt_version": "aaaa1111", "model": "haiku", "created_at": "2026-11-01T00:00:00+00:00"},
-        {"step": "scoring", "prompt_version": "aaaa1111", "model": "haiku", "created_at": "2026-11-05T00:00:00+00:00"},
-        {"step": "scoring", "prompt_version": "bbbb2222", "model": "haiku", "created_at": "2026-11-09T00:00:00+00:00"},
-    ]
-
-    newer, older = main.prompt_versions(calls)
-
-    assert (newer["prompt_version"], newer["calls"]) == ("bbbb2222", 1)
-    assert (older["calls"], older["first"], older["last"]) == (2, "2026-11-01T00:00:00+00:00", "2026-11-05T00:00:00+00:00")
-
-
-def test_score_versions_check_scores_against_ratings_per_version():
-    scores = [
-        {"score_prompt_version": "v1", "score_model": "haiku", "fit_score": 85, "fit_label": "good", "created_at": "2026-11-01"},
-        {"score_prompt_version": "v1", "score_model": "haiku", "fit_score": 75, "fit_label": "bad", "created_at": "2026-11-02"},
-        {"score_prompt_version": "v1", "score_model": "haiku", "fit_score": 30, "fit_label": None, "created_at": "2026-11-03"},
-    ]
-
-    [row] = main.score_versions(scores)
-
-    assert (row["scored"], row["average_score"], row["rated"], row["good"]) == (3, 190 / 3, 2, 1)
-    assert (row["predicted_good"], row["predicted_good_correct"]) == (2, 1)
 
 
 def test_an_unexpected_failure_shows_a_plain_message_and_keeps_the_error_for_the_admin(monkeypatch: pytest.MonkeyPatch):
@@ -561,3 +433,18 @@ def test_a_rescore_saves_which_page_it_scores(monkeypatch: pytest.MonkeyPatch):
     assert ("agent_runs", {"user_id": "user-1", "kind": "rescore", "input": {"scope": "jobs"}}) in db.inserts
     [task] = background.tasks
     assert task.args[1] == main.RescoreRequest(scope="jobs")
+
+
+def test_select_all_pages_past_the_row_limit():
+    class Paged(Rest):
+        def __init__(self):
+            self.offsets: list[str] = []
+
+        def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
+            self.offsets.append(params["offset"])
+            start = int(params["offset"])
+            return [{"n": n} for n in range(start, min(start + int(params["limit"]), 5))]
+
+    service = Paged()
+    assert len(main.select_all(service, "llm_calls", {"order": "id"}, page=2)) == 5
+    assert service.offsets == ["0", "2", "4"]

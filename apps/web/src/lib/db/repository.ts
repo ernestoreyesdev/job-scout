@@ -397,4 +397,11 @@ export class JobFinderRepository {
     const { error } = await this.client.from("profiles").upsert({ user_id: await this.userId(), theme });
     if (error) throw error;
   }
+
+  /** Everything the admin page shows, from the admin_stats database function; it refuses anyone but an admin. */
+  async getAdminStats<T>(): Promise<T> {
+    const { data, error } = await this.client.rpc("admin_stats");
+    if (error) throw error;
+    return data as T;
+  }
 }

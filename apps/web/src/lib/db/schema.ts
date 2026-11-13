@@ -321,6 +321,7 @@ export type Database = {
     Views: { [_ in never]: never };
     Functions: {
       reposted_postings: { Args: { job_ids: string[]; days: number }; Returns: { id: string }[] };
+      admin_stats: { Args: Record<string, never>; Returns: Record<string, unknown> };
     };
     Enums: {
       job_source: JobSourceRow;

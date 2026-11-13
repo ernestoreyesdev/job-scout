@@ -63,6 +63,7 @@ jobs:
           version: 3.1.0
       - run: supabase db start --workdir infra
       - run: supabase db reset --workdir infra
+      - run: supabase test db --workdir infra
 
   # Applies new migrations to the hosted database once every check passes; Vercel's Deployment Checks hold the
   # production deploy until this job succeeds, so new code goes live after its migrations.
