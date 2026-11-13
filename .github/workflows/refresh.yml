@@ -1,0 +1,36 @@
+name: Board refresh
+
+# Fetches every directory board, saves its jobs and embeds the new ones, every day and on demand from the Actions tab.
+on:
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: board-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Daily board refresh
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    defaults:
+      run:
+        working-directory: services/agent
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      # Required by the agent's settings, unused by the refresh.
+      SUPABASE_ANON_KEY: unused
+      AGENT_ENCRYPTION_KEY: unused
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv python install 3.12
+      - run: uv sync --locked --no-dev
+      - run: uv run python -m scripts.refresh_boards

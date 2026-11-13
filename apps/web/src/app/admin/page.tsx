@@ -668,7 +668,7 @@ function RefreshSection({
           {unembedded > 0 && (
             <p className="text-xs text-muted-foreground">
               {unembedded.toLocaleString()} open {unembedded === 1 ? "job has" : "jobs have"} no embedding yet, so searches rank{" "}
-              {unembedded === 1 ? "it" : "them"} after the rest. Each refresh embeds up to 1,000.
+              {unembedded === 1 ? "it" : "them"} after the rest. The next refresh embeds {unembedded === 1 ? "it" : "them"}.
             </p>
           )}
           <p className="mt-4 text-sm font-medium">Slowest and failing boards</p>
@@ -680,8 +680,7 @@ function RefreshSection({
             </details>
           )}
           <p className="mt-3 text-xs text-muted-foreground">
-            Fetching boards costs nothing per call. What they use is the refresh&apos;s time, against Vercel&apos;s 300-second
-            limit, and database space, against Supabase&apos;s 500 MB free plan.
+            Fetching boards costs nothing per call. What they use is database space, against Supabase&apos;s 500 MB free plan.
           </p>
         </>
       )}

@@ -1368,3 +1368,13 @@ def test_the_biggest_boards_are_fetched_first(monkeypatch: pytest.MonkeyPatch):
 
     order = [board for _, board, _ in fetched]
     assert order.index("big") < order.index("small")
+
+
+def test_a_refresh_embeds_batch_after_batch_until_none_are_left(monkeypatch: pytest.MonkeyPatch):
+    batches = iter([orchestrator.EMBED_BATCH, orchestrator.EMBED_BATCH, 3])
+    monkeypatch.setattr(orchestrator, "embed_missing", lambda service, embed, limit: next(batches))
+    service = FakeRest(companies=[company("acme")])
+
+    summary = orchestrator.refresh_boards(service, lambda source, board, name: [posting(board, "Engineer")])
+
+    assert summary["embedded_jobs"] == 2 * orchestrator.EMBED_BATCH + 3

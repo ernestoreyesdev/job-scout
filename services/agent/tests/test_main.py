@@ -353,42 +353,6 @@ def test_board_stats_sum_up_job_systems_and_list_the_slowest_boards():
     assert stats["slowest"][0]["median_ms"] == 11000
 
 
-class RefreshRest(Rest):
-    def __init__(self, recent: bool):
-        self.recent = recent
-
-    def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
-        return [{"id": "refresh-1"}] if self.recent else []
-
-
-def start_refresh(monkeypatch: pytest.MonkeyPatch, secret: str | None, authorization: str | None, recent: bool = False):
-    monkeypatch.setattr(main, "service_db", lambda settings: RefreshRest(recent))
-    background = BackgroundTasks()
-    return main.start_refresh(fake_settings(cron_secret=secret), background, authorization), background
-
-
-def test_a_refresh_needs_the_cron_secret(monkeypatch: pytest.MonkeyPatch):
-    for secret, authorization, status in ((None, "Bearer x", 503), ("a" * 32, None, 401), ("a" * 32, "Bearer wrong", 401)):
-        with pytest.raises(HTTPException) as refused:
-            start_refresh(monkeypatch, secret, authorization)
-        assert refused.value.status_code == status
-
-
-def test_a_refresh_is_refused_within_an_hour_of_the_last_one(monkeypatch: pytest.MonkeyPatch):
-    with pytest.raises(HTTPException) as refused:
-        start_refresh(monkeypatch, "a" * 32, f"Bearer {'a' * 32}", recent=True)
-
-    assert refused.value.status_code == 409
-
-
-def test_a_refresh_with_the_secret_starts_in_the_background(monkeypatch: pytest.MonkeyPatch):
-    result, background = start_refresh(monkeypatch, "a" * 32, f"Bearer {'a' * 32}")
-
-    assert result == {"status": "started"}
-    [task] = background.tasks
-    assert task.func is main.run_refresh
-
-
 def test_refresh_board_rows_join_fetch_times_with_storage():
     refreshes = [
         {"board_fetches": [{"board": "ashby/acme", "ms": 300, "outcome": "ok"}, {"board": "lever/beta", "ms": 900, "outcome": "unreachable"}]},
@@ -473,46 +437,6 @@ def test_score_versions_check_scores_against_ratings_per_version():
 
     assert (row["scored"], row["average_score"], row["rated"], row["good"]) == (3, 190 / 3, 2, 1)
     assert (row["predicted_good"], row["predicted_good_correct"]) == (2, 1)
-
-
-def capture_alerts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, list[str], str | None]]:
-    alerts: list[tuple[str, list[str], str | None]] = []
-    monkeypatch.setattr(main, "service_db", lambda settings: None)
-    monkeypatch.setattr(
-        main, "alert_admin", lambda settings, subject, lines, key=None: alerts.append((subject, lines, key)) or True
-    )
-    return alerts
-
-
-def test_a_failed_refresh_emails_the_admin_once_a_day(monkeypatch: pytest.MonkeyPatch):
-    alerts = capture_alerts(monkeypatch)
-
-    def fail(service: Any) -> dict[str, Any]:
-        raise RuntimeError("database down")
-
-    monkeypatch.setattr(main, "refresh_boards", fail)
-
-    main.run_refresh(fake_settings())
-
-    [(subject, lines, key)] = alerts
-    assert subject == "Board refresh failed" and "database down" in lines[0]
-    assert key and key.startswith("refresh-failed/")
-
-
-def test_a_refresh_that_misses_boards_names_them_and_a_clean_one_sends_nothing(monkeypatch: pytest.MonkeyPatch):
-    alerts = capture_alerts(monkeypatch)
-    fetches = [{"board": "lever/b", "outcome": "unreachable"}, {"board": "ashby/a", "outcome": "ok"}]
-    monkeypatch.setattr(main, "refresh_boards", lambda service: {"jobs": 10, "boards": 1, "board_fetches": fetches})
-
-    main.run_refresh(fake_settings())
-
-    [(subject, lines, _)] = alerts
-    assert subject == "Board refresh couldn't reach 1 board" and "lever/b" in lines
-
-    alerts.clear()
-    monkeypatch.setattr(main, "refresh_boards", lambda service: {"jobs": 10, "boards": 1, "board_fetches": fetches[1:]})
-    main.run_refresh(fake_settings())
-    assert alerts == []
 
 
 def test_an_unexpected_failure_shows_a_plain_message_and_keeps_the_error_for_the_admin(monkeypatch: pytest.MonkeyPatch):

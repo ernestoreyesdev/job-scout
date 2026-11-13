@@ -28,13 +28,14 @@ If you upload a new resume, **Rescore** on the Jobs page scores your saved jobs 
 ```mermaid
 flowchart LR
   browser[Browser] --> web[Next.js web app]
-  cron[Vercel Cron, daily] --> web
   web -- "server actions" --> agent[FastAPI agent]
   agent --> db[(Supabase: Postgres, pgvector, Auth, Storage)]
   web --> db
   agent --> claude[Claude API]
   agent --> boards[Job board APIs and Hacker News]
   agent --> resend[Resend email]
+  refresh[Daily refresh, GitHub Actions] --> boards
+  refresh --> db
 ```
 
 Both services deploy to Vercel as one project (Vercel Services, configured in `vercel.json`). The browser only talks to Next.js, and server actions call the agent on the signed-in user's behalf, so row-level security applies to everything it reads and writes for them.
@@ -54,7 +55,7 @@ Both services deploy to Vercel as one project (Vercel Services, configured in `v
 | Agent | Python 3.12, FastAPI, Pydantic, uv |
 | AI | Claude API (Anthropic SDK), LangChain core, FastEmbed, pgvector |
 | Data | Supabase Postgres with row-level security, Auth (magic links), Storage |
-| Hosting | Vercel (Services, Cron), Supabase |
+| Hosting | Vercel (Services), Supabase, GitHub Actions for the daily refresh |
 | Infrastructure | Terraform on HCP Terraform |
 | CI/CD | GitHub Actions, Dependabot |
 | Testing | Pytest, Vitest, Ruff, Pyright, ESLint |
@@ -74,6 +75,7 @@ Both services deploy to Vercel as one project (Vercel Services, configured in `v
 | `ci.yml` | Every push and pull request | Lint, type-check and test both services, audit dependencies, scan git history for secrets, rebuild the database from migrations, then apply new migrations to production on `main` |
 | `terraform.yml` | Changes under `infra/terraform` | Plan on pull requests, apply on `main` |
 | `smoke.yml` | After each production deploy | Checks the site loads and reaches the agent |
+| `refresh.yml` | Daily, or by hand | Fetches every board in the directory, saves its jobs and embeds the new ones |
 | `evals.yml` | Weekly, or by hand | Runs the model evaluations |
 
 Terraform (`infra/terraform`) manages the deployment configuration across Vercel, Supabase and GitHub, with state in HCP Terraform. The database schema is managed by migrations in `infra/supabase/migrations`.
@@ -82,7 +84,7 @@ Terraform (`infra/terraform`) manages the deployment configuration across Vercel
 
 - **Your data is yours.** Row-level security is on for every table, so each user can only read and change their own resumes, jobs and history, and resume files are stored privately per user.
 - **Shared data** (the job and company directory) is readable by signed-in users and written only by the server. Internal tables are reachable by the server alone.
-- **Every request is authenticated**, and scheduled jobs are protected by a secret.
+- **Every request is authenticated.**
 - **Job sources** are public pages and APIs that need no credentials. Text from postings is treated as data in every prompt, never as instructions.
 - **Secrets** never live in the repo, and CI scans every commit for leaks.
 

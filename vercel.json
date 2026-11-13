@@ -11,6 +11,5 @@
       "entrypoint": "app.main:app"
     }
   },
-  "rewrites": [{ "source": "/(.*)", "destination": { "service": "web" } }],
-  "crons": [{ "path": "/api/cron/refresh", "schedule": "0 10 * * *" }]
+  "rewrites": [{ "source": "/(.*)", "destination": { "service": "web" } }]
 }

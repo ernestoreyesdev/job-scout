@@ -1,4 +1,3 @@
-import hmac
 import io
 import logging
 from collections.abc import Callable
@@ -6,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 import httpx
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 
 from app.agents.follow_up.agent import FollowUpError, draft_follow_up
 from app.agents.gap_analysis.agent import GapAnalysisError, analyze_gaps
@@ -15,7 +14,6 @@ from app.agents.orchestrator import (
     ImportResult,
     SearchResult,
     import_companies,
-    refresh_boards,
     rescore as orchestrate_rescore,
     run_search as orchestrate_search,
 )
@@ -24,7 +22,6 @@ from app.auth import CurrentUser, admin_user, current_user
 from app.config import Settings, get_settings
 from app.crypto import decrypt, encrypt, key_hint
 from app.db import Rest, service_db, user_db
-from app.mail import alert_admin
 from app.sources.base import CompanyNotFound, Posting
 from app.telemetry import CallLog, RecordingClient, configure_logging, current_run
 
@@ -41,8 +38,6 @@ MODEL_WEEKS = 12
 GOOD_SCORE = 70
 # Stop reasons that mean a Claude answer came back cut off or refused.
 BROKEN_STOPS = frozenset({"max_tokens", "refusal"})
-# A board refresh is refused when another started this recently.
-REFRESH_COOLDOWN = timedelta(hours=1)
 # What users see when a run fails unexpectedly; the original error goes to run_errors.
 SEARCH_FAILED = "Something went wrong with this search. Try running it again."
 RESCORE_FAILED = "Something went wrong while rescoring. Try again."
@@ -777,49 +772,6 @@ def refresh_board_rows(refreshes: list[dict[str, Any]], storage: list[dict[str, 
             }
         )
     return sorted(rows, key=lambda row: row["median_ms"] or -1, reverse=True)
-
-
-@app.post("/refresh", status_code=202)
-def start_refresh(settings: Config, background: BackgroundTasks, authorization: Annotated[str | None, Header()] = None) -> dict[str, str]:
-    """Starts the daily board refresh; the caller sends the cron secret, and a refresh within REFRESH_COOLDOWN is refused."""
-    if not settings.cron_secret:
-        raise HTTPException(status_code=503, detail="Board refresh isn't set up: CRON_SECRET is missing.")
-    if not hmac.compare_digest((authorization or "").encode(), f"Bearer {settings.cron_secret}".encode()):
-        raise HTTPException(status_code=401, detail="Not allowed.")
-    since = (datetime.now(UTC) - REFRESH_COOLDOWN).isoformat()
-    if service_db(settings).select("board_refreshes", {"select": "id", "started_at": f"gte.{since}", "limit": "1"}):
-        raise HTTPException(status_code=409, detail="A board refresh started less than an hour ago.")
-    background.add_task(run_refresh, settings)
-    return {"status": "started"}
-
-
-def run_refresh(settings: Settings) -> None:
-    """Runs the board refresh and emails the admin when it fails or can't reach some boards, at most once a day each."""
-    today = datetime.now(UTC).date().isoformat()
-    try:
-        summary = refresh_boards(service_db(settings))
-    except Exception as error:
-        logger.exception("board refresh failed")
-        alert_admin(
-            settings,
-            "Board refresh failed",
-            [f"The daily board refresh stopped with an error: {error}", "Searches fetch boards live until the next refresh succeeds."],
-            f"refresh-failed/{today}",
-        )
-        return
-    logger.info("board refresh finished", extra={key: value for key, value in summary.items() if key != "board_fetches"})
-    unreachable = sorted(fetch["board"] for fetch in summary["board_fetches"] if fetch["outcome"] == "unreachable")
-    if unreachable:
-        alert_admin(
-            settings,
-            f"Board refresh couldn't reach {len(unreachable)} {'board' if len(unreachable) == 1 else 'boards'}",
-            [
-                f"The refresh saved {summary['jobs']:,} jobs from {summary['boards']} boards, but these failed twice in a row:",
-                *unreachable,
-                "Searches fetch these boards live; if they keep failing, check them on the admin page.",
-            ],
-            f"refresh-unreachable/{today}",
-        )
 
 
 def week_of(timestamp: str) -> str:

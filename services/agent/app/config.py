@@ -20,7 +20,6 @@ class Settings(BaseSettings):
     scoring_effort: str = "low"
     discovery_model: str = "claude-haiku-5-5"
     analysis_model: str = "claude-haiku-5-5"
-    cron_secret: str | None = None
     resend_api_key: str | None = None
     email_from: str = "Job Scout <onboarding@resend.dev>"
     admin_email: str | None = None

@@ -63,8 +63,8 @@ FRESH_BOARD_HOURS = 25
 # Jobs saved per request, and days a closed job nobody tracks is kept.
 STORE_CHUNK = 500
 STALE_JOB_DAYS = 30
-# Jobs without an embedding that a daily refresh embeds, newest first, and how many are saved per request.
-EMBED_PER_REFRESH = 1000
+# Jobs without an embedding that a refresh loads and embeds at a time, newest first, and how many are saved per request.
+EMBED_BATCH = 1000
 EMBED_CHUNK = 200
 
 Board = tuple[str, str, str, str]
@@ -1039,7 +1039,7 @@ def refresh_boards(
 ) -> dict[str, Any]:
     """
     Fetches every directory board from its system, saves the jobs, closes the
-    ones no longer listed, embeds up to EMBED_PER_REFRESH new ones, deletes jobs
+    ones no longer listed, embeds every open job that has none, deletes jobs
     closed STALE_JOB_DAYS ago that nobody tracks, and records the refresh in
     board_refreshes. Returns that record.
     """
@@ -1051,7 +1051,10 @@ def refresh_boards(
     new, closed = store_jobs(service, fetched)
     save_companies(service, [entry for entry in boards if f"{entry[0]}/{entry[1]}" in fetched], fetched)
     record_misses(service, [c for c in directory if f"{c['source']}/{c['board']}" in gone])
-    embedded = embed_missing(service, embed, EMBED_PER_REFRESH)
+    embedded = 0
+    while (batch := embed_missing(service, embed, EMBED_BATCH)) == EMBED_BATCH:
+        embedded += batch
+    embedded += batch
     deleted = service.rpc("delete_stale_postings", {"days": STALE_JOB_DAYS})
     summary = {
         "finished_at": datetime.now(UTC).isoformat(),

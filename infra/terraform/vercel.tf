@@ -12,7 +12,6 @@ locals {
       NEXT_PUBLIC_SUPABASE_URL      = { value = local.supabase_url, sensitive = false, target = local.production_and_preview }
       NEXT_PUBLIC_SUPABASE_ANON_KEY = { value = data.supabase_apikeys.production.publishable_key, sensitive = false, target = local.production_and_preview }
       ANTHROPIC_API_KEY             = { value = var.anthropic_api_key, sensitive = true, target = local.production }
-      CRON_SECRET                   = { value = random_password.cron_secret.result, sensitive = true, target = local.production }
       ADMIN_EMAIL                   = { value = var.admin_email, sensitive = false, target = local.production }
     },
     nonsensitive(var.resend_api_key == null) ? {} : { RESEND_API_KEY = { value = var.resend_api_key, sensitive = true, target = local.production } },
@@ -28,9 +27,4 @@ resource "vercel_project_environment_variable" "production" {
   value      = local.vercel_variables[each.key].value
   sensitive  = local.vercel_variables[each.key].sensitive
   target     = local.vercel_variables[each.key].target
-}
-
-resource "random_password" "cron_secret" {
-  length  = 48
-  special = false
 }
