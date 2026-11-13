@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -171,3 +172,18 @@ class RunStopped(Exception):
 
 class RunError(Exception):
     """A run failure whose message is written for the user."""
+
+
+class OutsideJob(BaseModel):
+    """
+    A job the user applied to outside the app: its link, the status it has
+    reached and when they applied. The title, company and description are used
+    when the app can't read the link.
+    """
+
+    url: str = Field(min_length=8, max_length=2000, pattern=r"^https?://")
+    status: Literal["applied", "screening", "interviewing", "offer", "rejected"] = "applied"
+    applied_on: date | None = None
+    title: str | None = Field(default=None, max_length=300)
+    company: str | None = Field(default=None, max_length=200)
+    description: str | None = Field(default=None, max_length=50_000)

@@ -9,6 +9,7 @@ import {
   MAX_COMPANY_IMPORT,
   MAX_JOBS_PER_SEARCH,
   MIN_SCORES,
+  OUTSIDE_STATUSES,
   POSTED_WITHIN_DAYS,
   THEMES,
   WORKPLACE_TYPES,
@@ -258,4 +259,36 @@ export async function saveTheme(theme: string): Promise<ActionResult> {
     const { repository } = await getSignedInSource();
     await repository.saveTheme(theme as ThemeRow);
   });
+}
+
+export type AddJobResult = ActionResult & { message?: string };
+
+/**
+ * Adds a job the user applied to outside the app to Jobs, then starts scoring it against the primary resume. The
+ * job stays added when scoring can't start, such as while a search runs.
+ */
+export async function addOutsideJob(formData: FormData): Promise<AddJobResult> {
+  let message = "Added to Jobs. Scoring started; progress shows on the Tracker.";
+  const result = await run("/jobs", async () => {
+    const url = text(formData.get("url"));
+    if (!/^https?:\/\/\S+$/.test(url)) throw new Error("Enter the job's link, starting with https://.");
+    const status = text(formData.get("status")) || "applied";
+    if (!OUTSIDE_STATUSES.includes(status as (typeof OUTSIDE_STATUSES)[number])) throw new Error("Pick a status.");
+    const body = {
+      url,
+      status,
+      applied_on: text(formData.get("applied_on")) || null,
+      title: text(formData.get("title")) || null,
+      company: text(formData.get("company")) || null,
+      description: text(formData.get("description")) || null,
+    };
+    await callAgent("/applications/outside", { method: "POST", body });
+    try {
+      await callAgent("/runs/rescore", { method: "POST" });
+    } catch (error) {
+      unstable_rethrow(error);
+      message = `Added to Jobs, but scoring didn't start: ${error instanceof Error ? error.message : "try Rescore later."}`;
+    }
+  });
+  return result.ok ? { ...result, message } : result;
 }

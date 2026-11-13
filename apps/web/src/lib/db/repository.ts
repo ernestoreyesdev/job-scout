@@ -342,11 +342,11 @@ export class JobFinderRepository {
     return data.map(({ posting, ...job }) => ({ ...job, source: posting.source }));
   }
 
-  /** Jobs past "new" with their status history, source and scoring resume's file name, for the funnel. */
+  /** Jobs past "new" with their status history, source, scoring resume's file name and who added them, for the funnel. */
   async listFunnelJobs(): Promise<FunnelJob[]> {
     const { data, error } = await this.client
       .from("applications")
-      .select("status, posting:postings!inner(source), resume:resumes(file_name), events:application_events(status)")
+      .select("status, added_by, posting:postings!inner(source), resume:resumes(file_name), events:application_events(status)")
       .neq("status", "new")
       .range(0, 9999);
     if (error) throw error;
@@ -354,6 +354,7 @@ export class JobFinderRepository {
       statuses: [job.status, ...job.events.map((event) => event.status)],
       source: job.posting.source,
       resume: job.resume?.file_name ?? "Unknown resume",
+      addedBy: job.added_by,
     }));
   }
 

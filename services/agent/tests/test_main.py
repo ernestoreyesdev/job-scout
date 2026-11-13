@@ -11,7 +11,7 @@ from app.agents.schemas import FollowUpDraft, GapAnalysis, GapItem, SearchRule
 from app.auth import CurrentUser
 from app.config import Settings
 from app.db import Rest
-from app.sources.base import CompanyNotFound
+from app.sources.base import CompanyNotFound, Posting
 
 
 class FakeRest(Rest):
@@ -455,3 +455,97 @@ def test_an_unexpected_failure_shows_a_plain_message_and_keeps_the_error_for_the
 
     assert db.updates[-1][2]["error"] == main.SEARCH_FAILED
     assert ("run_errors", {"run_id": "run-1", "detail": "ValueError: Could not load model BAAI/bge-small-en-v1.5 from any source."}) in db.inserts
+
+
+class OutsideRest(FakeRest):
+    """Tables as lists of rows; select matches eq filters, insert assigns ids."""
+
+    def __init__(self, **tables: list[dict[str, Any]]):
+        super().__init__()
+        self.tables = {"postings": [], "companies": [], "applications": [], "application_events": [], **tables}
+
+    def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
+        filters = {key: value.removeprefix("eq.") for key, value in params.items() if value.startswith("eq.")}
+        return [row for row in self.tables[table] if all(str(row.get(key)) == value for key, value in filters.items())]
+
+    def insert(self, table: str, rows: Any, on_conflict: str | None = None, select: str | None = None) -> list[dict[str, Any]]:
+        row = {"id": f"{table}-{len(self.tables[table]) + 1}", **rows}
+        self.tables[table].append(row)
+        self.inserts.append((table, rows))
+        if table == "applications":
+            self.tables["application_events"].append({"id": "event-1", "application_id": row["id"], "status": row["status"]})
+        return [row]
+
+
+def add_outside(monkeypatch: pytest.MonkeyPatch, db: OutsideRest, **job: Any) -> dict[str, str]:
+    monkeypatch.setattr(main, "user_db", lambda settings, token: db)
+    monkeypatch.setattr(main, "service_db", lambda settings: db)
+    return main.add_outside_job(main.OutsideJob(**job), fake_user(id="user-1", access_token="t"), fake_settings())
+
+
+RAMP_JOB = "https://jobs.ashbyhq.com/ramp/939892e5-5273-4bfc-8c41-a6c51cabb228"
+
+
+def ramp_posting() -> Posting:
+    return Posting(
+        source="ashby",
+        board="ramp",
+        external_id="939892e5-5273-4bfc-8c41-a6c51cabb228",
+        title="Software Engineer, Backend",
+        company="Ramp",
+        location="Remote (US)",
+        url=RAMP_JOB,
+        description="Build payments.",
+        posted_at=None,
+    )
+
+
+def test_an_outside_job_already_saved_is_added_as_applied_on_the_day_given(monkeypatch: pytest.MonkeyPatch):
+    db = OutsideRest(postings=[{"id": "posting-1", "url": RAMP_JOB}])
+
+    result = add_outside(monkeypatch, db, url=f"{RAMP_JOB}?departmentId=x", applied_on="2026-11-10")
+
+    [(_, application)] = [insert for insert in db.inserts if insert[0] == "applications"]
+    assert application == {"user_id": "user-1", "posting_id": "posting-1", "status": "applied", "in_tracker": False, "added_by": "user"}
+    assert ("application_events", {"id": "eq.event-1"}, {"changed_at": "2026-11-10"}) in db.updates
+    assert result == {"application_id": "applications-1"}
+
+
+def test_an_outside_job_not_saved_is_read_from_its_board(monkeypatch: pytest.MonkeyPatch):
+    db = OutsideRest(companies=[{"source": "ashby", "board": "ramp", "name": "Ramp"}])
+    monkeypatch.setattr(main, "fetch_live", lambda source, board, company: [ramp_posting()])
+
+    add_outside(monkeypatch, db, url=RAMP_JOB)
+
+    [saved] = db.tables["postings"]
+    assert (saved["source"], saved["external_id"], saved["title"]) == ("ashby", ramp_posting().external_id, "Software Engineer, Backend")
+
+
+def test_an_outside_job_with_an_unreadable_link_needs_a_title_and_company(monkeypatch: pytest.MonkeyPatch):
+    db = OutsideRest()
+
+    with pytest.raises(HTTPException) as refused:
+        add_outside(monkeypatch, db, url="https://careers.example.com/jobs/42")
+    assert refused.value.status_code == 422
+
+    add_outside(monkeypatch, db, url="https://careers.example.com/jobs/42", title="Engineer", company="Example")
+    [saved] = db.tables["postings"]
+    assert (saved["source"], saved["title"], saved["company"], saved["url"]) == (
+        "manual",
+        "Engineer",
+        "Example",
+        "https://careers.example.com/jobs/42",
+    )
+
+
+def test_an_outside_job_already_on_the_tracker_moves_to_its_status(monkeypatch: pytest.MonkeyPatch):
+    db = OutsideRest(
+        postings=[{"id": "posting-1", "url": RAMP_JOB}],
+        applications=[{"id": "application-1", "posting_id": "posting-1", "status": "new"}],
+    )
+
+    add_outside(monkeypatch, db, url=RAMP_JOB, status="interviewing")
+
+    assert not [insert for insert in db.inserts if insert[0] == "applications"]
+    patches = [patch for table, _, patch in db.updates if table == "applications"]
+    assert patches == [{"status": "applied", "in_tracker": False}, {"status": "interviewing", "in_tracker": False}]

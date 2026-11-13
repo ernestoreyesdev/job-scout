@@ -58,6 +58,7 @@ export function JobRow({
   const [followUp, setFollowUp] = useState<{ subject: string; body: string } | null>(null);
   const [pending, startTransition] = useTransition();
   const { openDays, reposted, daysSinceApplied } = job.signals;
+  const addedByUser = job.added_by === "user";
   const ghost = [
     openDays !== null && openDays >= GHOST_JOB_DAYS && `Open ${openDays} days`,
     reposted && "Reposted",
@@ -125,8 +126,9 @@ export function JobRow({
             .filter(Boolean)
             .join(" · ")}
         </p>
-        {(facts.length > 0 || stack.length > 0 || ghost.length > 0 || staleResume || closedOn) && (
+        {(facts.length > 0 || stack.length > 0 || ghost.length > 0 || staleResume || closedOn || addedByUser) && (
           <div className="mt-2 flex flex-wrap gap-1.5">
+            {addedByUser && <span className={CHIP}>Added by you</span>}
             {closedOn && (
               <span className="inline-flex items-center rounded-full bg-destructive/10 px-2 py-0.5 text-xs text-destructive">
                 Closed since {closedOn}

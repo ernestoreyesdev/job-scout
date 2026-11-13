@@ -21,6 +21,7 @@ SourceName = Literal[
     "icims",
     "jobvite",
     "hackernews",
+    "manual",
 ]
 WorkplaceType = Literal["onsite", "hybrid", "remote"]
 

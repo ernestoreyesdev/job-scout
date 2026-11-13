@@ -7,7 +7,7 @@ import { StatTile } from "@/components/stat-tile";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageReady } from "@/components/web-vitals";
 import { FUNNEL_STAGES, FOLLOW_UP_DAYS, GHOST_JOB_DAYS } from "@/lib/db";
-import { MIN_LABELED, accuracyByCut, funnel, statsBySource, type FunnelRow } from "@/lib/insights";
+import { MIN_LABELED, accuracyByCut, funnel, statsBySource, type FunnelJob, type FunnelRow } from "@/lib/insights";
 import { getSignedInSource } from "@/lib/repository";
 
 const PERCENT = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 });
@@ -24,7 +24,10 @@ const SOURCE_LABELS: Record<string, string> = {
   icims: "iCIMS",
   jobvite: "Jobvite",
   hackernews: "Hacker News",
+  manual: "Entered by hand",
 };
+
+const ADDED_BY_LABELS: Record<FunnelJob["addedBy"], string> = { search: "Found by search", user: "Added by you" };
 
 export const metadata: Metadata = { title: "Insights" };
 
@@ -93,6 +96,7 @@ async function InsightsData() {
         {overall ? (
           <>
             <FunnelBars row={overall} />
+            <FunnelTable title="By how it was added" rows={funnel(funnelJobs, (job) => ADDED_BY_LABELS[job.addedBy])} />
             <FunnelTable title="By source" rows={funnel(funnelJobs, (job) => SOURCE_LABELS[job.source] ?? job.source)} />
             <FunnelTable title="By resume" rows={funnel(funnelJobs, (job) => job.resume)} />
           </>

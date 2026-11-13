@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
+import { AddJob } from "@/components/add-job";
 import { JobListFilters } from "@/components/job-filters";
 import { JobListSkeleton } from "@/components/job-list-skeleton";
 import { JobsTable } from "@/components/jobs-table";
@@ -50,6 +51,7 @@ async function JobsData({ searchParams }: Pick<PageProps<"/jobs">, "searchParams
   return (
     <section className="mt-8">
       <PageReady />
+      <AddJob />
       <nav aria-label="Jobs view" className="mb-4 flex gap-1 text-sm">
         {VIEWS.map((option) => (
           <Link

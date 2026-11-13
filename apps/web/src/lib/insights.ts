@@ -103,8 +103,13 @@ export function summarizeCosts(
   };
 }
 
-/** A job past "new" with every status it has had, its source and the resume that scored it. */
-export type FunnelJob = { statuses: ApplicationStatusRow[]; source: JobSourceRow; resume: string };
+/** A job past "new" with every status it has had, its source, the resume that scored it and who added it. */
+export type FunnelJob = {
+  statuses: ApplicationStatusRow[];
+  source: JobSourceRow;
+  resume: string;
+  addedBy: ApplicationRow["added_by"];
+};
 
 export type FunnelRow = {
   label: string;

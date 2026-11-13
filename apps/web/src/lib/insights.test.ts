@@ -71,9 +71,9 @@ describe("costs", () => {
 describe("funnel", () => {
   it("counts every stage up to the furthest one reached", () => {
     const [row] = funnel([
-      { statuses: ["new", "applied", "screening", "rejected"], source: "lever", resume: "a" },
-      { statuses: ["applied"], source: "lever", resume: "a" },
-      { statuses: ["saved"], source: "lever", resume: "a" },
+      { statuses: ["new", "applied", "screening", "rejected"], source: "lever", resume: "a", addedBy: "search" },
+      { statuses: ["applied"], source: "lever", resume: "a", addedBy: "search" },
+      { statuses: ["saved"], source: "lever", resume: "a", addedBy: "search" },
     ]);
 
     expect(row.reached).toEqual({ applied: 2, screening: 1, interviewing: 0, offer: 0 });
@@ -83,12 +83,28 @@ describe("funnel", () => {
   it("leaves out groups with no applications", () => {
     const rows = funnel(
       [
-        { statuses: ["applied"], source: "lever", resume: "a" },
-        { statuses: ["saved"], source: "ashby", resume: "a" },
+        { statuses: ["applied"], source: "lever", resume: "a", addedBy: "search" },
+        { statuses: ["saved"], source: "ashby", resume: "a", addedBy: "search" },
       ],
       (job) => job.source,
     );
 
     expect(rows.map((row) => row.label)).toEqual(["lever"]);
+  });
+
+  it("groups jobs by who added them", () => {
+    const rows = funnel(
+      [
+        { statuses: ["applied", "screening"], source: "ashby", resume: "a", addedBy: "user" },
+        { statuses: ["applied"], source: "manual", resume: "a", addedBy: "user" },
+        { statuses: ["applied"], source: "lever", resume: "a", addedBy: "search" },
+      ],
+      (job) => job.addedBy,
+    );
+
+    expect(rows.map((row) => [row.label, row.reached.applied, row.responseRate])).toEqual([
+      ["user", 2, 0.5],
+      ["search", 1, 0],
+    ]);
   });
 });

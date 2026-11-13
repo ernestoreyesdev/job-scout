@@ -15,7 +15,8 @@ export type JobSourceRow =
   | "bamboohr"
   | "icims"
   | "jobvite"
-  | "hackernews";
+  | "hackernews"
+  | "manual";
 
 export const APPLICATION_STATUSES = [
   "new",
@@ -27,6 +28,9 @@ export const APPLICATION_STATUSES = [
   "offer",
   "rejected",
 ] as const;
+
+/** Statuses a job applied to outside the app can be added with. */
+export const OUTSIDE_STATUSES = ["applied", "screening", "interviewing", "offer", "rejected"] as const;
 
 /** Funnel stages after applying, in order; reaching one counts every stage before it too. */
 export const FUNNEL_STAGES = ["applied", "screening", "interviewing", "offer"] as const;
@@ -122,6 +126,7 @@ export type ApplicationRow = {
   status: ApplicationStatusRow;
   notes: string | null;
   in_tracker: boolean;
+  added_by: "search" | "user";
   fit_label: FitLabelRow | null;
   gap_analysis: GapAnalysis | null;
   gap_analyzed_at: string | null;

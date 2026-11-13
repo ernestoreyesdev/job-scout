@@ -1,5 +1,6 @@
 import io
 import logging
+import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
@@ -17,11 +18,12 @@ from app.agents.orchestrator import (
     rescore as orchestrate_rescore,
     run_search as orchestrate_search,
 )
-from app.agents.schemas import AnthropicKeyRequest, CompanyImport, RunError, RunStopped, SearchRule, Usage
+from app.agents.schemas import AnthropicKeyRequest, CompanyImport, OutsideJob, RunError, RunStopped, SearchRule, Usage
 from app.auth import CurrentUser, admin_user, current_user
 from app.config import Settings, get_settings
 from app.crypto import decrypt, encrypt, key_hint
 from app.db import Rest, service_db, user_db
+from app.sources import board_from_url, default_name, fetch_live
 from app.sources.base import CompanyNotFound, Posting
 from app.telemetry import CallLog, RecordingClient, configure_logging, current_run
 
@@ -882,3 +884,70 @@ def save_run_error(service: Rest, run_id: str, detail: str | None) -> None:
     """Keeps the original error of a run that failed unexpectedly, for the admin page."""
     if detail:
         service.insert("run_errors", {"run_id": run_id, "detail": detail})
+
+
+@app.post("/applications/outside", status_code=201)
+def add_outside_job(body: OutsideJob, user: User, settings: Config) -> dict[str, str]:
+    """
+    Adds a job the user applied to outside the app to their Jobs, dated the day
+    they applied. Moves it to `body.status` when it's past applied, and a job
+    already on their Tracker moves instead of being added twice.
+    """
+    db = user_db(settings, user.access_token)
+    posting_id = outside_posting(service_db(settings), body)
+    rows = db.select("applications", {"posting_id": f"eq.{posting_id}", "select": "id,status"})
+    if not rows:
+        rows = db.insert(
+            "applications",
+            {"user_id": user.id, "posting_id": posting_id, "status": "applied", "in_tracker": False, "added_by": "user"},
+            select="id,status",
+        )
+    elif rows[0]["status"] in ("new", "saved", "tailored"):
+        db.update("applications", {"id": f"eq.{rows[0]['id']}"}, {"status": "applied", "in_tracker": False})
+    application_id = rows[0]["id"]
+    if body.applied_on:
+        applied = db.select(
+            "application_events",
+            {"application_id": f"eq.{application_id}", "status": "eq.applied", "select": "id", "order": "changed_at.desc", "limit": "1"},
+        )
+        if applied:
+            db.update("application_events", {"id": f"eq.{applied[0]['id']}"}, {"changed_at": body.applied_on.isoformat()})
+    if body.status != "applied":
+        db.update("applications", {"id": f"eq.{application_id}"}, {"status": body.status, "in_tracker": False})
+    return {"application_id": application_id}
+
+
+def outside_posting(service: Rest, body: OutsideJob) -> str:
+    """
+    The id of the saved job at `body.url`: one already saved, else the job read
+    from its board and saved, else a manual job from the title and company given.
+    """
+    link = body.url.split("#")[0].split("?")[0].rstrip("/")
+    saved = service.select("postings", {"url": f"eq.{link}", "select": "id", "limit": "1"})
+    if saved:
+        return saved[0]["id"]
+    if board := board_from_url(link):
+        source, slug = board
+        names = service.select("companies", {"source": f"eq.{source}", "board": f"eq.{slug}", "select": "name"})
+        listed = fetch_live(source, slug, names[0]["name"] if names else default_name(source, slug))
+        segments = set(link.split("/"))
+        match = next((p for p in listed if p.url.split("?")[0].rstrip("/") == link or p.external_id in segments), None)
+        if match:
+            row = match.model_dump(mode="json", exclude=None if match.description else {"description"})
+            [row] = service.insert("postings", row, on_conflict="source,external_id", select="id")
+            return row["id"]
+    if not (body.title and body.company):
+        raise HTTPException(422, "Couldn't find this job from its link. Enter its title and company to add it.")
+    manual = Posting(
+        source="manual",
+        board="manual",
+        external_id=uuid.uuid4().hex,
+        title=body.title,
+        company=body.company,
+        location=None,
+        url=link,
+        description=body.description or "",
+        posted_at=None,
+    )
+    [row] = service.insert("postings", manual.model_dump(mode="json"), select="id")
+    return row["id"]
