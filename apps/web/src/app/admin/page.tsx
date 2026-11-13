@@ -50,6 +50,7 @@ type AdminStats = {
   users: { id: string; email: string | null; created_at: string | null; last_sign_in_at: string | null }[];
   runs: (Pick<AgentRunRow, "id" | "user_id" | "kind" | "status" | "error" | "error_code" | "created_at" | "finished_at" | "usage" | "timings"> & {
     unreachable_boards: string[];
+    run_error: { detail: string } | null;
   })[];
   calls: StepCalls[];
   boards: {
@@ -411,7 +412,7 @@ function HealthSection({ stats }: { stats: AdminStats }) {
               {run.error_code && (
                 <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{run.error_code.replace("_", " ")}</span>
               )}
-              <span className="min-w-0 flex-1 text-destructive">{run.error ?? "No error message"}</span>
+              <span className="min-w-0 flex-1 text-destructive">{run.run_error?.detail ?? run.error ?? "No error message"}</span>
             </li>
           ))}
         </ul>

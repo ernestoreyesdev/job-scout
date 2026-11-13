@@ -167,3 +167,7 @@ class RelatedTitles(BaseModel):
 
 class RunStopped(Exception):
     """The user stopped the run; raised at its next progress update."""
+
+
+class RunError(Exception):
+    """A run failure whose message is written for the user."""

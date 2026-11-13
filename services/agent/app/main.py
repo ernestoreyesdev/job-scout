@@ -19,7 +19,7 @@ from app.agents.orchestrator import (
     rescore as orchestrate_rescore,
     run_search as orchestrate_search,
 )
-from app.agents.schemas import AnthropicKeyRequest, CompanyImport, RunStopped, SearchRule, Usage
+from app.agents.schemas import AnthropicKeyRequest, CompanyImport, RunError, RunStopped, SearchRule, Usage
 from app.auth import CurrentUser, admin_user, current_user
 from app.config import Settings, get_settings
 from app.crypto import decrypt, encrypt, key_hint
@@ -43,6 +43,10 @@ GOOD_SCORE = 70
 BROKEN_STOPS = frozenset({"max_tokens", "refusal"})
 # A board refresh is refused when another started this recently.
 REFRESH_COOLDOWN = timedelta(hours=1)
+# What users see when a run fails unexpectedly; the original error goes to run_errors.
+SEARCH_FAILED = "Something went wrong with this search. Try running it again."
+RESCORE_FAILED = "Something went wrong while rescoring. Try again."
+IMPORT_FAILED = "Something went wrong while adding these companies. Try again."
 
 
 app = FastAPI(title="job-finder agent")
@@ -142,16 +146,17 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
     report = start_run(db, run_id)
     calls, timings = CallLog(user.id, run_id), {}
     outcome: dict[str, Any] = {}
+    detail: str | None = None
     try:
         api_key = anthropic_key(service, user.id, settings)
         if not api_key:
-            raise RuntimeError("Searches aren't set up yet: the app has no Anthropic key. Ask the admin to add one.")
+            raise RunError("Searches aren't set up yet: the app has no Anthropic key. Ask the admin to add one.")
 
         resume = None
         if body.score:
             resumes = db.select("resumes", {"is_primary": "eq.true", "select": "id,text"})
             if not resumes or not resumes[0]["text"]:
-                raise RuntimeError("Upload a resume first, or search without scoring.")
+                raise RunError("Upload a resume first, or search without scoring.")
             resume = resumes[0]
 
         result = orchestrate_search(
@@ -180,11 +185,15 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
         pass
     except CompanyNotFound as exc:
         outcome = {"status": "failed", "error": str(exc), "error_code": "company_not_found", "progress": None}
+    except RunError as exc:
+        outcome = {"status": "failed", "error": str(exc), "error_code": None, "progress": None}
     except Exception as exc:
         logger.exception("search run %s failed", run_id)
-        outcome = {"status": "failed", "error": str(exc) or exc.__class__.__name__, "error_code": None, "progress": None}
+        detail = f"{exc.__class__.__name__}: {exc}"
+        outcome = {"status": "failed", "error": SEARCH_FAILED, "error_code": None, "progress": None}
 
     finish_run(db, run_id, outcome, usage, timings)
+    save_run_error(service, run_id, detail)
     calls.save(service)
 
 
@@ -256,14 +265,15 @@ def run_rescore(run_id: str, user: CurrentUser, settings: Settings) -> None:
     report = start_run(db, run_id)
     calls, timings = CallLog(user.id, run_id), {}
     outcome: dict[str, Any] = {}
+    detail: str | None = None
     try:
         api_key = anthropic_key(service, user.id, settings)
         if not api_key:
-            raise RuntimeError("Searches aren't set up yet: the app has no Anthropic key. Ask the admin to add one.")
+            raise RunError("Searches aren't set up yet: the app has no Anthropic key. Ask the admin to add one.")
 
         resumes = db.select("resumes", {"is_primary": "eq.true", "select": "id,text"})
         if not resumes or not resumes[0]["text"]:
-            raise RuntimeError("Upload a resume first.")
+            raise RunError("Upload a resume first.")
 
         count = orchestrate_rescore(
             client=RecordingClient(make_client(api_key), calls),
@@ -285,11 +295,15 @@ def run_rescore(run_id: str, user: CurrentUser, settings: Settings) -> None:
         outcome = {"status": "done", "error": None, "progress": progress}
     except RunStopped:
         pass
+    except RunError as exc:
+        outcome = {"status": "failed", "error": str(exc), "progress": None}
     except Exception as exc:
         logger.exception("rescore run %s failed", run_id)
-        outcome = {"status": "failed", "error": str(exc) or exc.__class__.__name__, "progress": None}
+        detail = f"{exc.__class__.__name__}: {exc}"
+        outcome = {"status": "failed", "error": RESCORE_FAILED, "progress": None}
 
     finish_run(db, run_id, outcome, usage, timings)
+    save_run_error(service, run_id, detail)
     calls.save(service)
 
 
@@ -315,10 +329,11 @@ def run_import(run_id: str, body: CompanyImport, user: CurrentUser, settings: Se
     report = start_run(db, run_id)
     calls, timings = CallLog(user.id, run_id), {}
     outcome: dict[str, Any] = {}
+    detail: str | None = None
     try:
         api_key = anthropic_key(service, user.id, settings)
         if not api_key:
-            raise RuntimeError("Searches aren't set up yet: the app has no Anthropic key. Ask the admin to add one.")
+            raise RunError("Searches aren't set up yet: the app has no Anthropic key. Ask the admin to add one.")
 
         result = import_companies(
             entries=body.entries,
@@ -331,11 +346,15 @@ def run_import(run_id: str, body: CompanyImport, user: CurrentUser, settings: Se
         outcome = {"status": "done", "error": None, "progress": summarize_import(result)}
     except RunStopped:
         pass
+    except RunError as exc:
+        outcome = {"status": "failed", "error": str(exc), "progress": None}
     except Exception as exc:
         logger.exception("import run %s failed", run_id)
-        outcome = {"status": "failed", "error": str(exc) or exc.__class__.__name__, "progress": None}
+        detail = f"{exc.__class__.__name__}: {exc}"
+        outcome = {"status": "failed", "error": IMPORT_FAILED, "progress": None}
 
     finish_run(db, run_id, outcome, usage, timings)
+    save_run_error(service, run_id, detail)
     calls.save(service)
 
 
@@ -579,7 +598,8 @@ def admin_stats(admin: Admin, settings: Config) -> dict[str, Any]:
         "runs": service.select(
             "agent_runs",
             {
-                "select": "id,user_id,kind,status,error,error_code,unreachable_boards,created_at,finished_at,usage,timings",
+                "select": "id,user_id,kind,status,error,error_code,unreachable_boards,created_at,finished_at,usage,timings,"
+                "run_error:run_errors(detail)",
                 "created_at": f"gte.{since}",
                 "order": "created_at.desc",
             },
@@ -904,3 +924,9 @@ def score_versions(scores: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return sorted(rows, key=lambda row: row["last"], reverse=True)
+
+
+def save_run_error(service: Rest, run_id: str, detail: str | None) -> None:
+    """Keeps the original error of a run that failed unexpectedly, for the admin page."""
+    if detail:
+        service.insert("run_errors", {"run_id": run_id, "detail": detail})

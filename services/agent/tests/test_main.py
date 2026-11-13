@@ -513,3 +513,21 @@ def test_a_refresh_that_misses_boards_names_them_and_a_clean_one_sends_nothing(m
     monkeypatch.setattr(main, "refresh_boards", lambda service: {"jobs": 10, "boards": 1, "board_fetches": fetches[1:]})
     main.run_refresh(fake_settings())
     assert alerts == []
+
+
+def test_an_unexpected_failure_shows_a_plain_message_and_keeps_the_error_for_the_admin(monkeypatch: pytest.MonkeyPatch):
+    db = RunRest()
+    monkeypatch.setattr(main, "user_db", lambda settings, token: db)
+    monkeypatch.setattr(main, "service_db", lambda settings: db)
+    monkeypatch.setattr(main, "decrypt", lambda ciphertext, key: "key")
+
+    def broken(**kwargs: Any) -> SearchResult:
+        raise ValueError("Could not load model BAAI/bge-small-en-v1.5 from any source.")
+
+    monkeypatch.setattr(main, "orchestrate_search", broken)
+    settings = fake_settings(agent_encryption_key="k")
+
+    main.run_search("run-1", SearchRule(keywords=["engineer"]), fake_user(id="u", access_token="t"), settings)
+
+    assert db.updates[-1][2]["error"] == main.SEARCH_FAILED
+    assert ("run_errors", {"run_id": "run-1", "detail": "ValueError: Could not load model BAAI/bge-small-en-v1.5 from any source."}) in db.inserts
