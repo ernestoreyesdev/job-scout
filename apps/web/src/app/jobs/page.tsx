@@ -8,9 +8,11 @@ import { JobListSkeleton } from "@/components/job-list-skeleton";
 import { JobsTable } from "@/components/jobs-table";
 import { Pager } from "@/components/pager";
 import { RescoreButton } from "@/components/rescore-button";
+import { RunStatus } from "@/components/run-status";
 import { PageReady } from "@/components/web-vitals";
 import { APPLICATION_STATUSES } from "@/lib/db";
 import { parseJobQuery } from "@/lib/job-query";
+import { rescoreScope } from "@/lib/runs";
 import { getSignedInSource } from "@/lib/repository";
 import { cn } from "@/lib/utils";
 
@@ -42,16 +44,19 @@ async function JobsData({ searchParams }: Pick<PageProps<"/jobs">, "searchParams
   const resume = await repository.getPrimaryResume();
   const query = parseJobQuery(await searchParams, resume?.text ? "desc" : "posted");
   const view = query.rated ? "rated" : "jobs";
-  const [jobs, companies] = await Promise.all([
+  const [jobs, companies, runs] = await Promise.all([
     repository.listTrackedJobs(view, query.sort, query.page, query.filters),
     repository.listTrackedCompanies(view),
+    repository.listRuns(1),
   ]);
-  const stale = resume ? await repository.countStaleJobs(resume.id) : 0;
+  const rescoreRun = runs[0]?.kind === "rescore" && rescoreScope(runs[0]) === "jobs" ? runs[0] : null;
+  const stale = resume ? await repository.countStaleJobs(resume.id, "jobs") : 0;
 
   return (
     <section className="mt-8">
       <PageReady />
       <AddJob />
+      {rescoreRun && <RunStatus run={rescoreRun} />}
       <nav aria-label="Jobs view" className="mb-4 flex gap-1 text-sm">
         {VIEWS.map((option) => (
           <Link
@@ -81,7 +86,7 @@ async function JobsData({ searchParams }: Pick<PageProps<"/jobs">, "searchParams
             companies={companies}
             total={jobs.total}
             statuses={query.rated ? APPLICATION_STATUSES : APPLICATION_STATUSES.filter((status) => status !== "new")}
-            actions={stale > 0 && <RescoreButton count={stale} />}
+            actions={stale > 0 && <RescoreButton count={stale} scope="jobs" />}
           />
           {jobs.total === 0 && <p className="mt-4 text-sm text-muted-foreground">No jobs match these filters.</p>}
           <div className="mt-3">

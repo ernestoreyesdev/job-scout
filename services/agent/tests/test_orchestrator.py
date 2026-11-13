@@ -829,11 +829,12 @@ def test_rescore_updates_only_jobs_unscored_or_scored_against_another_resume():
         service=FakeRest(),
         usage=Usage(),
         report=progress.append,
+        scope="tracker",
     )
 
     assert count == 1
     [params] = selects
-    assert params["and"] == "(or(resume_id.is.null,resume_id.neq.resume-2),or(in_tracker.eq.true,status.neq.new))"
+    assert params["and"] == "(or(resume_id.is.null,resume_id.neq.resume-2),in_tracker.eq.true)"
     [saved] = user.inserted("applications")
     assert (saved["posting_id"], saved["resume_id"]) == ("posting-1", "resume-2")
     assert "status" not in saved and "in_tracker" not in saved
@@ -857,6 +858,7 @@ def test_rescore_with_nothing_stale_scores_nothing():
         service=FakeRest(),
         usage=Usage(),
         report=progress.append,
+        scope="jobs",
     )
 
     assert count == 0 and messages.calls == []
@@ -1378,3 +1380,28 @@ def test_a_refresh_embeds_batch_after_batch_until_none_are_left(monkeypatch: pyt
     summary = orchestrator.refresh_boards(service, lambda source, board, name: [posting(board, "Engineer")])
 
     assert summary["embedded_jobs"] == 2 * orchestrator.EMBED_BATCH + 3
+
+
+def test_rescore_for_jobs_picks_only_jobs_past_new():
+    selects: list[dict[str, str]] = []
+
+    class EmptyRest(FakeRest):
+        def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
+            selects.append(params)
+            return []
+
+    orchestrator.rescore(
+        client=SimpleNamespace(beta=SimpleNamespace(messages=FakeMessages(set()))),
+        settings=SETTINGS,
+        resume_id="resume-2",
+        resume_text="r",
+        user_id="user-1",
+        user=EmptyRest(),
+        service=FakeRest(),
+        usage=Usage(),
+        report=lambda message: None,
+        scope="jobs",
+    )
+
+    [params] = selects
+    assert params["and"] == "(or(resume_id.is.null,resume_id.neq.resume-2),status.neq.new)"

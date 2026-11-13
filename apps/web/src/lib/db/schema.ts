@@ -46,6 +46,9 @@ export const REPOST_DAYS = 15;
 
 export type ApplicationStatusRow = (typeof APPLICATION_STATUSES)[number];
 
+/** Which page's jobs a rescore scores. */
+export type RescoreScope = "tracker" | "jobs";
+
 export type RunStatusRow = "queued" | "running" | "done" | "failed" | "stopped";
 
 export const WORKPLACE_TYPES = ["onsite", "hybrid", "remote"] as const;

@@ -7,7 +7,7 @@ import { useEffect, useState, useTransition } from "react";
 import { rerunSearch, rescoreJobs, stopRun } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import type { AgentRunRow, RunStatusRow, SearchRuleInput } from "@/lib/db";
-import { describeRun } from "@/lib/runs";
+import { describeRun, rescoreScope } from "@/lib/runs";
 import { cn } from "@/lib/utils";
 
 const REFRESH_MS = 3000;
@@ -24,7 +24,7 @@ export function RunStatus({ run }: { run: AgentRunRow }) {
 
   function rerun(webLookup: boolean) {
     startTransition(async () => {
-      const result = run.kind === "rescore" ? await rescoreJobs() : await rerunSearch(run.id, webLookup);
+      const result = run.kind === "rescore" ? await rescoreJobs(rescoreScope(run)) : await rerunSearch(run.id, webLookup);
       setRerunError(result.ok ? null : (result.error ?? "Could not re-run the search."));
     });
   }

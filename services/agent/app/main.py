@@ -18,7 +18,16 @@ from app.agents.orchestrator import (
     rescore as orchestrate_rescore,
     run_search as orchestrate_search,
 )
-from app.agents.schemas import AnthropicKeyRequest, CompanyImport, OutsideJob, RunError, RunStopped, SearchRule, Usage
+from app.agents.schemas import (
+    AnthropicKeyRequest,
+    CompanyImport,
+    OutsideJob,
+    RescoreRequest,
+    RunError,
+    RunStopped,
+    SearchRule,
+    Usage,
+)
 from app.auth import CurrentUser, admin_user, current_user
 from app.config import Settings, get_settings
 from app.crypto import decrypt, encrypt, key_hint
@@ -241,21 +250,21 @@ def fail_runs(db: Rest, filters: dict[str, str], error: str) -> None:
 
 
 @app.post("/runs/rescore", status_code=202)
-def start_rescore(user: User, settings: Config, background: BackgroundTasks) -> dict[str, str]:
+def start_rescore(body: RescoreRequest, user: User, settings: Config, background: BackgroundTasks) -> dict[str, str]:
     db = user_db(settings, user.access_token)
     cutoff = (datetime.now(UTC) - RUN_TIME_LIMIT).isoformat()
     fail_runs(db, {"status": UNFINISHED, "created_at": f"lt.{cutoff}"}, "Stopped after running for more than 10 minutes.")
     try:
-        run = db.insert("agent_runs", {"user_id": user.id, "kind": "rescore", "input": {}})[0]
+        run = db.insert("agent_runs", {"user_id": user.id, "kind": "rescore", "input": body.model_dump()})[0]
     except httpx.HTTPStatusError as error:
         if error.response.status_code == 409:
             raise HTTPException(409, "A search is already running. Wait for it to finish.")
         raise
-    background.add_task(run_rescore, run["id"], user, settings)
+    background.add_task(run_rescore, run["id"], body, user, settings)
     return {"run_id": run["id"]}
 
 
-def run_rescore(run_id: str, user: CurrentUser, settings: Settings) -> None:
+def run_rescore(run_id: str, body: RescoreRequest, user: CurrentUser, settings: Settings) -> None:
     db = user_db(settings, user.access_token)
     service = service_db(settings)
     usage = Usage()
@@ -282,6 +291,7 @@ def run_rescore(run_id: str, user: CurrentUser, settings: Settings) -> None:
             service=service,
             usage=usage,
             report=report,
+            scope=body.scope,
             timings=timings,
         )
         progress = (

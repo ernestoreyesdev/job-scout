@@ -11,7 +11,7 @@ from typing import Any
 
 from app.agents.discovery.agent import FoundBoard, discover_boards, find_company_boards, name_companies
 from app.agents.hiring_threads.agent import HiringPost, extract_jobs, recent_posts
-from app.agents.schemas import CompanyName, SearchRule, Usage
+from app.agents.schemas import CompanyName, RescoreScope, SearchRule, Usage
 from app.agents.scoring.agent import score_and_save
 from app.agents.scoring.prompts import LabeledJob
 from app.agents.titles.agent import related_titles
@@ -66,6 +66,8 @@ STALE_JOB_DAYS = 30
 # Jobs without an embedding that a refresh loads and embeds at a time, newest first, and how many are saved per request.
 EMBED_BATCH = 1000
 EMBED_CHUNK = 200
+# The jobs each page lists, as a filter on applications.
+RESCORE_SCOPES: dict[RescoreScope, str] = {"tracker": "in_tracker.eq.true", "jobs": "status.neq.new"}
 
 Board = tuple[str, str, str, str]
 
@@ -587,20 +589,21 @@ def rescore(
     service: Rest,
     usage: Usage,
     report: Callable[[str], None],
+    scope: RescoreScope,
     describer: Callable[[Posting], str] = describe,
     embed: Callable[[list[str]], list[list[float]]] = embed_jobs,
     timings: dict[str, int] | None = None,
 ) -> int:
     """
-    Scores the jobs on the user's Tracker or Jobs that were scored against
-    another resume or not scored at all. Their status, notes and place on the Tracker stay as they
-    are. Returns how many were re-scored.
+    Scores the jobs on the user's Tracker or on Jobs, as `scope` says, that
+    were scored against another resume or not scored at all. Their status,
+    notes and place on the Tracker stay as they are. Returns how many were re-scored.
     """
     rows = user.select(
         "applications",
         {
             "select": "posting_id,posting:postings(*)",
-            "and": f"(or(resume_id.is.null,resume_id.neq.{resume_id}),or(in_tracker.eq.true,status.neq.new))",
+            "and": f"(or(resume_id.is.null,resume_id.neq.{resume_id}),{RESCORE_SCOPES[scope]})",
         },
     )
     todo = [(row["posting_id"], Posting.model_validate(row["posting"])) for row in rows]

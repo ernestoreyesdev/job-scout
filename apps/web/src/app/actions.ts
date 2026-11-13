@@ -15,6 +15,7 @@ import {
   WORKPLACE_TYPES,
   type ApplicationStatusRow,
   type FitLabelRow,
+  type RescoreScope,
   type SearchRuleInput,
   type ThemeRow,
   type WorkplaceTypeRow,
@@ -205,10 +206,11 @@ export async function setCompanyHidden(companyId: string, hidden: boolean): Prom
   });
 }
 
-/** Re-scores the Tracker and Jobs entries scored against an older resume. */
-export async function rescoreJobs(): Promise<ActionResult> {
-  return run(["/tracker", "/jobs"], async () => {
-    await callAgent("/runs/rescore", { method: "POST" });
+/** Re-scores the jobs on the Tracker or on Jobs, as `scope` says, that were scored against an older resume. */
+export async function rescoreJobs(scope: RescoreScope): Promise<ActionResult> {
+  return run(scope === "tracker" ? "/tracker" : "/jobs", async () => {
+    if (scope !== "tracker" && scope !== "jobs") throw new Error("Pick the Tracker or Jobs to score.");
+    await callAgent("/runs/rescore", { method: "POST", body: { scope } });
   });
 }
 
@@ -268,7 +270,7 @@ export type AddJobResult = ActionResult & { message?: string };
  * job stays added when scoring can't start, such as while a search runs.
  */
 export async function addOutsideJob(formData: FormData): Promise<AddJobResult> {
-  let message = "Added to Jobs. Scoring started; progress shows on the Tracker.";
+  let message = "Added to Jobs. Scoring started.";
   const result = await run("/jobs", async () => {
     const url = text(formData.get("url"));
     if (!/^https?:\/\/\S+$/.test(url)) throw new Error("Enter the job's link, starting with https://.");
@@ -284,7 +286,7 @@ export async function addOutsideJob(formData: FormData): Promise<AddJobResult> {
     };
     await callAgent("/applications/outside", { method: "POST", body });
     try {
-      await callAgent("/runs/rescore", { method: "POST" });
+      await callAgent("/runs/rescore", { method: "POST", body: { scope: "jobs" } });
     } catch (error) {
       unstable_rethrow(error);
       message = `Added to Jobs, but scoring didn't start: ${error instanceof Error ? error.message : "try Rescore later."}`;

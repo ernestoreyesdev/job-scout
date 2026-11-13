@@ -12,6 +12,7 @@ import { RunStatus } from "@/components/run-status";
 import { SearchForm } from "@/components/search-form";
 import { PageReady } from "@/components/web-vitals";
 import { parseJobQuery } from "@/lib/job-query";
+import { rescoreScope } from "@/lib/runs";
 import { getSignedInSource } from "@/lib/repository";
 
 export const metadata: Metadata = { title: "Tracker" };
@@ -46,19 +47,18 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
     repository.listTrackedCompanies("tracker"),
     repository.countTrackerJobs(),
   ]);
-  const stale = resume ? await repository.countStaleJobs(resume.id) : 0;
+  const stale = resume ? await repository.countStaleJobs(resume.id, "tracker") : 0;
+  const banner = runs[0]?.kind === "rescore" && rescoreScope(runs[0]) === "jobs" ? null : runs[0];
 
   return (
     <>
       <PageReady />
-      {runs[0] && !(trackerTotal === 0 && runs[0].status === "done" && (runs[0].jobs_added ?? 0) > 0) && (
-        <RunStatus run={runs[0]} />
-      )}
+      {banner && !(trackerTotal === 0 && banner.status === "done" && (banner.jobs_added ?? 0) > 0) && <RunStatus run={banner} />}
       <RecentRuns runs={runs} />
       <section className="mt-8">
         {trackerTotal === 0 ? (
           <div className="rounded-xl border border-dashed px-6 py-12 text-center">
-            {runs[0]?.status === "queued" || runs[0]?.status === "running" ? (
+            {banner?.status === "queued" || banner?.status === "running" ? (
               <>
                 <p className="font-medium">Searching…</p>
                 <p className="mt-1 text-sm text-muted-foreground">Matches show up here as they&apos;re scored.</p>
@@ -86,7 +86,7 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
               total={jobs.total}
               actions={
                 <>
-                  {stale > 0 && <RescoreButton count={stale} />}
+                  {stale > 0 && <RescoreButton count={stale} scope="tracker" />}
                   <ClearTracker count={trackerTotal} />
                 </>
               }

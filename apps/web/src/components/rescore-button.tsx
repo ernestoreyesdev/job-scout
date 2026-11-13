@@ -5,16 +5,17 @@ import { useState, useTransition } from "react";
 
 import { rescoreJobs } from "@/app/actions";
 import { Button } from "@/components/ui/button";
+import type { RescoreScope } from "@/lib/db";
 
-/** Starts a run that scores the jobs scored against an older resume or not scored yet. */
-export function RescoreButton({ count }: { count: number }) {
+/** Starts a run that scores this page's jobs scored against an older resume or not scored yet. */
+export function RescoreButton({ count, scope }: { count: number; scope: RescoreScope }) {
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   function rescore() {
     startTransition(async () => {
-      const result = await rescoreJobs();
-      setMessage(result.ok ? "Scoring started. Progress shows on the Tracker." : (result.error ?? "Could not start."));
+      const result = await rescoreJobs(scope);
+      setMessage(result.ok ? "Scoring started." : (result.error ?? "Could not start."));
     });
   }
 

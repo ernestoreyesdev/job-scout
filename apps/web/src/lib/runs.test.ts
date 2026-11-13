@@ -47,7 +47,8 @@ describe("describeRun", () => {
   });
 
   it("describes re-scores and imports", () => {
-    expect(describeRun(run("rescore", {})).title).toBe("Re-score with current resume");
+    expect(describeRun(run("rescore", {})).title).toBe("Score Tracker jobs with current resume");
+    expect(describeRun(run("rescore", { scope: "jobs" })).title).toBe("Score Jobs with current resume");
     expect(describeRun(run("import", { entries: ["a", "b"] }))).toEqual({ title: "Import companies", detail: " (2 entries)" });
   });
 });

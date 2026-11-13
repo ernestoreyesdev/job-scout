@@ -187,3 +187,12 @@ class OutsideJob(BaseModel):
     title: str | None = Field(default=None, max_length=300)
     company: str | None = Field(default=None, max_length=200)
     description: str | None = Field(default=None, max_length=50_000)
+
+
+RescoreScope = Literal["tracker", "jobs"]
+
+
+class RescoreRequest(BaseModel):
+    """Which page's jobs a rescore scores: the Tracker's or the ones on Jobs."""
+
+    scope: RescoreScope

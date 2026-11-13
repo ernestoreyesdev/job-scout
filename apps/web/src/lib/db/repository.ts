@@ -12,6 +12,7 @@ import type {
   JobSort,
   PostingRow,
   ProfileRow,
+  RescoreScope,
   ResumeRow,
   ThemeRow,
 } from "./schema";
@@ -298,13 +299,13 @@ export class JobFinderRepository {
     return { items: result.data ?? [], page: current, pageCount: Math.max(1, Math.ceil(total / size)), total };
   }
 
-  /** Jobs on the Tracker or Jobs that were scored against a resume other than `resumeId`. */
-  async countStaleJobs(resumeId: string): Promise<number> {
-    const { count, error } = await this.client
+  /** Jobs on the Tracker or on Jobs, as `scope` says, that were scored against a resume other than `resumeId`. */
+  async countStaleJobs(resumeId: string, scope: RescoreScope): Promise<number> {
+    const query = this.client
       .from("applications")
       .select("id", { count: "exact", head: true })
-      .or(`resume_id.is.null,resume_id.neq.${resumeId}`)
-      .or("in_tracker.eq.true,status.neq.new");
+      .or(`resume_id.is.null,resume_id.neq.${resumeId}`);
+    const { count, error } = await (scope === "tracker" ? query.eq("in_tracker", true) : query.neq("status", "new"));
     if (error) throw error;
     return count ?? 0;
   }

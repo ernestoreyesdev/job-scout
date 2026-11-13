@@ -549,3 +549,15 @@ def test_an_outside_job_already_on_the_tracker_moves_to_its_status(monkeypatch: 
     assert not [insert for insert in db.inserts if insert[0] == "applications"]
     patches = [patch for table, _, patch in db.updates if table == "applications"]
     assert patches == [{"status": "applied", "in_tracker": False}, {"status": "interviewing", "in_tracker": False}]
+
+
+def test_a_rescore_saves_which_page_it_scores(monkeypatch: pytest.MonkeyPatch):
+    db = FakeRest()
+    monkeypatch.setattr(main, "user_db", lambda settings, token: db)
+    background = BackgroundTasks()
+
+    main.start_rescore(main.RescoreRequest(scope="jobs"), fake_user(id="user-1", access_token="t"), fake_settings(), background)
+
+    assert ("agent_runs", {"user_id": "user-1", "kind": "rescore", "input": {"scope": "jobs"}}) in db.inserts
+    [task] = background.tasks
+    assert task.args[1] == main.RescoreRequest(scope="jobs")
