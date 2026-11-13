@@ -20,8 +20,8 @@ export function RecentRuns({ runs }: { runs: AgentRunRow[] }) {
           const { title, detail } = describeRun(run);
           return (
             <li key={run.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2">
-              <span className="w-32 shrink-0 text-muted-foreground tabular-nums">{WHEN.format(new Date(run.created_at))}</span>
-              <span className="min-w-0 flex-1">
+              <span className="basis-full text-muted-foreground tabular-nums sm:w-32 sm:shrink-0 sm:basis-auto">{WHEN.format(new Date(run.created_at))}</span>
+              <span className="min-w-0 basis-full sm:basis-0 sm:flex-1">
                 <span className="font-medium">{title}</span>
                 {detail}
                 <span className={run.status === "failed" ? "block text-destructive" : "block text-muted-foreground"}>

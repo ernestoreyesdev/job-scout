@@ -408,13 +408,13 @@ function HealthSection({ stats }: { stats: AdminStats }) {
         <ul className="mt-2 divide-y rounded-lg border text-sm">
           {failed.slice(0, RECENT_FAILURES).map((run) => (
             <li key={run.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2">
-              <span className="w-24 shrink-0 text-muted-foreground tabular-nums">{isoDate(new Date(run.created_at))}</span>
-              <span className="w-56 shrink-0 truncate text-muted-foreground">{emails.get(run.user_id) ?? "–"}</span>
+              <span className="shrink-0 text-muted-foreground tabular-nums sm:w-24">{isoDate(new Date(run.created_at))}</span>
+              <span className="min-w-0 max-w-full truncate text-muted-foreground sm:w-56 sm:shrink-0">{emails.get(run.user_id) ?? "–"}</span>
               <span className="shrink-0 capitalize">{run.kind}</span>
               {run.error_code && (
                 <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{run.error_code.replace("_", " ")}</span>
               )}
-              <span className="min-w-0 flex-1 text-destructive">{run.run_error?.detail ?? run.error ?? "No error message"}</span>
+              <span className="min-w-0 basis-full text-destructive sm:basis-0 sm:flex-1">{run.run_error?.detail ?? run.error ?? "No error message"}</span>
             </li>
           ))}
         </ul>
