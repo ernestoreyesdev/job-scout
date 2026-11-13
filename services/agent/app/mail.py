@@ -36,4 +36,4 @@ def alert_admin(settings: Settings, subject: str, lines: list[str], idempotency_
         logger.info("alert not sent: ADMIN_EMAIL is not set", extra={"subject": subject})
         return False
     body = "".join(f"<p>{html.escape(line)}</p>" for line in lines)
-    return send_email(settings, settings.admin_email, f"[Job Finder] {subject}", body, idempotency_key)
+    return send_email(settings, settings.admin_email, f"[Job Scout] {subject}", body, idempotency_key)

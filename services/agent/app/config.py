@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     analysis_model: str = "claude-haiku-5-5"
     cron_secret: str | None = None
     resend_api_key: str | None = None
-    email_from: str = "Job Finder <onboarding@resend.dev>"
+    email_from: str = "Job Scout <onboarding@resend.dev>"
     admin_email: str | None = None
 
 

@@ -23,7 +23,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: { default: "Job Finder", template: `%s${TITLE_SUFFIX}` },
+  title: { default: "Job Scout", template: `%s${TITLE_SUFFIX}` },
   description: "Find jobs that match your resume, score the fit and track your applications.",
 };
 

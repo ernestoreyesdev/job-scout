@@ -1,8 +1,8 @@
-# job-finder
+# Job Scout
 
 A multi-user job search platform that finds openings matching each user's resume, scores the fit with Claude, and tracks applications from first look to outcome. The user always submits applications themselves.
 
-Live at [nesty-job-finder.vercel.app](https://nesty-job-finder.vercel.app).
+Live at [job-role-scout-ai.vercel.app](https://job-role-scout-ai.vercel.app).
 
 ## What it does
 

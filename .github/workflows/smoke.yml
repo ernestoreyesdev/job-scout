@@ -10,7 +10,7 @@ jobs:
     if: github.event.context == 'Vercel' && github.event.state == 'success' && contains(github.event.branches.*.name, 'main')
     runs-on: ubuntu-latest
     env:
-      SITE: https://nesty-job-finder.vercel.app
+      SITE: https://job-role-scout-ai.vercel.app
     steps:
       - name: Sign-in page loads
         run: curl --fail --silent --show-error --retry 3 --retry-delay 10 --retry-all-errors -o /dev/null "$SITE/login"

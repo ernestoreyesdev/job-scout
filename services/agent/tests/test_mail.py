@@ -8,7 +8,7 @@ from app.config import Settings
 
 
 def settings(**fields: Any) -> Settings:
-    defaults = {"resend_api_key": "re_test", "email_from": "Job Finder <onboarding@resend.dev>", "admin_email": "admin@example.com"}
+    defaults = {"resend_api_key": "re_test", "email_from": "Job Scout <onboarding@resend.dev>", "admin_email": "admin@example.com"}
     return cast(Settings, SimpleNamespace(**{**defaults, **fields}))
 
 
@@ -31,7 +31,7 @@ def test_an_email_goes_out_through_resend_with_its_idempotency_key(monkeypatch: 
     assert mail.send_email(settings(), "user@example.com", "Hello", "<p>Hi</p>", "welcome/1")
 
     [(params, options)] = sent
-    assert params == {"from": "Job Finder <onboarding@resend.dev>", "to": ["user@example.com"], "subject": "Hello", "html": "<p>Hi</p>"}
+    assert params == {"from": "Job Scout <onboarding@resend.dev>", "to": ["user@example.com"], "subject": "Hello", "html": "<p>Hi</p>"}
     assert options == {"idempotency_key": "welcome/1"}
 
 
@@ -54,7 +54,7 @@ def test_an_alert_goes_to_the_admin_with_its_lines_escaped(monkeypatch: pytest.M
     assert mail.alert_admin(settings(), "Refresh failed", ["Error: <timeout>", "Second line"])
 
     [(params, _)] = sent
-    assert params["to"] == ["admin@example.com"] and params["subject"] == "[Job Finder] Refresh failed"
+    assert params["to"] == ["admin@example.com"] and params["subject"] == "[Job Scout] Refresh failed"
     assert params["html"] == "<p>Error: &lt;timeout&gt;</p><p>Second line</p>"
 
 

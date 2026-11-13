@@ -13,7 +13,7 @@ export default function LoginPage() {
         <div className="flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground">
           <Briefcase className="size-5" />
         </div>
-        <h1 className="mt-5 text-2xl font-semibold tracking-tight">Sign in to Job Finder</h1>
+        <h1 className="mt-5 text-2xl font-semibold tracking-tight">Sign in to Job Scout</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           We&apos;ll email you a sign-in link, so there&apos;s no password to remember.
         </p>

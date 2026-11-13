@@ -1,6 +1,6 @@
 resource "supabase_project" "production" {
   organization_id   = var.supabase_organization_id
-  name              = "job-finder"
+  name              = "job-scout"
   region            = var.supabase_region
   database_password = var.supabase_db_password
 
@@ -19,8 +19,8 @@ resource "supabase_settings" "production" {
   project_ref = supabase_project.production.id
 
   auth = jsonencode({
-    site_url       = "https://nesty-job-finder.vercel.app"
-    uri_allow_list = "https://nesty-job-finder.vercel.app/auth/callback"
+    site_url       = "https://job-role-scout-ai.vercel.app"
+    uri_allow_list = "https://job-role-scout-ai.vercel.app/auth/callback"
   })
 
   lifecycle {

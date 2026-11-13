@@ -20,7 +20,7 @@ export function NavLinks({ extra }: { extra?: ReactNode }) {
   return (
     <nav className="-mx-2 flex min-w-0 items-center gap-1 overflow-x-auto text-sm">
       <Link href="/tracker" className="shrink-0 px-2 font-semibold tracking-tight">
-        Job Finder
+        Job Scout
       </Link>
       {NAV.map((item) => (
         <NavItem key={item.href} href={item.href} label={item.label} />

@@ -5,7 +5,7 @@ terraform {
     organization = "ernesto-reyes-dev-org"
 
     workspaces {
-      name = "job-finder-production"
+      name = "job-scout-production"
     }
   }
 
