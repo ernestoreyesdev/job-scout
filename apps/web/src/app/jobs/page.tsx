@@ -56,7 +56,11 @@ async function JobsData({ searchParams }: Pick<PageProps<"/jobs">, "searchParams
     <section className="mt-8">
       <PageReady />
       <AddJob />
-      {rescoreRun && <RunStatus run={rescoreRun} />}
+      {rescoreRun && (
+        <div className="mb-6">
+          <RunStatus run={rescoreRun} />
+        </div>
+      )}
       <nav aria-label="Jobs view" className="mb-4 flex gap-1 text-sm">
         {VIEWS.map((option) => (
           <Link
