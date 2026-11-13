@@ -6,7 +6,8 @@ import { useState } from "react";
 import { JobRow } from "@/components/job-row";
 import type { TrackedJob } from "@/lib/db";
 
-const DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+// Swedish formatting is ISO: "2026-11-13".
+const DAY = new Intl.DateTimeFormat("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit" });
 
 /**
  * The jobs on one page of the Tracker or Jobs, one card each. On the Tracker, a job moved past new or rated leaves

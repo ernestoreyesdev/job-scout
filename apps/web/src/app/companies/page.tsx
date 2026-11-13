@@ -15,7 +15,8 @@ import { COMPANY_SORTS, type CompanySort } from "@/lib/db";
 import { jobListHref } from "@/lib/job-query";
 import { getSignedInSource } from "@/lib/repository";
 
-const CHECKED = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+// Swedish formatting is ISO: "2026-11-13".
+const CHECKED = new Intl.DateTimeFormat("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit" });
 
 export const metadata: Metadata = { title: "Companies" };
 

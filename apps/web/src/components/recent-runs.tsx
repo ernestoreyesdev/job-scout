@@ -3,7 +3,8 @@ import { ChevronDown } from "lucide-react";
 import type { AgentRunRow } from "@/lib/db";
 import { describeRun } from "@/lib/runs";
 
-const WHEN = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+// Swedish formatting is ISO: "2026-11-13 21:37".
+const WHEN = new Intl.DateTimeFormat("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 /** Collapsible list of past searches and re-scores with what each one did. */
 export function RecentRuns({ runs }: { runs: AgentRunRow[] }) {
@@ -20,7 +21,7 @@ export function RecentRuns({ runs }: { runs: AgentRunRow[] }) {
           const { title, detail } = describeRun(run);
           return (
             <li key={run.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2">
-              <span className="basis-full text-muted-foreground tabular-nums sm:w-32 sm:shrink-0 sm:basis-auto">{WHEN.format(new Date(run.created_at))}</span>
+              <span className="basis-full text-muted-foreground tabular-nums sm:w-36 sm:shrink-0 sm:basis-auto">{WHEN.format(new Date(run.created_at))}</span>
               <span className="min-w-0 basis-full sm:basis-0 sm:flex-1">
                 <span className="font-medium">{title}</span>
                 {detail}
