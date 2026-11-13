@@ -68,7 +68,7 @@ async function InsightsData() {
         <StatTile
           label="Response rate"
           value={overall?.responseRate == null ? "–" : PERCENT.format(overall.responseRate)}
-          note="Screening or further"
+          note="Interviewing or further"
         />
       </dl>
 

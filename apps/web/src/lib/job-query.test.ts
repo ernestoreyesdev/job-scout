@@ -51,4 +51,8 @@ describe("jobListHref", () => {
     expect(jobListHref("/jobs", { view: "rated", company: "" })).toBe("/jobs?view=rated");
     expect(jobListHref("/jobs", {})).toBe("/jobs");
   });
+
+  it("accepts sorting by status", () => {
+    expect(parseJobQuery({ sort: "status" }).sort).toBe("status");
+  });
 });

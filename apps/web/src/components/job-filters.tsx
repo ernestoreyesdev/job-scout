@@ -3,15 +3,16 @@
 import Link from "next/link";
 import type { ChangeEvent, ReactNode } from "react";
 
-import { APPLICATION_STATUSES, type ApplicationStatusRow } from "@/lib/db";
+import { APPLICATION_STATUSES, type ApplicationStatusRow, type JobSort } from "@/lib/db";
 import { jobListHref, type JobQuery } from "@/lib/job-query";
 
-const SORT_LABELS = {
+const SORT_LABELS: Record<JobSort, string> = {
+  status: "Furthest along",
   desc: "Best match",
   asc: "Lowest score",
   posted: "Newest posted",
   added: "Recently added",
-} as const;
+};
 
 const PILL = "h-8 rounded-full border border-input bg-transparent px-3 text-sm shadow-xs hover:border-foreground/30";
 
@@ -27,6 +28,7 @@ export function JobListFilters({
   total,
   actions,
   statuses = APPLICATION_STATUSES,
+  sorts = ["desc", "asc", "posted", "added"],
 }: {
   basePath: string;
   query: JobQuery;
@@ -34,6 +36,7 @@ export function JobListFilters({
   total: number;
   actions?: ReactNode;
   statuses?: readonly ApplicationStatusRow[];
+  sorts?: readonly JobSort[];
 }) {
   const kept: Record<string, string> = query.rated ? { view: "rated" } : {};
   const active = Object.keys(query.params).length > Object.keys(kept).length;
@@ -46,9 +49,9 @@ export function JobListFilters({
           {total} {total === 1 ? "job" : "jobs"}
         </span>
         <select name="sort" defaultValue={query.sort} aria-label="Sort" onChange={apply} className={PILL}>
-          {Object.entries(SORT_LABELS).map(([value, label]) => (
+          {sorts.map((value) => (
             <option key={value} value={value}>
-              {label}
+              {SORT_LABELS[value]}
             </option>
           ))}
         </select>

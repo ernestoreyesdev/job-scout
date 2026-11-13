@@ -18,22 +18,13 @@ export type JobSourceRow =
   | "hackernews"
   | "manual";
 
-export const APPLICATION_STATUSES = [
-  "new",
-  "saved",
-  "tailored",
-  "applied",
-  "screening",
-  "interviewing",
-  "offer",
-  "rejected",
-] as const;
+export const APPLICATION_STATUSES = ["new", "saved", "applied", "interviewing", "offer", "rejected"] as const;
 
 /** Statuses a job applied to outside the app can be added with. */
-export const OUTSIDE_STATUSES = ["applied", "screening", "interviewing", "offer", "rejected"] as const;
+export const OUTSIDE_STATUSES = ["applied", "interviewing", "offer", "rejected"] as const;
 
 /** Funnel stages after applying, in order; reaching one counts every stage before it too. */
-export const FUNNEL_STAGES = ["applied", "screening", "interviewing", "offer"] as const;
+export const FUNNEL_STAGES = ["applied", "interviewing", "offer"] as const;
 
 /** A still-listed posting this many days old is flagged as a possible ghost job. */
 export const GHOST_JOB_DAYS = 60;
@@ -186,7 +177,7 @@ export type ApplicationEventRow = {
 };
 
 /** Ways the Tracker and Jobs can be sorted: by score either way, newest posting, or most recently added. */
-export const JOB_SORTS = ["desc", "asc", "posted", "added"] as const;
+export const JOB_SORTS = ["desc", "asc", "posted", "added", "status"] as const;
 
 /** Companies page columns that sort, each with the direction it starts in. */
 export const COMPANY_SORTS = { name: "asc", jobs: "desc", checked: "desc" } as const;

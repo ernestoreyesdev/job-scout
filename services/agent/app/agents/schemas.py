@@ -182,7 +182,7 @@ class OutsideJob(BaseModel):
     """
 
     url: str = Field(min_length=8, max_length=2000, pattern=r"^https?://")
-    status: Literal["applied", "screening", "interviewing", "offer", "rejected"] = "applied"
+    status: Literal["applied", "interviewing", "offer", "rejected"] = "applied"
     applied_on: date | None = None
     title: str | None = Field(default=None, max_length=300)
     company: str | None = Field(default=None, max_length=200)

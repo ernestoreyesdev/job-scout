@@ -912,7 +912,7 @@ def add_outside_job(body: OutsideJob, user: User, settings: Config) -> dict[str,
             {"user_id": user.id, "posting_id": posting_id, "status": "applied", "in_tracker": False, "added_by": "user"},
             select="id,status",
         )
-    elif rows[0]["status"] in ("new", "saved", "tailored"):
+    elif rows[0]["status"] in ("new", "saved"):
         db.update("applications", {"id": f"eq.{rows[0]['id']}"}, {"status": "applied", "in_tracker": False})
     application_id = rows[0]["id"]
     if body.applied_on:

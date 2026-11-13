@@ -71,12 +71,12 @@ describe("costs", () => {
 describe("funnel", () => {
   it("counts every stage up to the furthest one reached", () => {
     const [row] = funnel([
-      { statuses: ["new", "applied", "screening", "rejected"], source: "lever", resume: "a", addedBy: "search" },
+      { statuses: ["new", "applied", "interviewing", "rejected"], source: "lever", resume: "a", addedBy: "search" },
       { statuses: ["applied"], source: "lever", resume: "a", addedBy: "search" },
       { statuses: ["saved"], source: "lever", resume: "a", addedBy: "search" },
     ]);
 
-    expect(row.reached).toEqual({ applied: 2, screening: 1, interviewing: 0, offer: 0 });
+    expect(row.reached).toEqual({ applied: 2, interviewing: 1, offer: 0 });
     expect(row.responseRate).toBe(0.5);
   });
 
@@ -95,7 +95,7 @@ describe("funnel", () => {
   it("groups jobs by who added them", () => {
     const rows = funnel(
       [
-        { statuses: ["applied", "screening"], source: "ashby", resume: "a", addedBy: "user" },
+        { statuses: ["applied", "interviewing"], source: "ashby", resume: "a", addedBy: "user" },
         { statuses: ["applied"], source: "manual", resume: "a", addedBy: "user" },
         { statuses: ["applied"], source: "lever", resume: "a", addedBy: "search" },
       ],

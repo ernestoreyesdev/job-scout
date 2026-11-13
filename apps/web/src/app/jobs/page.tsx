@@ -10,7 +10,7 @@ import { Pager } from "@/components/pager";
 import { RescoreButton } from "@/components/rescore-button";
 import { RunStatus } from "@/components/run-status";
 import { PageReady } from "@/components/web-vitals";
-import { APPLICATION_STATUSES } from "@/lib/db";
+import { APPLICATION_STATUSES, JOB_SORTS } from "@/lib/db";
 import { parseJobQuery } from "@/lib/job-query";
 import { rescoreScope } from "@/lib/runs";
 import { getSignedInSource } from "@/lib/repository";
@@ -28,7 +28,7 @@ export default function JobsPage({ searchParams }: PageProps<"/jobs">) {
     <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
       <h1 className="text-2xl font-semibold tracking-tight">Jobs</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Jobs you&apos;ve saved, tailored, applied to or heard back from, and under Rated every job you marked good or
+        Jobs you&apos;ve saved, applied to or heard back from, and under Rated every job you marked good or
         bad. Status changes are dated for you under Details; use notes for what the app can&apos;t know, like a
         recruiter&apos;s name.
       </p>
@@ -42,7 +42,7 @@ export default function JobsPage({ searchParams }: PageProps<"/jobs">) {
 async function JobsData({ searchParams }: Pick<PageProps<"/jobs">, "searchParams">) {
   const { repository } = await getSignedInSource();
   const resume = await repository.getPrimaryResume();
-  const query = parseJobQuery(await searchParams, resume?.text ? "desc" : "posted");
+  const query = parseJobQuery(await searchParams, "status");
   const view = query.rated ? "rated" : "jobs";
   const [jobs, companies, runs] = await Promise.all([
     repository.listTrackedJobs(view, query.sort, query.page, query.filters),
@@ -86,6 +86,7 @@ async function JobsData({ searchParams }: Pick<PageProps<"/jobs">, "searchParams
             companies={companies}
             total={jobs.total}
             statuses={query.rated ? APPLICATION_STATUSES : APPLICATION_STATUSES.filter((status) => status !== "new")}
+            sorts={JOB_SORTS}
             actions={stale > 0 && <RescoreButton count={stale} scope="jobs" />}
           />
           {jobs.total === 0 && <p className="mt-4 text-sm text-muted-foreground">No jobs match these filters.</p>}

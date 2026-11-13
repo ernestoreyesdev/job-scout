@@ -124,7 +124,7 @@ function furthestStage(job: FunnelJob): number {
 
 /**
  * How many jobs reached each stage, overall and grouped by `group`. Reaching a stage counts every stage before it,
- * so a job rejected after an interview still counts as screened. The response rate is screened or further over
+ * so a job that reached an offer also counts as applied and interviewing. The response rate is interviewing or further over
  * applied. Groups with no applications are left out.
  */
 export function funnel(jobs: FunnelJob[], group?: (job: FunnelJob) => string): FunnelRow[] {
@@ -139,7 +139,7 @@ export function funnel(jobs: FunnelJob[], group?: (job: FunnelJob) => string): F
       const reached = Object.fromEntries(
         FUNNEL_STAGES.map((stage, index) => [stage, furthest.filter((value) => value >= index).length]),
       ) as FunnelRow["reached"];
-      return { label, reached, responseRate: reached.applied ? reached.screening / reached.applied : null };
+      return { label, reached, responseRate: reached.applied ? reached.interviewing / reached.applied : null };
     })
     .filter((row) => row.reached.applied > 0)
     .sort((a, b) => b.reached.applied - a.reached.applied);

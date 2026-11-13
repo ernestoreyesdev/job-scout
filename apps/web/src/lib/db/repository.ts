@@ -154,7 +154,9 @@ export class JobFinderRepository {
           ? query.order("posting(posted_at)", { ascending: false, nullsFirst: false })
           : sort === "added"
             ? query.order("created_at", { ascending: false })
-            : query.order("fit_score", { ascending: sort === "asc", nullsFirst: false });
+            : sort === "status"
+              ? query.order("status", { ascending: false }).order("fit_score", { ascending: false, nullsFirst: false })
+              : query.order("fit_score", { ascending: sort === "asc", nullsFirst: false });
       return ordered.order("id").order("changed_at", { referencedTable: "events" }).range(from, to);
     });
     return { ...result, items: await this.withSignals(result.items) };
