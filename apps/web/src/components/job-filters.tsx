@@ -42,20 +42,20 @@ export function JobListFilters({
   const active = Object.keys(query.params).length > Object.keys(kept).length;
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3 text-sm shadow-xs">
-      <form method="get" action={basePath} className="flex flex-1 flex-wrap items-center gap-2">
+    <div className="grid gap-2 rounded-xl border bg-card p-3 text-sm shadow-xs sm:flex sm:flex-wrap sm:items-center">
+      <form method="get" action={basePath} className="grid grid-cols-2 items-center gap-2 sm:flex sm:flex-1 sm:flex-wrap">
         {query.rated && <input type="hidden" name="view" value="rated" />}
-        <span className="mr-auto pl-1 font-medium">
+        <span className="col-span-2 pl-1 font-medium sm:mr-auto">
           {total} {total === 1 ? "job" : "jobs"}
         </span>
-        <select name="sort" defaultValue={query.sort} aria-label="Sort" onChange={apply} className={PILL}>
+        <select name="sort" defaultValue={query.sort} aria-label="Sort" onChange={apply} className={`${PILL} w-full sm:w-auto`}>
           {sorts.map((value) => (
             <option key={value} value={value}>
               {SORT_LABELS[value]}
             </option>
           ))}
         </select>
-        <select name="status" defaultValue={query.filters.status ?? ""} aria-label="Status" onChange={apply} className={PILL}>
+        <select name="status" defaultValue={query.filters.status ?? ""} aria-label="Status" onChange={apply} className={`${PILL} w-full sm:w-auto`}>
           <option value="">Any status</option>
           {statuses.map((status) => (
             <option key={status} value={status}>
@@ -63,7 +63,7 @@ export function JobListFilters({
             </option>
           ))}
         </select>
-        <select name="company" defaultValue={query.filters.company ?? ""} aria-label="Company" onChange={apply} className={`${PILL} max-w-48`}>
+        <select name="company" defaultValue={query.filters.company ?? ""} aria-label="Company" onChange={apply} className={`${PILL} w-full min-w-0 sm:w-auto sm:max-w-48`}>
           <option value="">Any company</option>
           {companies.map((company) => (
             <option key={company} value={company}>
@@ -71,8 +71,8 @@ export function JobListFilters({
             </option>
           ))}
         </select>
-        <label className="flex items-center gap-1.5 text-muted-foreground">
-          Min salary
+        <label className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+          <span className="shrink-0">Min salary</span>
           <input
             type="number"
             name="salary"
@@ -83,7 +83,7 @@ export function JobListFilters({
               const changed = event.currentTarget.value !== String(query.filters.minSalary ?? "");
               if (changed) event.currentTarget.form?.requestSubmit();
             }}
-            className={`${PILL} w-28`}
+            className={`${PILL} w-full min-w-0 sm:w-28`}
           />
         </label>
         <label className="flex h-8 items-center gap-1.5 text-muted-foreground">
@@ -105,12 +105,12 @@ export function JobListFilters({
           Apply filters
         </button>
         {active && (
-          <Link href={jobListHref(basePath, kept)} className="text-muted-foreground hover:text-foreground">
+          <Link href={jobListHref(basePath, kept)} className="col-span-2 text-muted-foreground hover:text-foreground">
             Reset
           </Link>
         )}
       </form>
-      {actions}
+      {actions && <div className="flex flex-wrap items-center justify-end gap-2 justify-self-end">{actions}</div>}
     </div>
   );
 }

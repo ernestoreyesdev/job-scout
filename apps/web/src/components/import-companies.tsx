@@ -38,7 +38,7 @@ export function ImportCompanies() {
           name="entries"
           rows={5}
           required
-          placeholder={"Stripe\nhttps://jobs.lever.co/palantir\nhttps://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite"}
+          placeholder={"Examples:\nStripe\nhttps://jobs.lever.co/palantir\nhttps://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite"}
         />
         <div className="flex items-center gap-3">
           <Button type="submit" size="sm" disabled={pending}>
