@@ -581,6 +581,7 @@ def admin_stats(admin: Admin, settings: Config) -> dict[str, Any]:
         "agent_runs",
         {"select": "usage,created_at", "kind": "eq.search", "status": "eq.done", "created_at": f"gte.{model_since}"},
     )
+    companies = service.select("companies", {"select": "name,source,board,kind,open_jobs,missed_checks"})
     refreshes = service.select(
         "board_refreshes",
         {
@@ -647,8 +648,9 @@ def admin_stats(admin: Admin, settings: Config) -> dict[str, Any]:
             {"select": "eval,model,prompt_version,metrics,cost,created_at", "order": "created_at.desc", "limit": "20"},
         ),
         "refreshes": refreshes,
-        "refresh_boards": refresh_board_rows(refreshes, service.rpc("board_storage", {})),
-        "companies": service.select("companies", {"select": "name,source,board,kind,open_jobs,missed_checks"}),
+        "refresh_boards": refresh_board_rows(refreshes, companies),
+        "storage": service.rpc("storage_totals", {})[0],
+        "companies": companies,
         "labels": service.select("applications", {"select": "fit_score,fit_label", "fit_label": "not.is.null"}),
         "applications": service.select("applications", {"select": "user_id,status", "status": "neq.new"}),
     }
@@ -753,22 +755,21 @@ def board_stats(fetches: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]
     }
 
 
-def refresh_board_rows(refreshes: list[dict[str, Any]], storage: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def refresh_board_rows(refreshes: list[dict[str, Any]], companies: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    Each board's refresh fetches, newest refresh first, summed up with its saved
-    jobs and their storage: median and latest fetch time, failed fetches, open,
-    embedded and saved jobs, and bytes. Slowest median first.
+    Each board's refresh fetches, newest refresh first, summed up with its
+    directory entry: median and latest fetch time, failed fetches and open
+    jobs. Slowest median first.
     """
     fetches: dict[str, list[dict[str, Any]]] = {}
     for refresh in refreshes:
         for fetch in refresh["board_fetches"]:
             fetches.setdefault(fetch["board"], []).append(fetch)
-    stored = {f"{row['source']}/{row['board']}": row for row in storage}
+    listed = {f"{row['source']}/{row['board']}": row for row in companies}
     rows = []
-    for board in fetches.keys() | stored.keys():
+    for board in fetches.keys() | listed.keys():
         runs = fetches.get(board, [])
         times = sorted(run["ms"] for run in runs)
-        saved = stored.get(board, {})
         rows.append(
             {
                 "board": board,
@@ -777,10 +778,7 @@ def refresh_board_rows(refreshes: list[dict[str, Any]], storage: list[dict[str, 
                 "last_ms": runs[0]["ms"] if runs else None,
                 "last_outcome": runs[0]["outcome"] if runs else None,
                 "failures": sum(1 for run in runs if run["outcome"] != "ok"),
-                "open_jobs": saved.get("open_jobs", 0),
-                "embedded": saved.get("embedded", 0),
-                "saved_jobs": saved.get("jobs", 0),
-                "bytes": saved.get("bytes", 0),
+                "open_jobs": listed.get(board, {}).get("open_jobs") or 0,
             }
         )
     return sorted(rows, key=lambda row: row["median_ms"] or -1, reverse=True)

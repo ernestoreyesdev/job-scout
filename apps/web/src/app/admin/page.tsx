@@ -104,10 +104,8 @@ type AdminStats = {
     last_outcome: string | null;
     failures: number;
     open_jobs: number;
-    embedded: number;
-    saved_jobs: number;
-    bytes: number;
   }[];
+  storage: { bytes: number; unembedded: number };
   companies: { name: string; source: string; board: string; kind: CompanyKindRow | null; open_jobs: number; missed_checks: number }[];
   labels: { fit_score: number | null; fit_label: FitLabelRow | null }[];
   applications: { user_id: string; status: ApplicationStatusRow }[];
@@ -217,7 +215,13 @@ async function AdminData() {
 
       <BoardSection boards={stats.boards} companies={stats.companies} days={stats.days} />
 
-      <RefreshSection refreshes={stats.refreshes} boards={stats.refresh_boards} companies={stats.companies} days={stats.days} />
+      <RefreshSection
+        refreshes={stats.refreshes}
+        boards={stats.refresh_boards}
+        storage={stats.storage}
+        companies={stats.companies}
+        days={stats.days}
+      />
 
       <SectionCard collapsible
         title="Claude calls by step"
@@ -606,17 +610,18 @@ function size(bytes: number): string {
 function RefreshSection({
   refreshes,
   boards,
+  storage,
   companies,
   days,
 }: {
   refreshes: AdminStats["refreshes"];
   boards: AdminStats["refresh_boards"];
+  storage: AdminStats["storage"];
   companies: AdminStats["companies"];
   days: number;
 }) {
   const names = new Map(companies.map((company) => [`${company.source}/${company.board}`, company.name]));
-  const totalBytes = boards.reduce((sum, row) => sum + row.bytes, 0);
-  const unembedded = boards.reduce((sum, row) => sum + row.open_jobs - row.embedded, 0);
+  const { bytes: totalBytes, unembedded } = storage;
   const worth = boards.filter((row, rank) => rank < SLOWEST_BOARDS || row.failures > 0);
 
   return (
@@ -702,9 +707,6 @@ function RefreshBoardTable({ boards, names }: { boards: AdminStats["refresh_boar
           <TableHead className="text-right">Last</TableHead>
           <TableHead className="text-right">Failed</TableHead>
           <TableHead className="text-right">Open jobs</TableHead>
-          <TableHead className="text-right">Embedded</TableHead>
-          <TableHead className="text-right">Saved jobs</TableHead>
-          <TableHead className="text-right">Space</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -720,11 +722,6 @@ function RefreshBoardTable({ boards, names }: { boards: AdminStats["refresh_boar
             </TableCell>
             <TableCell className={cn("text-right tabular-nums", row.failures > 0 && "text-destructive")}>{row.failures}</TableCell>
             <TableCell className="text-right tabular-nums">{row.open_jobs.toLocaleString()}</TableCell>
-            <TableCell className={cn("text-right tabular-nums", row.embedded < row.open_jobs && "text-amber-600 dark:text-amber-400")}>
-              {row.embedded.toLocaleString()}
-            </TableCell>
-            <TableCell className="text-right tabular-nums">{row.saved_jobs.toLocaleString()}</TableCell>
-            <TableCell className="text-right tabular-nums">{size(row.bytes)}</TableCell>
           </TableRow>
         ))}
       </TableBody>

@@ -353,20 +353,20 @@ def test_board_stats_sum_up_job_systems_and_list_the_slowest_boards():
     assert stats["slowest"][0]["median_ms"] == 11000
 
 
-def test_refresh_board_rows_join_fetch_times_with_storage():
+def test_refresh_board_rows_join_fetch_times_with_the_directory():
     refreshes = [
         {"board_fetches": [{"board": "ashby/acme", "ms": 300, "outcome": "ok"}, {"board": "lever/beta", "ms": 900, "outcome": "unreachable"}]},
         {"board_fetches": [{"board": "ashby/acme", "ms": 100, "outcome": "ok"}]},
     ]
-    storage = [{"source": "ashby", "board": "acme", "jobs": 12, "open_jobs": 10, "embedded": 7, "bytes": 4096}]
+    companies = [{"source": "ashby", "board": "acme", "open_jobs": 10}, {"source": "greenhouse", "board": "new", "open_jobs": None}]
 
-    rows = main.refresh_board_rows(refreshes, storage)
+    rows = main.refresh_board_rows(refreshes, companies)
 
-    assert [row["board"] for row in rows] == ["lever/beta", "ashby/acme"]
+    assert [row["board"] for row in rows] == ["lever/beta", "ashby/acme", "greenhouse/new"]
     acme = rows[1]
-    assert (acme["median_ms"], acme["last_ms"], acme["failures"]) == (300, 300, 0)
-    assert (acme["open_jobs"], acme["embedded"], acme["saved_jobs"], acme["bytes"]) == (10, 7, 12, 4096)
-    assert (rows[0]["failures"], rows[0]["bytes"]) == (1, 0)
+    assert (acme["median_ms"], acme["last_ms"], acme["failures"], acme["open_jobs"]) == (300, 300, 0, 10)
+    assert (rows[0]["failures"], rows[0]["open_jobs"]) == (1, 0)
+    assert (rows[2]["median_ms"], rows[2]["open_jobs"]) == (None, 0)
 
 
 def test_a_finished_search_records_how_many_jobs_it_added(monkeypatch: pytest.MonkeyPatch):
