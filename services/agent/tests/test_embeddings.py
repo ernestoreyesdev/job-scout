@@ -1,4 +1,4 @@
-from app.embeddings import job_text, resume_chunks
+from app.embeddings import MAX_TOKENS, MODEL, MODEL_PATH, FastEmbedEmbeddings, job_text, resume_chunks
 
 
 def test_a_resume_is_split_at_line_breaks_into_pieces_the_model_reads_whole():
@@ -17,3 +17,12 @@ def test_a_line_longer_than_a_piece_is_cut():
 
 def test_job_text_leaves_out_a_missing_location():
     assert job_text("Engineer", "Acme", None, "Builds things.") == "Engineer at Acme\n\nBuilds things."
+
+
+def test_the_shipped_model_loads_and_embeds_without_downloading(monkeypatch, tmp_path):
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    monkeypatch.setenv("FASTEMBED_CACHE_PATH", str(tmp_path))
+
+    [vector] = FastEmbedEmbeddings(MODEL, MAX_TOKENS, path=MODEL_PATH).embed_documents(["Engineer at Acme"])
+
+    assert len(vector) == 384
