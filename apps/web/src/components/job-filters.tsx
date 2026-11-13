@@ -16,10 +16,9 @@ const SORT_LABELS = {
 const PILL = "h-8 rounded-full border border-input bg-transparent px-3 text-sm shadow-xs hover:border-foreground/30";
 
 /**
- * Job count plus status, company, sort, salary, closed-job and clearance controls for the Tracker or Jobs, with the
- * page's own `actions` at the end; each control submits the form as a plain GET to the page as soon as it changes. The salary minimum keeps jobs that
- * state a yearly salary reaching it; jobs whose details were never read pass both the salary and clearance filters.
- * Jobs' rated view stays selected through filter changes and Reset.
+ * Filter bar for the Tracker and Jobs, followed by the page's own `actions`. Each control submits the form as a GET
+ * as soon as it changes. Jobs whose details were never read pass the salary and clearance filters, and the rated
+ * view stays selected through filter changes and Reset.
  */
 export function JobListFilters({
   basePath,

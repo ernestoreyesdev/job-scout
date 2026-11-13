@@ -1,11 +1,7 @@
 /**
- * Row shapes for the tables in `infra/supabase/migrations`. Hand-written rather than
- * generated so the app builds without the Supabase CLI; keep in step with the
- * migrations.
- *
- * These must stay type aliases: supabase-js constrains them to
- * `Record<string, unknown>`, and an interface has no implicit index signature,
- * so declaring one here silently collapses every query result to `never`.
+ * Hand-written row shapes for the tables in `infra/supabase/migrations`, so the app builds without the Supabase CLI.
+ * They must stay type aliases: supabase-js requires `Record<string, unknown>`, which an interface doesn't satisfy, and
+ * every query result would silently become `never`.
  */
 export type JobSourceRow =
   | "greenhouse"
@@ -240,8 +236,8 @@ export type AgentRunRow = {
   finished_at: string | null;
 };
 
+/** The database shape supabase-js types queries with; `__InternalSupabase` sets its PostgREST behavior. */
 export type Database = {
-  // supabase-js reads this to pick its PostgREST behavior.
   __InternalSupabase: { PostgrestVersion: "12" };
   public: {
     Tables: {

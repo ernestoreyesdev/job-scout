@@ -21,7 +21,7 @@ class SmartRecruitersSource(JobSource):
     """
     SmartRecruiters posting API. Lists come in pages of 100 without descriptions,
     so describe() fetches one posting's details. An unknown company returns an
-    empty list rather than 404, so no postings counts as no board.
+    empty list with a 200, so no postings counts as no board.
     """
 
     name = "smartrecruiters"

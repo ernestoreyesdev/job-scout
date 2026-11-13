@@ -1,25 +1,100 @@
 # job-finder
 
-Finds jobs that match a user's resume, scores the fit, and tracks applications. The user always submits applications themselves.
+A multi-user job search platform that finds openings matching each user's resume, scores the fit with Claude, and tracks applications from first look to outcome. The user always submits applications themselves.
 
-## Structure
+Live at [nesty-job-finder.vercel.app](https://nesty-job-finder.vercel.app).
 
-- `apps/web`: Next.js 16 (App Router, Tailwind v4, shadcn), to be deployed on Vercel
-- `services/agent`: Python 3.12 FastAPI service that runs job searches, scoring and the other Claude calls (uv)
-- `infra/supabase`: Postgres schema, row-level security and storage policies (`migrations/`), plus local stack config
+## What it does
 
-The browser only talks to Next.js. Server actions call the agent with the user's Supabase access token; the agent verifies it with Supabase Auth and queries as that user, so row-level security applies.
+- **Shared company directory.** Jobs come straight from the public APIs of 11 applicant tracking systems (Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable, BambooHR, iCIMS, Jobvite, Personio, Recruitee) plus Hacker News "Who is hiring?" threads. Claude's web search finds new companies and their boards, and a daily refresh saves every open job, closes the ones that disappear and removes stale ones.
+- **Resume-matched search.** Each search ranks matching jobs by semantic similarity to the user's resume, then scores the closest ones with Claude for fit, strengths and gaps, in rounds until enough reach the user's minimum score.
+- **Scoring that learns from feedback.** Jobs the user rated good or bad are embedded, and the most similar ones go into the scoring prompt as examples.
+- **Application tracker.** Status history, follow-up reminders with drafted emails, resume gap analysis per job, and signals for reposted and likely ghost jobs.
+- **Insights** on application outcomes, and an **admin console** for usage, cost, speed, failures and model quality.
+
+## Using the app
+
+1. **Sign in** with your email; the app sends a one-time sign-in link.
+2. **Upload your resume** on the Resume page (PDF or Word). Searches rank and score jobs against your primary resume.
+3. **Search from the Tracker.** Enter job titles or keywords, and optionally a company, location type, location, how recent the posting is, words to leave out, how many jobs to add and a minimum score. Matches appear on the Tracker as they're scored, each with its fit score, a summary of strengths and gaps, and warnings for reposted or long-open jobs.
+4. **Rate and track.** Thumbs up or down tells future searches what a good fit looks like for you. Moving a job past "new" (applied, interviewing, offer, rejected) takes it to the Jobs page, which keeps its status history. From a job you can run a gap analysis against your resume or draft a follow-up email once an application has waited a while.
+5. **Shape the directory** on the Companies page: hide companies you don't want searched, or add companies by name or job board link.
+6. **Review Insights** for how your applications progressed, response rates by source and resume, scoring accuracy against your ratings, and follow-ups that are due.
+
+If you upload a new resume, **Rescore** on the Jobs page scores your saved jobs again against it. The Admin page is reserved for the site owner and covers usage, cost, speed, failures and model quality across all users.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  browser[Browser] --> web[Next.js web app]
+  cron[Vercel Cron, daily] --> web
+  web -- "server actions with the user's token" --> agent[FastAPI agent]
+  agent --> db[(Supabase: Postgres, pgvector, Auth, Storage)]
+  web --> db
+  agent --> claude[Claude API]
+  agent --> boards[Job board APIs and Hacker News]
+  agent --> resend[Resend email]
+```
+
+Both services deploy to Vercel as one project (Vercel Services, configured in `vercel.json`). The browser only talks to Next.js; server actions call the agent with the user's Supabase access token, and the agent queries as that user so row-level security applies.
+
+### How a search works
+
+1. Match the user's rule (keywords, company, location, remote or on-site, posting age, exclusions) against the saved open jobs.
+2. Rank the matches by similarity between each job's embedding and the resume's section embeddings (FastEmbed `bge-small-en-v1.5`, 384 dimensions, stored in pgvector).
+3. Score the top candidates with Claude using structured outputs, prompt caching and the user's most similar past ratings as examples.
+4. Repeat for up to three rounds until enough jobs reach the minimum score; jobs below it are saved outside the tracker.
+
+## Tech stack
+
+| Area | Tools |
+|---|---|
+| Web | Next.js 16 (App Router, Cache Components), React 19, TypeScript, Tailwind v4, shadcn/ui |
+| Agent | Python 3.12, FastAPI, Pydantic, uv |
+| AI | Claude API (Anthropic SDK), LangChain core, FastEmbed, pgvector |
+| Data | Supabase Postgres with row-level security, Auth (magic links), Storage |
+| Hosting | Vercel (Services, Cron), Supabase |
+| Infrastructure | Terraform on HCP Terraform |
+| CI/CD | GitHub Actions, Dependabot |
+| Testing | Pytest, Vitest, Ruff, Pyright, ESLint |
+| Email | Resend |
+
+## Observability and model quality
+
+- **Every Claude call** is logged with its model, prompt version, tokens, cost and duration. The prompt version is a fingerprint of the system prompt and output schema, so a prompt change shows up as a new version.
+- **The admin console** shows usage and Claude cost by step and by user, search speed, failures, board fetch and refresh results, page speed from real visits, and fit scores week by week for each prompt version.
+- **Weekly evaluations** run in GitHub Actions: one scores held-out labeled jobs with and without examples, the other compares ways of picking which jobs to score. Results are saved and charted next to the live numbers.
+- **Alerts** email the admin when the daily board refresh fails or can't reach job boards.
+
+## CI/CD and infrastructure
+
+| Workflow | When | What |
+|---|---|---|
+| `ci.yml` | Every push and pull request | Lint, type-check and test both services, audit dependencies, scan git history for secrets, rebuild the database from migrations, then apply new migrations to production on `main` |
+| `terraform.yml` | Changes under `infra/terraform` | Plan on pull requests, apply on `main` |
+| `smoke.yml` | After each production deploy | Checks the site loads and reaches the agent |
+| `evals.yml` | Weekly, or by hand | Runs the model evaluations |
+
+Terraform (`infra/terraform`) manages the deployment configuration across Vercel, Supabase and GitHub, with state in HCP Terraform. The database schema is managed by migrations in `infra/supabase/migrations`.
 
 ## Security
 
-- **Users' Anthropic keys** are encrypted by the agent with Fernet (`AGENT_ENCRYPTION_KEY`, from `services/agent/.env`) and stored in `api_credentials`. That table has row-level security on and no policies, so only the agent's service role can read it. The browser gets back the last four characters as a hint, never the key.
-- **Row-level security** is on for every table. Per-user tables (`profiles`, `resumes`, `applications`, `application_events`, `agent_runs`, `hidden_companies`) only allow the signed-in user's own rows, and the agent reads and writes them with the user's token. Resume files live in a private `resumes` bucket under `{user_id}/`, with the same rule.
-- **Shared data** (`postings`, `companies`) is readable by any signed-in user and written only by the agent's service role. `directory_discoveries` is service-role only. The service role is also used for `api_credentials`, and for nothing else.
-- **Agent requests** need a Supabase access token, checked with Supabase Auth on every call. A user can have one run at a time (enforced by a unique index); a run still unfinished after 10 minutes is marked failed.
-- **Job sources** are public job board pages and APIs that need no credentials. Text from postings and Hacker News posts is treated as data in every prompt, never as instructions.
-- **Secrets** stay in `.env` files, which git ignores; only `.env.example` files are committed. Resume `.docx` files are ignored too.
+- **Your data is yours.** Row-level security is on for every table, so each user can only read and change their own resumes, jobs and history, and resume files are stored privately per user.
+- **Shared data** (the job and company directory) is readable by signed-in users and written only by the server. Internal tables are reachable by the server alone.
+- **Every request is authenticated**, and scheduled jobs are protected by a secret.
+- **Job sources** are public pages and APIs that need no credentials. Text from postings is treated as data in every prompt, never as instructions.
+- **Secrets** never live in the repo, and CI scans every commit for leaks.
 
-## Getting started
+## Repository layout
+
+- `apps/web`: Next.js app (pages, server actions, admin console)
+- `services/agent`: FastAPI service with the search pipeline, Claude agents (`app/agents`), job board clients (`app/sources`), tests and evaluations (`evals`)
+- `infra/supabase`: database migrations and local Supabase config
+- `infra/terraform`: infrastructure as code
+- `.github/workflows`: CI/CD
+
+## Running locally
 
 Requirements: Node 24, Docker Desktop running, uv (`brew install uv`).
 
@@ -38,8 +113,4 @@ npm run dev:web     # http://localhost:3000
 
 Magic-link emails land in the local inbox at http://127.0.0.1:54324. Supabase Studio is at http://127.0.0.1:54323.
 
-Other tasks: `npm run build`, `npm run lint`, `npm run typecheck` (through Turborepo) and `npm run test:agent` (pytest).
-
-## CI
-
-GitHub Actions (`.github/workflows/ci.yml`) runs on every push to `main` and every pull request: the agent's pytest suite with uv, and the web app's lint and typecheck. Neither job needs secrets; the tests mock every external API.
+Other tasks: `npm run build`, `npm run lint`, `npm run typecheck` and `npx turbo run test` (through Turborepo), and `npm run test:agent` (pytest).

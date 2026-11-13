@@ -23,8 +23,8 @@ def _posted(stamp: str | None) -> datetime | None:
 class RecruiteeSource(JobSource):
     """
     Recruitee careers API: one request returns every published offer with its
-    description and requirements. Each company's board is a subdomain,
-    {board}.recruitee.com, rather than a path.
+    description and requirements. Each company's board is the subdomain
+    {board}.recruitee.com.
     """
 
     name = "recruitee"

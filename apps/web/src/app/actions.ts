@@ -35,7 +35,7 @@ async function run(paths: string | string[], work: () => Promise<void>): Promise
     for (const path of [paths].flat()) revalidatePath(path);
     return { ok: true };
   } catch (error) {
-    // Lets a sign-in redirect through instead of reporting it as a failure.
+    // Rethrows Next.js control flow, such as a redirect to sign in.
     unstable_rethrow(error);
     return { ok: false, error: error instanceof Error ? error.message : "Something went wrong." };
   }

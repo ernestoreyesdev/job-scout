@@ -516,12 +516,9 @@ def delete_shared_key(admin: Admin, settings: Config) -> None:
 @app.get("/admin/stats")
 def admin_stats(admin: Admin, settings: Config) -> dict[str, Any]:
     """
-    App-wide data for the admin page: every user, the last STATS_DAYS of runs,
-    of Claude calls summed up by step, of board fetches by board and job system
-    and of page load measurements by page,
-    the last MODEL_WEEKS of model quality by week and by prompt version, the
-    latest evaluation runs, the board refreshes with each board's fetch times and storage,
-    the company directory, every good or bad label, and jobs past "new".
+    App-wide data for the admin page: users, the last STATS_DAYS of runs, Claude
+    calls, board fetches and page loads, the last MODEL_WEEKS of model quality,
+    evaluation runs, board refreshes, the company directory, labels and jobs past "new".
     """
     service = service_db(settings)
     since = (datetime.now(UTC) - timedelta(days=STATS_DAYS)).isoformat()

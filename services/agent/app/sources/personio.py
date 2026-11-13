@@ -25,7 +25,7 @@ class PersonioSource(JobSource):
     Personio XML job feed: one request returns every position. Descriptions
     come only in the language each job was written in, so the English feed is
     read first and the default feed fills in jobs it left without one. Each
-    company's board is a subdomain, {board}.jobs.personio.de, rather than a path.
+    company's board is the subdomain {board}.jobs.personio.de.
     """
 
     name = "personio"

@@ -58,7 +58,7 @@ MAX_MISSED_CHECKS = 3
 # Most recent jobs per label shown to scoring, and how many of each label it takes before any are shown.
 MAX_EXAMPLES = 15
 MIN_EXAMPLES = 3
-# A board fetched this recently is read from postings instead of its system; the daily refresh keeps boards inside it.
+# A board fetched this recently is read from postings; the daily refresh keeps boards inside it.
 FRESH_BOARD_HOURS = 25
 # Jobs saved per request, and days a closed job nobody tracks is kept.
 STORE_CHUNK = 500
@@ -286,13 +286,10 @@ def directory_postings(
     namer: Callable[..., dict[tuple[str, str], CompanyName]],
 ) -> tuple[list[Posting], int, list[str], list[dict[str, Any]]]:
     """
-    Open jobs at every directory company the user hasn't hidden, topping the
-    directory up from the web while it's small or once a week. Staffing agencies
-    and aggregators count as hidden unless the user chose to show them. Boards
-    fetched within FRESH_BOARD_HOURS are read from postings; the rest are
-    fetched, biggest first, and their jobs saved. Returns
-    the jobs, the companies checked, the boards ("source/board") that couldn't
-    be reached, and how long each board's fetch took and how it ended.
+    Open jobs at every directory company the user hasn't hidden (staffing
+    agencies and aggregators count as hidden unless shown), topping the
+    directory up from the web while it's small or once a week. Returns the jobs,
+    the companies checked, the unreachable boards and each board fetch's timing.
     """
     directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,kind,open_jobs,checked_at"})
     choices = {row["company_id"]: row["hidden"] for row in user.select("hidden_companies", {"select": "company_id,hidden"})}
@@ -424,8 +421,8 @@ def with_descriptions(
 ) -> list[tuple[str, Posting]]:
     """
     Fills in descriptions from postings, then fetches the ones a system's job
-    list left out and saves them. A job whose description can't be fetched is
-    dropped rather than scored blind.
+    list left out and saves them. Jobs whose description can't be fetched are
+    dropped.
     """
     missing = [posting_id for posting_id, posting in todo if not posting.description]
     saved = (
@@ -505,9 +502,8 @@ def keep_best(
 ) -> int:
     """
     Keeps the `limit` highest-scoring jobs at or above `min_score` on the Tracker
-    (ties go to the newer job) and takes the rest off it. Their scores stay
-    saved, so later searches skip them instead of scoring them again. Returns
-    how many were kept.
+    (ties go to the newer job) and takes the rest off it, keeping their scores
+    so later searches skip them. Returns how many were kept.
     """
     undated = datetime.min.replace(tzinfo=UTC)
     posted = {posting_id: p.posted_at or undated for posting_id, p in todo}

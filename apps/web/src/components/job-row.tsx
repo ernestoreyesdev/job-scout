@@ -34,11 +34,9 @@ const WARNING_CHIP =
   "inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300";
 
 /**
- * One tracked job as a card: score badge, posting link, facts as chips, warnings, a two-line fit summary, status
- * select and actions. Thumbs up or down records whether the user agrees it fits; clicking the active one clears it.
- * "Show more" opens the full summary, notes, timeline, strengths and gaps, and an on-demand gap analysis. Delete
- * removes the job everywhere. `onMovedToJobs` runs after a status change past new or a rating, either of which takes
- * the job off the Tracker; `rated` says which.
+ * One tracked job as a card with its score, facts, fit summary, status and actions. Thumbs up or down rates the fit,
+ * and clicking the active one clears it. `onMovedToJobs` runs when a status change or a rating takes the job off the
+ * Tracker; `rated` says which.
  */
 export function JobRow({
   job,

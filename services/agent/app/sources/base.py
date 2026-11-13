@@ -66,17 +66,19 @@ class JobSource(ABC):
     every system shares: the HTTP client, turning "not found" into BoardNotFound,
     guessing board names from a company name and reading boards from job page
     URLs. Each subclass only knows its endpoints and how to map its jobs to Posting.
+
+    board_hosts are the hosts of the system's public job pages, where the first
+    path segment is the board, and reserved_paths are the segments on them that
+    are site pages. not_found_statuses are the response codes meaning a board
+    doesn't exist. max_jobs is the most one fetch returns, so a board at that
+    size may have more.
     """
 
     name: ClassVar[SourceName]
     label: ClassVar[str]
-    # Hosts of the system's public job pages, where the first path segment is the board.
     board_hosts: ClassVar[tuple[str, ...]]
-    # Path segments on those hosts that are site pages rather than boards.
     reserved_paths: ClassVar[frozenset[str]] = frozenset()
-    # Response codes meaning the board doesn't exist.
     not_found_statuses: ClassVar[frozenset[int]] = frozenset({404})
-    # Most jobs one fetch can return; a board at this size may have more that weren't listed.
     max_jobs: ClassVar[int | None] = None
 
     def __init__(self, http: httpx.Client | None = None):
