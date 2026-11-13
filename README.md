@@ -29,7 +29,7 @@ If you upload a new resume, **Rescore** on the Jobs page scores your saved jobs 
 flowchart LR
   browser[Browser] --> web[Next.js web app]
   cron[Vercel Cron, daily] --> web
-  web -- "server actions with the user's token" --> agent[FastAPI agent]
+  web -- "server actions" --> agent[FastAPI agent]
   agent --> db[(Supabase: Postgres, pgvector, Auth, Storage)]
   web --> db
   agent --> claude[Claude API]
@@ -37,7 +37,7 @@ flowchart LR
   agent --> resend[Resend email]
 ```
 
-Both services deploy to Vercel as one project (Vercel Services, configured in `vercel.json`). The browser only talks to Next.js; server actions call the agent with the user's Supabase access token, and the agent queries as that user so row-level security applies.
+Both services deploy to Vercel as one project (Vercel Services, configured in `vercel.json`). The browser only talks to Next.js, and server actions call the agent on the signed-in user's behalf, so row-level security applies to everything it reads and writes for them.
 
 ### How a search works
 

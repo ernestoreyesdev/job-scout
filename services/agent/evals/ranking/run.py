@@ -68,7 +68,7 @@ def main() -> None:
         return
     resume = resumes[0]["text"]
     cut = rule.min_score or DEFAULT_CUT
-    print(f"Search from {run['created_at'][:10]}: {', '.join(rule.keywords)} · up to {rule.limit} jobs · cut {cut}")
+    print(f"Search from {run['created_at'][:10]} · up to {rule.limit} jobs · cut {cut}")
 
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     usage = Usage()
@@ -128,8 +128,6 @@ def main() -> None:
         methods[name] = {"passing": passing, "scored": len(values), "mean": sum(values) / len(values)}
         print(f"\n{name}")
         print(f"  {passing} of {len(values)} reach {cut}; mean score {sum(values) / len(values):.1f}")
-        for posting_id, p in sorted(picked, key=lambda job: -scores.get(job[0], -1))[:5]:
-            print(f"  {scores.get(posting_id, '–'):>3}  {p.title} · {p.company}")
     both = {posting_id for posting_id, _ in by_title} & {posting_id for posting_id, _ in by_resume}
     print(f"\n{len(both)} jobs are in both pools")
     cost = sum(
