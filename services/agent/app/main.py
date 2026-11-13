@@ -5,11 +5,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
-import anthropic
 import httpx
-from docx import Document
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException
-from pypdf import PdfReader
 
 from app.agents.follow_up.agent import FollowUpError, draft_follow_up
 from app.agents.gap_analysis.agent import GapAnalysisError, analyze_gaps
@@ -56,11 +53,15 @@ Config = Annotated[Settings, Depends(get_settings)]
 
 
 def make_client(api_key: str) -> Any:
+    import anthropic
+
     return anthropic.Anthropic(api_key=api_key)
 
 
 def extract_docx_text(data: bytes) -> str:
     """Paragraphs, then table cells, in document order within each."""
+    from docx import Document
+
     document = Document(io.BytesIO(data))
     lines = [p.text for p in document.paragraphs]
     for table in document.tables:
@@ -189,6 +190,8 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
 
 def extract_pdf_text(data: bytes) -> str:
     """Text of every page in order; empty for scanned PDFs with no text layer."""
+    from pypdf import PdfReader
+
     pages = (page.extract_text() or "" for page in PdfReader(io.BytesIO(data)).pages)
     lines = "\n".join(pages).splitlines()
     return "\n".join(line.strip() for line in lines if line.strip())
@@ -365,6 +368,8 @@ def claude_and_resume(user: CurrentUser, settings: Settings) -> tuple[Any, str, 
 
 @app.post("/applications/{application_id}/gap-analysis")
 def post_gap_analysis(application_id: str, user: User, settings: Config) -> dict[str, Any]:
+    import anthropic
+
     db = user_db(settings, user.access_token)
     rows = db.select("applications", {"id": f"eq.{application_id}", "select": "id,posting:postings(*)"})
     if not rows:
@@ -387,6 +392,8 @@ def post_gap_analysis(application_id: str, user: User, settings: Config) -> dict
 
 @app.post("/applications/{application_id}/follow-up")
 def post_follow_up(application_id: str, user: User, settings: Config) -> dict[str, Any]:
+    import anthropic
+
     db = user_db(settings, user.access_token)
     rows = db.select(
         "applications",
@@ -478,6 +485,8 @@ def stop_run(run_id: str, user: User, settings: Config) -> dict[str, str]:
 
 def validate_anthropic_key(api_key: str, settings: Settings) -> None:
     """Raises a 400 or 502 unless Anthropic accepts the key for the scoring model."""
+    import anthropic
+
     try:
         make_client(api_key).models.retrieve(settings.scoring_model)
     except anthropic.AuthenticationError:

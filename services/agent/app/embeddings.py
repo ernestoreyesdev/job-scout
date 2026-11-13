@@ -1,6 +1,5 @@
 from functools import cache
 
-from fastembed import TextEmbedding
 from langchain_core.embeddings import Embeddings
 
 MODEL = "BAAI/bge-small-en-v1.5"
@@ -11,6 +10,8 @@ class FastEmbedEmbeddings(Embeddings):
     """LangChain embeddings computed in-process by a FastEmbed model; `prefix` is prepended to every text."""
 
     def __init__(self, model_name: str, max_length: int, prefix: str = ""):
+        from fastembed import TextEmbedding
+
         self.model = TextEmbedding(model_name=model_name, max_length=max_length)
         self.prefix = prefix
 
