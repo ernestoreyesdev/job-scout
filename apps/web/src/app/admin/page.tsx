@@ -170,14 +170,14 @@ async function AdminData() {
   return (
     <div className="mt-8 space-y-6">
       <PageReady />
-      <SectionCard
+      <SectionCard collapsible
         title="Shared Anthropic key"
         description="Runs use a user's own key when they saved one before, otherwise this key, otherwise the ANTHROPIC_API_KEY setting. Anthropic checks a new key before it's saved."
       >
         <KeyForm hint={key.hint} fallback={key.fallback} />
       </SectionCard>
 
-      <SectionCard title="Usage" description={`The last ${stats.days} days, estimated at Claude Haiku prices. Your Anthropic console has the exact bill.`}>
+      <SectionCard collapsible title="Usage" description={`The last ${stats.days} days, estimated at Claude Haiku prices. Your Anthropic console has the exact bill.`}>
         <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile label="Users" value={stats.users.length} note={`${active.size} active in the last ${ACTIVE_DAYS} days`} />
           <StatTile
@@ -219,7 +219,7 @@ async function AdminData() {
 
       <RefreshSection refreshes={stats.refreshes} boards={stats.refresh_boards} companies={stats.companies} days={stats.days} />
 
-      <SectionCard
+      <SectionCard collapsible
         title="Claude calls by step"
         description={`Every call over the last ${stats.days} days. Cache hits are the share of input read from the prompt cache.`}
       >
@@ -260,7 +260,7 @@ async function AdminData() {
 
       <ModelQualitySection stats={stats} />
 
-      <SectionCard title="Users" description={`Searches and spend over the last ${stats.days} days; applied counts every job past saved.`}>
+      <SectionCard collapsible title="Users" description={`Searches and spend over the last ${stats.days} days; applied counts every job past saved.`}>
         <Table>
           <TableHeader>
             <TableRow>
@@ -287,7 +287,7 @@ async function AdminData() {
         </Table>
       </SectionCard>
 
-      <SectionCard title="Company directory" description="Every company searches can check, shared by all users.">
+      <SectionCard collapsible title="Company directory" description="Every company searches can check, shared by all users.">
         <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile label="Companies" value={stats.companies.length.toLocaleString()} note={`${openJobs.toLocaleString()} open jobs`} />
           <StatTile label="Employers" value={kinds.employer} />
@@ -296,7 +296,7 @@ async function AdminData() {
         </dl>
       </SectionCard>
 
-      <SectionCard
+      <SectionCard collapsible
         title="Scoring accuracy across everyone"
         description={`${marked.length} jobs marked good or bad by all users.${marked.length < MIN_LABELED ? ` These numbers need about ${MIN_LABELED} before they mean much.` : ""}`}
       >
@@ -334,7 +334,7 @@ function SpeedSection({ runs }: { runs: AdminStats["runs"] }) {
   const longest = Math.max(1, ...steps.map((row) => row.average));
 
   return (
-    <SectionCard title="Search speed" description="Finished searches, from start to the last saved job.">
+    <SectionCard collapsible title="Search speed" description="Finished searches, from start to the last saved job.">
       <dl className="grid gap-3 sm:grid-cols-3">
         <StatTile label="Finished searches" value={done.length} />
         <StatTile label="Median" value={durations.length ? seconds(durations[Math.floor(durations.length / 2)]) : "–"} />
@@ -392,7 +392,7 @@ function HealthSection({ stats }: { stats: AdminStats }) {
   ];
 
   return (
-    <SectionCard title="Health" description={`Problems over the last ${stats.days} days.`}>
+    <SectionCard collapsible title="Health" description={`Problems over the last ${stats.days} days.`}>
       <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile label="Failed runs" value={failed.length} note={`of ${stats.runs.length} runs`} />
         <StatTile label="Timed out" value={timedOut} note="Stopped after 10 minutes" />
@@ -459,7 +459,7 @@ function PageSpeedSection({ vitals, days }: { vitals: AdminStats["vitals"]; days
   const find = (page: string, metric: string) => vitals.find((row) => row.page === page && row.metric === metric);
 
   return (
-    <SectionCard
+    <SectionCard collapsible
       title="Page speed"
       description={`What signed-in users' browsers measured over the last ${days} days. Data shown is from opening a page, by a click or a full load, until its data is on screen; the other columns only cover full loads in most browsers. 75% means three in four were at least this fast. Green is good, amber needs work and red is poor.`}
     >
@@ -518,7 +518,7 @@ function BoardSection({ boards, companies, days }: { boards: AdminStats["boards"
   const names = new Map(companies.map((company) => [`${company.source}/${company.board}`, company.name]));
 
   return (
-    <SectionCard
+    <SectionCard collapsible
       title="Board fetches"
       description={`Every board searches checked over the last ${days} days, timed from the first request to the last page, retry included. Boards refreshed within the last 25 hours are read from saved jobs and count as from cache.`}
     >
@@ -620,7 +620,7 @@ function RefreshSection({
   const worth = boards.filter((row, rank) => rank < SLOWEST_BOARDS || row.failures > 0);
 
   return (
-    <SectionCard
+    <SectionCard collapsible
       title="Board refresh"
       description={`Every directory board is fetched once a day and its jobs saved, so searches read them from the database. Refreshes over the last ${days} days.`}
     >
@@ -776,7 +776,7 @@ function evalSummary(run: AdminStats["evals"][number]): string {
  */
 function ModelQualitySection({ stats }: { stats: AdminStats }) {
   return (
-    <SectionCard
+    <SectionCard collapsible
       title="Model quality"
       description="Each prompt gets a version from its text, so a change to a prompt or model shows up as a new row. Weeks start on Monday, in UTC."
     >
