@@ -66,6 +66,8 @@ STALE_JOB_DAYS = 30
 # Jobs without an embedding that a refresh loads and embeds at a time, newest first, and how many are saved per request.
 EMBED_BATCH = 1000
 EMBED_CHUNK = 200
+# The refresh workflow's timeout; a refresh still unfinished after it was cut off.
+REFRESH_TIME_LIMIT = timedelta(hours=5)
 # The jobs each page lists, as a filter on applications.
 RESCORE_SCOPES: dict[RescoreScope, str] = {"tracker": "in_tracker.eq.true", "jobs": "status.neq.new"}
 
@@ -1041,12 +1043,19 @@ def refresh_boards(
     embed: Callable[[list[str]], list[list[float]]] = embed_jobs,
 ) -> dict[str, Any]:
     """
-    Fetches every directory board from its system, saves the jobs, closes the
-    ones no longer listed, embeds every open job that has none, deletes jobs
-    closed STALE_JOB_DAYS ago that nobody tracks, and records the refresh in
+    Marks earlier refreshes that were cut off as stopped, fetches every
+    directory board from its system, saves the jobs, closes the ones no longer
+    listed, embeds every open job that has none, deletes jobs closed
+    STALE_JOB_DAYS ago that nobody tracks, and records the refresh in
     board_refreshes. Returns that record.
     """
-    [refresh] = service.insert("board_refreshes", {"started_at": datetime.now(UTC).isoformat()}, select="id")
+    now = datetime.now(UTC)
+    service.update(
+        "board_refreshes",
+        {"finished_at": "is.null", "stopped_at": "is.null", "started_at": f"lt.{(now - REFRESH_TIME_LIMIT).isoformat()}", "select": "id"},
+        {"stopped_at": now.isoformat()},
+    )
+    [refresh] = service.insert("board_refreshes", {"started_at": now.isoformat()}, select="id")
     directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,open_jobs"})
     directory.sort(key=lambda c: c.get("open_jobs") or 0, reverse=True)
     boards: list[Board] = [(c["source"], c["board"], c["name"], c["found_by"]) for c in directory]

@@ -1356,7 +1356,9 @@ def test_a_refresh_fetches_every_board_and_records_itself():
     assert [function for function, _ in service.rpcs] == ["delete_stale_postings"]
     [refresh] = service.inserted("board_refreshes")
     assert refresh["started_at"]
-    [(_, filters, patch)] = [update for update in service.updates if update[0] == "board_refreshes"]
+    [(_, cutoff, stop), (_, filters, patch)] = [update for update in service.updates if update[0] == "board_refreshes"]
+    assert (cutoff["finished_at"], cutoff["stopped_at"], cutoff["started_at"][:3]) == ("is.null", "is.null", "lt.")
+    assert stop["stopped_at"]
     assert filters["id"] == "eq.refresh-1" and patch["finished_at"]
     assert {fetch["board"] for fetch in patch["board_fetches"]} == {"ashby/acme", "ashby/agency", "ashby/gone"}
     assert ("companies", {"id": "eq.id-gone"}, {"missed_checks": 1}) in service.updates

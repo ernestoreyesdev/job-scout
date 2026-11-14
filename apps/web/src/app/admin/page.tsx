@@ -88,6 +88,7 @@ type AdminStats = {
     id: string;
     started_at: string;
     finished_at: string | null;
+    stopped_at: string | null;
     boards: number;
     jobs: number;
     new_jobs: number;
@@ -649,7 +650,11 @@ function RefreshSection({
               <TableRow key={row.id}>
                 <TableCell className="tabular-nums">{utcTime(row.started_at)}</TableCell>
                 <TableCell className="text-right tabular-nums">
-                  {row.finished_at ? seconds(new Date(row.finished_at).getTime() - new Date(row.started_at).getTime()) : "Unfinished"}
+                  {row.finished_at
+                    ? seconds(new Date(row.finished_at).getTime() - new Date(row.started_at).getTime())
+                    : row.stopped_at
+                      ? "Stopped"
+                      : "Unfinished"}
                 </TableCell>
                 <TableCell className="text-right tabular-nums">{row.boards}</TableCell>
                 <TableCell className="text-right tabular-nums">{row.jobs.toLocaleString()}</TableCell>

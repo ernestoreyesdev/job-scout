@@ -3,7 +3,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(27);
+select plan(28);
 
 insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000a1', 'admin@example.com');
 select set_config('request.jwt.claims', '{"app_metadata":{"role":"admin"}}', true);
@@ -78,9 +78,9 @@ select is((admin_stats() -> 'boards' -> 'slowest' -> 0 -> 'median_ms')::int, 110
 -- Refresh fetches joined with the directory.
 delete from board_refreshes;
 delete from companies;
-insert into board_refreshes (started_at, board_fetches) values
-  (now() - interval '1 hour', '[{"board": "ashby/acme", "ms": 300, "outcome": "ok"}, {"board": "lever/beta", "ms": 900, "outcome": "unreachable"}]'),
-  (now() - interval '2 hours', '[{"board": "ashby/acme", "ms": 100, "outcome": "ok"}]');
+insert into board_refreshes (started_at, stopped_at, board_fetches) values
+  (now() - interval '1 hour', null, '[{"board": "ashby/acme", "ms": 300, "outcome": "ok"}, {"board": "lever/beta", "ms": 900, "outcome": "unreachable"}]'),
+  (now() - interval '2 hours', now(), '[{"board": "ashby/acme", "ms": 100, "outcome": "ok"}]');
 insert into companies (name, source, board, found_by, open_jobs) values
   ('Acme', 'ashby', 'acme', 'lookup', 10),
   ('New', 'greenhouse', 'new', 'lookup', 0);
@@ -104,6 +104,11 @@ select is(
   (select jsonb_build_array(b -> 'median_ms', b -> 'open_jobs') from jsonb_array_elements(admin_stats() -> 'refresh_boards') b where b ->> 'board' = 'greenhouse/new'),
   '[null, 0]'::jsonb,
   'a directory board never fetched has no times'
+);
+select is(
+  (select jsonb_agg(r ->> 'stopped_at' is not null) from jsonb_array_elements(admin_stats() -> 'refreshes') r),
+  '[false, true]'::jsonb,
+  'refreshes are listed newest first, a stopped one with when it was stopped'
 );
 
 -- Model quality week by week.
