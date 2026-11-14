@@ -3,7 +3,7 @@ name: Evals
 # Measures scoring quality every week, and on demand from the Actions tab, saving results for the admin page.
 on:
   schedule:
-    - cron: "0 12 * * 1"
+    - cron: "43 12 * * 1"
   workflow_dispatch:
 
 jobs:

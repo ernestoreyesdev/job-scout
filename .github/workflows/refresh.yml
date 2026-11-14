@@ -3,7 +3,7 @@ name: Board refresh
 # Fetches every directory board, saves its jobs and embeds the new ones, every day and on demand from the Actions tab.
 on:
   schedule:
-    - cron: "0 10 * * *"
+    - cron: "17 10 * * *"
   workflow_dispatch:
 
 concurrency:

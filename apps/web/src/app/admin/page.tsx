@@ -595,7 +595,7 @@ function RefreshSection({
       description={`Every directory board is fetched once a day and its jobs saved, so searches read them from the database. Refreshes over the last ${days} days.`}
     >
       {refreshes.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No refreshes yet. The first one runs at 10:00 UTC.</p>
+        <p className="text-sm text-muted-foreground">No refreshes yet. The first one runs at 10:17 UTC.</p>
       ) : (
         <Table>
           <TableHeader>
