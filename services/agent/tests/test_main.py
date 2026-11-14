@@ -338,7 +338,11 @@ class OutsideRest(FakeRest):
 
     def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
         filters = {key: value.removeprefix("eq.") for key, value in params.items() if value.startswith("eq.")}
-        return [row for row in self.tables[table] if all(str(row.get(key)) == value for key, value in filters.items())]
+        rows = [row for row in self.tables[table] if all(str(row.get(key)) == value for key, value in filters.items())]
+        if "posting:postings" in params.get("select", ""):
+            postings = {posting["id"]: posting for posting in self.tables["postings"]}
+            rows = [{**row, "posting": postings[row["posting_id"]]} for row in rows]
+        return rows
 
     def insert(self, table: str, rows: Any, on_conflict: str | None = None, select: str | None = None) -> list[dict[str, Any]]:
         row = {"id": f"{table}-{len(self.tables[table]) + 1}", **rows}
@@ -373,7 +377,7 @@ def ramp_posting() -> Posting:
 
 
 def test_an_outside_job_already_saved_is_added_as_applied_on_the_day_given(monkeypatch: pytest.MonkeyPatch):
-    db = OutsideRest(postings=[{"id": "posting-1", "url": RAMP_JOB}])
+    db = OutsideRest(postings=[{"id": "posting-1", "url": RAMP_JOB, "title": "Software Engineer, Backend", "company": "Ramp"}])
 
     result = add_outside(monkeypatch, db, url=f"{RAMP_JOB}?departmentId=x", applied_on="2026-11-10")
 
@@ -489,3 +493,17 @@ def test_an_admin_account_cant_be_deleted(monkeypatch: pytest.MonkeyPatch):
     with pytest.raises(HTTPException) as refused:
         main.delete_account(fake_user(id="u", access_token="t", admin=True), fake_settings())
     assert refused.value.status_code == 403 and db.calls == []
+
+
+def test_an_outside_job_tracked_from_another_source_moves_instead_of_being_added(monkeypatch: pytest.MonkeyPatch):
+    hn = {"id": "hn-1", "source": "hackernews", "title": "Sr Software Engineer, Backend", "company": "Ramp"}
+    board = {"id": "board-1", "source": "ashby", "url": RAMP_JOB, "title": "Senior Software Engineer Backend", "company": "Ramp"}
+    db = OutsideRest(
+        postings=[hn, board], applications=[{"id": "app-1", "posting_id": "hn-1", "status": "saved", "in_tracker": True}]
+    )
+
+    result = add_outside(monkeypatch, db, url=RAMP_JOB, status="applied")
+
+    assert result == {"application_id": "app-1"}
+    assert not [insert for insert in db.inserts if insert[0] == "applications"]
+    assert ("applications", {"id": "eq.app-1"}, {"status": "applied", "in_tracker": False}) in db.updates

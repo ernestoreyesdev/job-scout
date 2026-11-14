@@ -14,6 +14,7 @@ from app.agents.orchestrator import (
     ImportResult,
     SearchResult,
     import_companies,
+    job_key,
     rescore as orchestrate_rescore,
     run_search as orchestrate_search,
 )
@@ -553,11 +554,12 @@ def add_outside_job(body: OutsideJob, user: User, settings: Config) -> dict[str,
     """
     Adds a job the user applied to outside the app to their Jobs, dated the day
     they applied. Moves it to `body.status` when it's past applied, and a job
-    already on their Tracker moves instead of being added twice.
+    the user already tracks, from this source or another, moves instead of
+    being added twice.
     """
-    db = user_db(settings, user.access_token)
-    posting_id = outside_posting(service_db(settings), body)
-    rows = db.select("applications", {"posting_id": f"eq.{posting_id}", "select": "id,status"})
+    db, service = user_db(settings, user.access_token), service_db(settings)
+    posting_id = outside_posting(service, body)
+    rows = db.select("applications", {"posting_id": f"eq.{posting_id}", "select": "id,status"}) or same_job(db, service, posting_id)
     if not rows:
         rows = db.insert(
             "applications",
@@ -627,3 +629,15 @@ def delete_account(user: User, settings: Config) -> None:
     service = service_db(settings)
     service.delete_folder("resumes", user.id)
     service.rpc("delete_account", {"target": user.id})
+
+
+def same_job(user: Rest, service: Rest, posting_id: str) -> list[dict[str, Any]]:
+    """The user's tracked job with the posting's company and title from any source, as [{id, status}], or []."""
+    [posting] = service.select("postings", {"id": f"eq.{posting_id}", "select": "company,title"})
+    key = job_key(posting["company"], posting["title"])
+    rows = user.select("applications", {"select": "id,status,posting:postings(company,title)"})
+    return [
+        {"id": row["id"], "status": row["status"]}
+        for row in rows
+        if job_key(row["posting"]["company"], row["posting"]["title"]) == key
+    ][:1]

@@ -109,6 +109,7 @@ class FakeRest(Rest):
         self.hidden = hidden or []
         self.discoveries = discoveries or []
         self.tracked_postings: list[dict[str, Any]] = []
+        self.tracked_jobs: dict[str, dict[str, str]] = {}
         self.labeled: list[dict[str, Any]] = []
         self.unembedded_labeled: list[dict[str, Any]] = []
         self.unembedded: list[dict[str, Any]] = []
@@ -143,6 +144,11 @@ class FakeRest(Rest):
             return [row for row in self.labeled if params["fit_label"] == f"eq.{row['fit_label']}"]
         if "fit_label" in params:
             return self.labeled
+        if params.get("select") == "posting_id,posting:postings(company,title)":
+            return [
+                {"posting_id": posting_id, "posting": self.tracked_jobs.get(posting_id, {"company": "", "title": posting_id})}
+                for posting_id in self.tracked
+            ]
         if "posting:" in params.get("select", ""):
             return self.tracked_postings
         return [{"posting_id": posting_id} for posting_id in self.tracked]
@@ -1407,3 +1413,14 @@ def test_rescore_for_jobs_picks_only_jobs_past_new():
 
     [params] = selects
     assert params["and"] == "(or(resume_id.is.null,resume_id.neq.resume-2),status.neq.new)"
+
+
+def test_a_job_tracked_from_another_source_is_skipped():
+    user = FakeRest(["hn-job"])
+    user.tracked_jobs = {"hn-job": {"company": "ACME", "title": "Sr. Software Engineer, Backend"}}
+    jobs = [posting("1", "Senior Software Engineer Backend"), posting("2", "Software Engineer, Payments")]
+
+    result, _, user, _, _, _ = run(rule=SearchRule(company="Acme", keywords=["software engineer"]), jobs=jobs, user=user)
+
+    assert (result.already_tracked, result.scored) == (1, 1)
+    assert saved_ids(user) == ["posting-2"]

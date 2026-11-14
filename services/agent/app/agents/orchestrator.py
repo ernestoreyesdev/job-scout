@@ -191,8 +191,14 @@ def run_search(
         select="id,source,external_id",
     )
     ids = {(row["source"], row["external_id"]): row["id"] for row in rows}
-    tracked = {row["posting_id"] for row in user.select("applications", {"select": "posting_id"})}
-    fresh = [(ids[(p.source, p.external_id)], p) for p in matched if ids[(p.source, p.external_id)] not in tracked]
+    tracked_rows = user.select("applications", {"select": "posting_id,posting:postings(company,title)"})
+    tracked = {row["posting_id"] for row in tracked_rows}
+    tracked_jobs = {job_key(row["posting"]["company"], row["posting"]["title"]) for row in tracked_rows}
+    fresh = [
+        (ids[(p.source, p.external_id)], p)
+        for p in matched
+        if ids[(p.source, p.external_id)] not in tracked and job_key(p.company, p.title) not in tracked_jobs
+    ]
     per_company = None if rule.company else MAX_PER_COMPANY
     already_tracked = len(matched) - len(fresh)
     if not rule.score:
@@ -833,8 +839,7 @@ def one_per_job(postings: list[Posting]) -> list[Posting]:
     """
     chosen: dict[tuple[str, str], Posting] = {}
     for p in postings:
-        words: list[str] = re.findall(r"[a-z0-9]+", p.title.lower())
-        key = (compact(p.company), " ".join(TITLE_ABBREVIATIONS.get(word, word) for word in words))
+        key = job_key(p.company, p.title)
         if key not in chosen or (chosen[key].source == "hackernews" and p.source != "hackernews"):
             chosen[key] = p
     return list(chosen.values())
@@ -1115,3 +1120,12 @@ def embed_missing(service: Rest, embed: Callable[[list[str]], list[list[float]]]
             embed,
         )
     return len(rows)
+
+
+def job_key(company: str, title: str) -> tuple[str, str]:
+    """
+    A job as compared across sources: the company in letters and digits, and
+    the title's words with short forms written out ('Sr' reads as 'Senior').
+    """
+    words: list[str] = re.findall(r"[a-z0-9]+", title.lower())
+    return compact(company), " ".join(TITLE_ABBREVIATIONS.get(word, word) for word in words)
