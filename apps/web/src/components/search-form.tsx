@@ -11,7 +11,8 @@ import { MAX_JOBS_PER_SEARCH, MIN_SCORES, POSTED_WITHIN_DAYS, WORKPLACE_TYPES } 
 
 const WORKPLACE_LABELS = { onsite: "On-site", hybrid: "Hybrid", remote: "Remote" } as const;
 
-const SELECT = "h-9 w-full rounded-md border border-input bg-background px-2 text-sm shadow-xs disabled:opacity-50";
+const SELECT =
+  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-base disabled:opacity-50 md:text-sm dark:bg-input/30";
 
 /**
  * Starts a background search run on one company, or every company in the directory when none is given. The fields
