@@ -294,3 +294,10 @@ export async function addOutsideJob(formData: FormData): Promise<AddJobResult> {
   });
   return result.ok ? { ...result, message } : result;
 }
+
+/** Deletes the signed-in account through the agent; the caller then signs the browser out. */
+export async function deleteAccount(): Promise<ActionResult> {
+  return run([], async () => {
+    await callAgent("/me", { method: "DELETE" });
+  });
+}

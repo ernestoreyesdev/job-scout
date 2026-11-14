@@ -41,10 +41,9 @@ MAX_ERROR_LENGTH = 500
 
 
 class CallLog:
-    """Claude calls made for one user, and run when there is one, kept in memory until save()."""
+    """Claude calls made for a run, or outside one, kept in memory until save()."""
 
-    def __init__(self, user_id: str, run_id: str | None = None):
-        self.user_id = user_id
+    def __init__(self, run_id: str | None = None):
         self.run_id = run_id
         self.rows: list[dict[str, Any]] = []
         self._lock = threading.Lock()
@@ -54,7 +53,6 @@ class CallLog:
         server_tools = getattr(usage, "server_tool_use", None)
         row = {
             "run_id": self.run_id,
-            "user_id": self.user_id,
             "step": STEPS.get(str(kwargs.get("system")), "other"),
             "model": str(kwargs.get("model", "")),
             "prompt_version": prompt_version(kwargs.get("system"), kwargs.get("output_format")),

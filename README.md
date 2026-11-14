@@ -22,7 +22,7 @@ Live at [job-role-scout-ai.vercel.app](https://job-role-scout-ai.vercel.app).
 6. **Shape the directory** on the Companies page: hide companies you don't want searched, or add companies by name or job board link.
 7. **Review Insights** for how your applications progressed, response rates by source, resume and whether search found the job, scoring accuracy against your ratings, and follow-ups that are due.
 
-If you upload a new resume, the score button on the Tracker and on Jobs scores that page's jobs again against it. The Admin page is reserved for the site owner and covers usage, cost, speed, failures and model quality across all users.
+If you upload a new resume, the score button on the Tracker and on Jobs scores that page's jobs again against it. The account menu (the round button with your initial) switches between light and dark, signs you out and deletes your account. Deleting removes your resume, tracked jobs and sign-in; the searches you ran and the scores your jobs got stay in the app's statistics with nothing linking them to you. The Admin page is reserved for the site owner and covers usage, cost, speed, failures and model quality across all users, with no figures kept per user.
 
 ## Architecture
 

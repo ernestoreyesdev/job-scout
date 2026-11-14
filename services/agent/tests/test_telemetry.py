@@ -37,21 +37,21 @@ def client(fail: bool = False) -> SimpleNamespace:
 
 
 def test_calls_are_recorded_with_their_step_tokens_and_run():
-    log = CallLog("user-1", "run-1")
+    log = CallLog("run-1")
     recording = RecordingClient(client(), log)
 
     recording.beta.messages.parse(model="claude-haiku-5-5", system=FIT_SYSTEM, messages=[])
     recording.messages.create(model="claude-haiku-5-5", system="Something else", messages=[])
 
     scoring, other = log.rows
-    assert (scoring["step"], scoring["run_id"], scoring["user_id"]) == ("scoring", "run-1", "user-1")
+    assert (scoring["step"], scoring["run_id"], "user_id" in scoring) == ("scoring", "run-1", False)
     assert (scoring["input_tokens"], scoring["cache_read_input_tokens"], scoring["stop_reason"]) == (900, 800, "end_turn")
     assert scoring["duration_ms"] >= 0 and scoring["error"] is None
     assert other["step"] == "other"
 
 
 def test_a_failed_call_is_recorded_and_still_raises():
-    log = CallLog("user-1")
+    log = CallLog()
     with pytest.raises(RuntimeError):
         RecordingClient(client(fail=True), log).beta.messages.parse(model="m", system=TITLES_SYSTEM, messages=[])
 
@@ -60,7 +60,7 @@ def test_a_failed_call_is_recorded_and_still_raises():
 
 
 def test_saving_writes_every_call_once():
-    log, service = CallLog("user-1", "run-1"), Insert()
+    log, service = CallLog("run-1"), Insert()
     RecordingClient(client(), log).beta.messages.parse(model="m", system=FIT_SYSTEM, messages=[])
 
     log.save(service)
@@ -124,7 +124,7 @@ def test_a_prompt_version_changes_with_the_prompt_or_its_output_schema():
 
 
 def test_calls_are_recorded_with_their_prompt_version():
-    log = CallLog("user-1", "run-1")
+    log = CallLog("run-1")
     RecordingClient(client(), log).beta.messages.parse(model="m", system=FIT_SYSTEM, output_format=FitScore, messages=[])
 
     [row] = log.rows

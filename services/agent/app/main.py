@@ -141,7 +141,7 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
     service = service_db(settings)
     usage = Usage()
     report = start_run(db, run_id)
-    calls, timings = CallLog(user.id, run_id), {}
+    calls, timings = CallLog(run_id), {}
     outcome: dict[str, Any] = {}
     detail: str | None = None
     try:
@@ -260,7 +260,7 @@ def run_rescore(run_id: str, body: RescoreRequest, user: CurrentUser, settings: 
     service = service_db(settings)
     usage = Usage()
     report = start_run(db, run_id)
-    calls, timings = CallLog(user.id, run_id), {}
+    calls, timings = CallLog(run_id), {}
     outcome: dict[str, Any] = {}
     detail: str | None = None
     try:
@@ -325,7 +325,7 @@ def run_import(run_id: str, body: CompanyImport, user: CurrentUser, settings: Se
     service = service_db(settings)
     usage = Usage()
     report = start_run(db, run_id)
-    calls, timings = CallLog(user.id, run_id), {}
+    calls, timings = CallLog(run_id), {}
     outcome: dict[str, Any] = {}
     detail: str | None = None
     try:
@@ -379,7 +379,7 @@ def claude_and_resume(user: CurrentUser, settings: Settings) -> tuple[Any, str, 
     resumes = user_db(settings, user.access_token).select("resumes", {"is_primary": "eq.true", "select": "text"})
     if not resumes or not resumes[0]["text"]:
         raise HTTPException(400, "Upload a resume first.")
-    calls = CallLog(user.id)
+    calls = CallLog()
     return RecordingClient(make_client(api_key), calls), resumes[0]["text"], calls
 
 
@@ -613,3 +613,17 @@ def outside_posting(service: Rest, body: OutsideJob) -> str:
     )
     [row] = service.insert("postings", manual.model_dump(mode="json"), select="id")
     return row["id"]
+
+
+@app.delete("/me", status_code=204)
+def delete_account(user: User, settings: Config) -> None:
+    """
+    Deletes the signed-in account: its resume files, then the account with
+    everything personal, keeping its runs and scores without the user.
+    Admin accounts are refused.
+    """
+    if user.admin:
+        raise HTTPException(403, "Admin accounts can't be deleted.")
+    service = service_db(settings)
+    service.delete_folder("resumes", user.id)
+    service.rpc("delete_account", {"target": user.id})

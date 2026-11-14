@@ -202,7 +202,6 @@ export const WEB_VITALS = ["TTFB", "FCP", "LCP", "CLS", "INP", "READY"] as const
 /** One page load measurement a browser reported. */
 export type WebVitalRow = {
   id: string;
-  user_id: string;
   page: string;
   metric: (typeof WEB_VITALS)[number];
   value: number;
@@ -220,7 +219,7 @@ export type HiddenCompanyRow = {
 
 export type AgentRunRow = {
   id: string;
-  user_id: string;
+  user_id: string | null;
   kind: string;
   input: Record<string, unknown>;
   status: RunStatusRow;

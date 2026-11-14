@@ -54,7 +54,14 @@ def main() -> None:
     db = service_db(settings)
     runs = db.select(
         "agent_runs",
-        {"select": "user_id,input,created_at", "kind": "eq.search", "status": "eq.done", "order": "created_at.desc", "limit": "50"},
+        {
+            "select": "user_id,input,created_at",
+            "kind": "eq.search",
+            "status": "eq.done",
+            "user_id": "not.is.null",
+            "order": "created_at.desc",
+            "limit": "50",
+        },
     )
     run = next((r for r in runs if r["input"].get("score", True) and not r["input"].get("company")), None)
     if run is None:

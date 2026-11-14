@@ -8,5 +8,5 @@ export async function UserMenu() {
   if (!supabase || !user?.email) return null;
   const { data } = await supabase.from("profiles").select("theme").maybeSingle();
 
-  return <SignOut email={user.email} theme={data?.theme ?? "light"} />;
+  return <SignOut email={user.email} theme={data?.theme ?? "light"} admin={user.app_metadata?.role === "admin"} />;
 }

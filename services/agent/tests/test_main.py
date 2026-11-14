@@ -448,3 +448,44 @@ def test_select_all_pages_past_the_row_limit():
     service = Paged()
     assert len(main.select_all(service, "llm_calls", {"order": "id"}, page=2)) == 5
     assert service.offsets == ["0", "2", "4"]
+
+
+class AccountRest(Rest):
+    def __init__(self, fail_files: bool = False):
+        self.fail_files = fail_files
+        self.calls: list[tuple[str, ...]] = []
+
+    def delete_folder(self, bucket: str, folder: str, page: int = 1000) -> None:
+        if self.fail_files:
+            raise RuntimeError("storage down")
+        self.calls.append(("files", bucket, folder))
+
+    def rpc(self, function: str, args: dict[str, Any]) -> Any:
+        self.calls.append(("rpc", function, args["target"]))
+
+
+def test_deleting_an_account_removes_its_files_then_the_account(monkeypatch: pytest.MonkeyPatch):
+    db = AccountRest()
+    monkeypatch.setattr(main, "service_db", lambda settings: db)
+
+    main.delete_account(fake_user(id="u", access_token="t", admin=False), fake_settings())
+
+    assert db.calls == [("files", "resumes", "u"), ("rpc", "delete_account", "u")]
+
+
+def test_an_account_whose_files_cant_be_deleted_is_kept(monkeypatch: pytest.MonkeyPatch):
+    db = AccountRest(fail_files=True)
+    monkeypatch.setattr(main, "service_db", lambda settings: db)
+
+    with pytest.raises(RuntimeError):
+        main.delete_account(fake_user(id="u", access_token="t", admin=False), fake_settings())
+    assert db.calls == []
+
+
+def test_an_admin_account_cant_be_deleted(monkeypatch: pytest.MonkeyPatch):
+    db = AccountRest()
+    monkeypatch.setattr(main, "service_db", lambda settings: db)
+
+    with pytest.raises(HTTPException) as refused:
+        main.delete_account(fake_user(id="u", access_token="t", admin=True), fake_settings())
+    assert refused.value.status_code == 403 and db.calls == []

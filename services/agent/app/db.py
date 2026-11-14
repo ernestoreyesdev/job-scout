@@ -78,6 +78,23 @@ class Rest:
         res.raise_for_status()
         return res.json() if res.content else None
 
+    def delete_folder(self, bucket: str, folder: str, page: int = 1000) -> None:
+        """Deletes every file in `folder` of a Storage bucket, a page at a time."""
+        while True:
+            res = self._http.post(
+                f"{self._base}/storage/v1/object/list/{bucket}",
+                json={"prefix": folder, "limit": page},
+                headers=self._headers,
+            )
+            res.raise_for_status()
+            paths = [f"{folder}/{item['name']}" for item in res.json() if item.get("id")]
+            if not paths:
+                return
+            res = self._http.request(
+                "DELETE", f"{self._base}/storage/v1/object/{bucket}", json={"prefixes": paths}, headers=self._headers
+            )
+            res.raise_for_status()
+
 
 def user_db(settings: Settings, access_token: str) -> Rest:
     return Rest(settings, settings.supabase_anon_key, access_token)

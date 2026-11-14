@@ -3,7 +3,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(28);
+select plan(32);
 
 insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000a1', 'admin@example.com');
 select set_config('request.jwt.claims', '{"app_metadata":{"role":"admin"}}', true);
@@ -13,8 +13,8 @@ create temporary table this_week as
 
 -- Claude calls summed up by step.
 delete from llm_calls;
-insert into llm_calls (user_id, step, model, duration_ms, input_tokens, output_tokens, cache_read_input_tokens, error)
-select '00000000-0000-0000-0000-0000000000a1', step, 'haiku', ms, 100, 10, 50, error
+insert into llm_calls (step, model, duration_ms, input_tokens, output_tokens, cache_read_input_tokens, error)
+select step, 'haiku', ms, 100, 10, 50, error
 from (values ('scoring', 900, null), ('scoring', 1200, null), ('scoring', 3000, 'overloaded'), ('titles', 400, null)) as c (step, ms, error);
 
 select is(admin_stats() -> 'calls' -> 0 ->> 'step', 'scoring', 'the busiest step comes first');
@@ -36,8 +36,8 @@ select is(
 
 -- Page speed by page and metric.
 delete from web_vitals;
-insert into web_vitals (user_id, page, metric, value)
-select '00000000-0000-0000-0000-0000000000a1', page, metric, value
+insert into web_vitals (page, metric, value)
+select page, metric, value
 from (values ('Tracker', 'LCP', 800), ('Tracker', 'LCP', 1200), ('Tracker', 'LCP', 2000), ('Tracker', 'LCP', 3500), ('Tracker', 'TTFB', 300), ('Jobs', 'LCP', 900))
   as v (page, metric, value);
 
@@ -120,8 +120,8 @@ insert into postings (source, board, external_id, title, company, url) values
   ('lever', 'acme', 'job-2', 'Engineer II', 'Acme', 'https://jobs.lever.co/acme/job-2'),
   ('lever', 'acme', 'job-3', 'Engineer III', 'Acme', 'https://jobs.lever.co/acme/job-3')
 on conflict (source, external_id) do nothing;
-insert into llm_calls (user_id, step, model, duration_ms, input_tokens, cache_read_input_tokens, error, stop_reason, created_at)
-select '00000000-0000-0000-0000-0000000000a1', 'scoring', 'haiku', ms, input, cached, error, stop, (select monday from this_week) + offset_days
+insert into llm_calls (step, model, duration_ms, input_tokens, cache_read_input_tokens, error, stop_reason, created_at)
+select 'scoring', 'haiku', ms, input, cached, error, stop, (select monday from this_week) + offset_days
 from (values
   (100, 20, 80, null, 'end_turn', interval '1 day'),
   (300, 100, 0, 'overloaded', null, interval '2 days'),
@@ -161,12 +161,27 @@ select is(
   'weeks are named by their Monday'
 );
 
+-- Accounts as counts, with no user on runs.
+delete from account_deletions;
+insert into account_deletions default values;
+select is(
+  admin_stats() -> 'users',
+  jsonb_build_object(
+    'total', (select count(*) from auth.users),
+    'active', 1,
+    'new_this_month', (select count(*) from auth.users where created_at >= date_trunc('month', now())),
+    'deleted', 1
+  ),
+  'accounts are counted: all, active this week, new this month and deleted'
+);
+select ok(not (admin_stats() -> 'runs' -> 0 ? 'user_id'), 'runs carry no user');
+
 -- Prompt versions per step.
 delete from llm_calls;
-insert into llm_calls (user_id, step, model, duration_ms, prompt_version, created_at) values
-  ('00000000-0000-0000-0000-0000000000a1', 'scoring', 'haiku', 100, 'aaaa1111', now() - interval '12 days'),
-  ('00000000-0000-0000-0000-0000000000a1', 'scoring', 'haiku', 100, 'aaaa1111', now() - interval '8 days'),
-  ('00000000-0000-0000-0000-0000000000a1', 'scoring', 'haiku', 100, 'bbbb2222', now() - interval '4 days');
+insert into llm_calls (step, model, duration_ms, prompt_version, created_at) values
+  ('scoring', 'haiku', 100, 'aaaa1111', now() - interval '12 days'),
+  ('scoring', 'haiku', 100, 'aaaa1111', now() - interval '8 days'),
+  ('scoring', 'haiku', 100, 'bbbb2222', now() - interval '4 days');
 
 select is(
   (select jsonb_build_array(v -> 'prompt_version', v -> 'calls') from jsonb_array_elements(admin_stats() -> 'prompt_versions') with ordinality as x (v, n) where n = 1),
@@ -200,6 +215,10 @@ select is(
   63.33,
   'a version averages its scores'
 );
+insert into former_scores (fit_score, fit_label, score_prompt_version, score_model, created_at, updated_at)
+values (90, 'good', 'v1', 'haiku', now(), now());
+select is((admin_stats() -> 'score_versions' -> 0 ->> 'scored')::int, 4, 'scores from deleted accounts still count');
+select is(jsonb_array_length(admin_stats() -> 'labels'), 3, 'labels from deleted accounts still count');
 
 -- Only admins.
 select set_config('request.jwt.claims', '{"app_metadata":{}}', true);

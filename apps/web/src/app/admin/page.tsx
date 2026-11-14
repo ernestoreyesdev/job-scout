@@ -7,7 +7,7 @@ import { SectionCard } from "@/components/section-card";
 import { StatTile } from "@/components/stat-tile";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageReady } from "@/components/web-vitals";
-import type { AgentRunRow, ApplicationStatusRow, CompanyKindRow, FitLabelRow, RunUsage, WEB_VITALS } from "@/lib/db";
+import type { AgentRunRow, CompanyKindRow, FitLabelRow, RunUsage, WEB_VITALS } from "@/lib/db";
 import { MIN_LABELED, accuracyByCut, runCost, summarizeCosts } from "@/lib/insights";
 import { getAdminSource } from "@/lib/repository";
 import { cn } from "@/lib/utils";
@@ -47,8 +47,8 @@ type AdminStats = {
   days: number;
   max_missed_checks: number;
   key_hint: string | null;
-  users: { id: string; email: string | null; created_at: string | null; last_sign_in_at: string | null }[];
-  runs: (Pick<AgentRunRow, "id" | "user_id" | "kind" | "status" | "error" | "error_code" | "created_at" | "finished_at" | "usage" | "timings"> & {
+  users: { total: number; active: number; new_this_month: number; deleted: number };
+  runs: (Pick<AgentRunRow, "id" | "kind" | "status" | "error" | "error_code" | "created_at" | "finished_at" | "usage" | "timings"> & {
     unreachable_boards: string[];
     run_error: { detail: string } | null;
   })[];
@@ -109,7 +109,6 @@ type AdminStats = {
   storage: { bytes: number; unembedded: number };
   companies: { name: string; source: string; board: string; kind: CompanyKindRow | null; open_jobs: number; missed_checks: number }[];
   labels: { fit_score: number | null; fit_label: FitLabelRow | null }[];
-  applications: { user_id: string; status: ApplicationStatusRow }[];
 };
 
 export const metadata: Metadata = { title: "Admin" };
@@ -131,9 +130,7 @@ async function AdminData() {
   const stats = await repository.getAdminStats<AdminStats>();
   const key = { hint: stats.key_hint, fallback: Boolean(process.env.ANTHROPIC_API_KEY) };
   const now = new Date(stats.generated_at).getTime();
-  const activeSince = now - ACTIVE_DAYS * DAY_MS;
   const searches = stats.runs.filter((run) => run.kind === "search");
-  const active = new Set(stats.runs.filter((run) => new Date(run.created_at).getTime() >= activeSince).map((run) => run.user_id));
   const costs = summarizeCosts(stats.runs);
   const marked = stats.labels.filter((label) => label.fit_label !== null);
   const kinds = { employer: 0, staffing: 0, aggregator: 0, unlabeled: 0 };
@@ -152,17 +149,6 @@ async function AdminData() {
   });
   const busiest = Math.max(1, ...days.map((day) => day.done + day.other));
 
-  const users = stats.users
-    .map((user) => {
-      const runs = stats.runs.filter((run) => run.user_id === user.id);
-      return {
-        ...user,
-        searches: runs.filter((run) => run.kind === "search").length,
-        spend: runs.reduce((sum, run) => sum + runCost(run.usage), 0),
-        applied: stats.applications.filter((application) => application.user_id === user.id && application.status !== "saved").length,
-      };
-    })
-    .sort((a, b) => b.spend - a.spend);
 
   return (
     <div className="mt-8 space-y-6">
@@ -176,7 +162,7 @@ async function AdminData() {
 
       <SectionCard collapsible title="Usage" description={`The last ${stats.days} days, estimated at Claude Haiku prices. Your Anthropic console has the exact bill.`}>
         <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <StatTile label="Users" value={stats.users.length} note={`${active.size} active in the last ${ACTIVE_DAYS} days`} />
+          <StatTile label="Users" value={stats.users.total} note={`${stats.users.active} active in the last ${ACTIVE_DAYS} days`} />
           <StatTile
             label="Searches"
             value={searches.length}
@@ -263,31 +249,13 @@ async function AdminData() {
 
       <ModelQualitySection stats={stats} />
 
-      <SectionCard collapsible title="Users" description={`Searches and spend over the last ${stats.days} days; applied counts every job past saved.`}>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Email</TableHead>
-              <TableHead>Joined</TableHead>
-              <TableHead>Last sign-in</TableHead>
-              <TableHead className="text-right">Searches</TableHead>
-              <TableHead className="text-right">Spend</TableHead>
-              <TableHead className="text-right">Applied</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {users.map((user) => (
-              <TableRow key={user.id}>
-                <TableCell className="max-w-64 truncate">{user.email ?? "–"}</TableCell>
-                <TableCell className="tabular-nums">{user.created_at ? isoDate(new Date(user.created_at)) : "–"}</TableCell>
-                <TableCell className="tabular-nums">{user.last_sign_in_at ? isoDate(new Date(user.last_sign_in_at)) : "Never"}</TableCell>
-                <TableCell className="text-right tabular-nums">{user.searches}</TableCell>
-                <TableCell className="text-right tabular-nums">{DOLLARS.format(user.spend)}</TableCell>
-                <TableCell className="text-right tabular-nums">{user.applied}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+      <SectionCard collapsible title="Users" description="Accounts as counts only; no stats are kept per user.">
+        <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <StatTile label="Accounts" value={stats.users.total} />
+          <StatTile label="Active" value={stats.users.active} note={`Started a run in the last ${ACTIVE_DAYS} days`} />
+          <StatTile label="New this month" value={stats.users.new_this_month} />
+          <StatTile label="Deleted" value={stats.users.deleted} note="All time" />
+        </dl>
       </SectionCard>
 
       <SectionCard collapsible title="Company directory" description="Every company searches can check, shared by all users.">
@@ -367,7 +335,6 @@ const RECENT_FAILURES = 8;
 
 /** Failed and timed-out runs, and the boards searches couldn't reach or found gone. */
 function HealthSection({ stats }: { stats: AdminStats }) {
-  const emails = new Map(stats.users.map((user) => [user.id, user.email ?? "–"]));
   const names = new Map(stats.companies.map((company) => [`${company.source}/${company.board}`, company.name]));
   const failed = stats.runs.filter((run) => run.status === "failed");
   const timedOut = failed.filter((run) => run.error_code === "timed_out").length;
@@ -410,7 +377,6 @@ function HealthSection({ stats }: { stats: AdminStats }) {
           {failed.slice(0, RECENT_FAILURES).map((run) => (
             <li key={run.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2">
               <span className="shrink-0 text-muted-foreground tabular-nums sm:w-24">{isoDate(new Date(run.created_at))}</span>
-              <span className="min-w-0 max-w-full truncate text-muted-foreground sm:w-56 sm:shrink-0">{emails.get(run.user_id) ?? "–"}</span>
               <span className="shrink-0 capitalize">{run.kind}</span>
               {run.error_code && (
                 <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{run.error_code.replace("_", " ")}</span>
