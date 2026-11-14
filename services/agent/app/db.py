@@ -19,7 +19,7 @@ class Rest:
 
     def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
         res = self._http.get(f"{self._base}/rest/v1/{table}", params=params, headers=self._headers)
-        res.raise_for_status()
+        check(res)
         return res.json()
 
     def insert(
@@ -36,7 +36,7 @@ class Rest:
             json=rows,
             headers={**self._headers, "Prefer": ",".join(prefer)},
         )
-        res.raise_for_status()
+        check(res)
         return res.json()
 
     def update(self, table: str, filters: dict[str, str], patch: dict[str, Any]) -> list[dict[str, Any]]:
@@ -46,16 +46,16 @@ class Rest:
             json=patch,
             headers={**self._headers, "Prefer": "return=representation"},
         )
-        res.raise_for_status()
+        check(res)
         return res.json()
 
     def delete(self, table: str, filters: dict[str, str]) -> None:
         res = self._http.delete(f"{self._base}/rest/v1/{table}", params=filters, headers=self._headers)
-        res.raise_for_status()
+        check(res)
 
     def download(self, bucket: str, path: str) -> bytes:
         res = self._http.get(f"{self._base}/storage/v1/object/{bucket}/{path}", headers=self._headers)
-        res.raise_for_status()
+        check(res)
         return res.content
 
     def list_users(self, per_page: int = 1000) -> list[dict[str, Any]]:
@@ -66,7 +66,7 @@ class Rest:
             res = self._http.get(
                 f"{self._base}/auth/v1/admin/users", params={"page": page, "per_page": per_page}, headers=self._headers
             )
-            res.raise_for_status()
+            check(res)
             batch = res.json()["users"]
             users += batch
             if len(batch) < per_page:
@@ -75,7 +75,7 @@ class Rest:
 
     def rpc(self, function: str, args: dict[str, Any]) -> Any:
         res = self._http.post(f"{self._base}/rest/v1/rpc/{function}", json=args, headers=self._headers)
-        res.raise_for_status()
+        check(res)
         return res.json() if res.content else None
 
     def delete_folder(self, bucket: str, folder: str, page: int = 1000) -> None:
@@ -86,14 +86,14 @@ class Rest:
                 json={"prefix": folder, "limit": page},
                 headers=self._headers,
             )
-            res.raise_for_status()
+            check(res)
             paths = [f"{folder}/{item['name']}" for item in res.json() if item.get("id")]
             if not paths:
                 return
             res = self._http.request(
                 "DELETE", f"{self._base}/storage/v1/object/{bucket}", json={"prefixes": paths}, headers=self._headers
             )
-            res.raise_for_status()
+            check(res)
 
 
 def user_db(settings: Settings, access_token: str) -> Rest:
@@ -102,3 +102,11 @@ def user_db(settings: Settings, access_token: str) -> Rest:
 
 def service_db(settings: Settings) -> Rest:
     return Rest(settings, settings.supabase_service_role_key, settings.supabase_service_role_key)
+
+
+def check(res: httpx.Response) -> None:
+    """Raises on an error status, with the start of the response body in the message."""
+    try:
+        res.raise_for_status()
+    except httpx.HTTPStatusError as error:
+        raise httpx.HTTPStatusError(f"{error}\nResponse body: {res.text[:500]}", request=error.request, response=res) from None
