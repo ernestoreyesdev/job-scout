@@ -12,7 +12,6 @@ const NAV = [
   { href: "/companies", label: "Companies" },
   { href: "/insights", label: "Insights" },
   { href: "/resume", label: "Resume" },
-  { href: "/settings", label: "Settings" },
 ];
 
 /** The app's pages plus any `extra` items, with the current one highlighted; scrolls sideways on narrow screens. */

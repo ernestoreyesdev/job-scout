@@ -256,7 +256,7 @@ export async function stopRun(runId: string): Promise<ActionResult> {
 }
 
 export async function saveTheme(theme: string): Promise<ActionResult> {
-  return run("/settings", async () => {
+  return run([], async () => {
     if (!THEMES.includes(theme as ThemeRow)) throw new Error("Unknown theme.");
     const { repository } = await getSignedInSource();
     await repository.saveTheme(theme as ThemeRow);
