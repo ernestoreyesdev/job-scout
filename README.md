@@ -117,3 +117,7 @@ npm run dev:web     # http://localhost:3000
 Magic-link emails land in the local inbox at http://127.0.0.1:54324. Supabase Studio is at http://127.0.0.1:54323.
 
 Other tasks: `npm run build`, `npm run lint`, `npm run typecheck` and `npx turbo run test` (through Turborepo), `npm run test:agent` (pytest) and `npx supabase test db --workdir infra` (pgTAP, against the local database).
+
+## License
+
+Copyright 2026 Ernesto Reyes Nolasco. All rights reserved. The code is public to read, but it may not be copied, modified or reused without written permission.
