@@ -34,9 +34,9 @@ test("a good rating saves the job to Jobs and keeps it under Rated", async ({ pa
   await expect(page.getByRole("link", { name: RATED_TITLE })).toBeVisible();
 });
 
-test("a lesson the user writes shows on the Resume page until they delete it", async ({ page }) => {
+test("a lesson the user writes shows on Insights until they delete it", async ({ page }) => {
   const lesson = "No jobs that need a security clearance";
-  await page.goto("/resume");
+  await page.goto("/insights");
   await page.getByRole("textbox", { name: "Your own lesson" }).fill(lesson);
   await page.getByRole("button", { name: "Add", exact: true }).click();
   await expect(page.getByText(lesson)).toBeVisible();

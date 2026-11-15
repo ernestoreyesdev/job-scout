@@ -278,7 +278,7 @@ export async function deleteAccount(): Promise<ActionResult> {
 }
 
 export async function addLesson(formData: FormData): Promise<ActionResult> {
-  return run("/resume", async () => {
+  return run("/insights", async () => {
     const lesson = text(formData.get("lesson"));
     if (!lesson) throw new Error("Write a preference, such as \"No jobs that need a security clearance\".");
     if (lesson.length > MAX_LESSON_LENGTH) throw new Error(`Keep it under ${MAX_LESSON_LENGTH} characters.`);
@@ -288,7 +288,7 @@ export async function addLesson(formData: FormData): Promise<ActionResult> {
 }
 
 export async function deleteLesson(id: string): Promise<ActionResult> {
-  return run("/resume", async () => {
+  return run("/insights", async () => {
     const { repository } = await getSignedInSource();
     await repository.deleteLesson(id);
   });
@@ -296,7 +296,7 @@ export async function deleteLesson(id: string): Promise<ActionResult> {
 
 /** Learns the lessons again from the user's ratings and statuses now. */
 export async function refreshLessons(): Promise<ActionResult> {
-  return run("/resume", async () => {
+  return run("/insights", async () => {
     await callAgent("/me/lessons/refresh", { method: "POST" });
   });
 }

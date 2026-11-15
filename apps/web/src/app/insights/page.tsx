@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 
 import { AccuracyTable } from "@/components/accuracy-table";
+import { Lessons } from "@/components/lessons";
 import { SectionCard } from "@/components/section-card";
 import { StatTile } from "@/components/stat-tile";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -47,10 +48,11 @@ export default function InsightsPage() {
 
 async function InsightsData() {
   const { repository } = await getSignedInSource();
-  const [jobs, funnelJobs, aging] = await Promise.all([
+  const [jobs, funnelJobs, aging, lessons] = await Promise.all([
     repository.listScoredJobs(),
     repository.listFunnelJobs(),
     repository.countAgingJobs(),
+    repository.listLessons(),
   ]);
   const [overall] = funnel(funnelJobs);
   const marked = jobs.filter((job) => job.fit_label !== null);
@@ -86,6 +88,13 @@ async function InsightsData() {
           You can only mark jobs a search kept, and searches drop the lower-scored ones, so recall here counts good jobs
           among those you saw, not every good job that exists.
         </p>
+      </SectionCard>
+
+      <SectionCard
+        title="What Job Scout has learned"
+        description="Scoring weighs these preferences, learned from your ratings and applications. Ones you write count as firm rules."
+      >
+        <Lessons lessons={lessons} />
       </SectionCard>
 
       <SectionCard
