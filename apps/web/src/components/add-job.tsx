@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, Plus } from "lucide-react";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
 import { addOutsideJob } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { OUTSIDE_STATUSES } from "@/lib/db";
+import { useAction } from "@/lib/use-action";
 
 const FIELD = "h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-xs";
 
@@ -17,14 +18,11 @@ const FIELD = "h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-x
  * description, for jobs on sites the app can't read.
  */
 export function AddJob() {
-  const [error, setError] = useState<string | null>(null);
+  const { run, pending, error } = useAction();
   const [message, setMessage] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
 
   function submit(formData: FormData) {
-    startTransition(async () => {
-      const result = await addOutsideJob(formData);
-      setError(result.ok ? null : (result.error ?? "Could not add the job."));
+    run(() => addOutsideJob(formData), "Could not add the job.", (result) => {
       setMessage(result.ok ? (result.message ?? null) : null);
     });
   }

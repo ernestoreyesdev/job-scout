@@ -1,6 +1,6 @@
 
 from app.sources.base import JobSource, Posting
-from app.sources.text import html_to_text, workplace_from_location
+from app.sources.text import html_to_text, join_locations, workplace_from_location
 
 HOST = "bamboohr.com"
 
@@ -9,11 +9,14 @@ def _location(job: dict) -> str | None:
     """City, state and country from the job's address and its ATS location, each named once."""
     place = job.get("location") or {}
     ats = job.get("atsLocation") or {}
-    parts: list[str] = []
-    for part in (place.get("city"), place.get("state"), ats.get("city"), ats.get("state") or ats.get("province"), ats.get("country")):
-        if part and part.strip() and part.strip() not in parts:
-            parts.append(part.strip())
-    return ", ".join(parts) or None
+    return join_locations(
+        place.get("city"),
+        place.get("state"),
+        ats.get("city"),
+        ats.get("state") or ats.get("province"),
+        ats.get("country"),
+        separator=", ",
+    )
 
 
 class BambooHRSource(JobSource):

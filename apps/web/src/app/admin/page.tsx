@@ -9,11 +9,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { PageReady } from "@/components/web-vitals";
 import type { AgentRunRow, CompanyKindRow, FitLabelRow, RunUsage, WEB_VITALS } from "@/lib/db";
 import { MIN_LABELED, accuracyByCut, runCost, summarizeCosts } from "@/lib/insights";
+import { ISO_DAY, PERCENT } from "@/lib/format";
 import { getAdminSource } from "@/lib/repository";
 import { cn } from "@/lib/utils";
 
 const DOLLARS = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const PERCENT = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 });
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_DAYS = 7;
 const CHART_DAYS = 14;
@@ -146,7 +146,7 @@ async function AdminData() {
       const at = new Date(run.created_at).getTime();
       return at >= start.getTime() && at < end;
     });
-    return { label: isoDate(start), done: runs.filter((run) => run.status === "done").length, other: runs.filter((run) => run.status !== "done").length };
+    return { label: ISO_DAY.format(start), done: runs.filter((run) => run.status === "done").length, other: runs.filter((run) => run.status !== "done").length };
   });
   const busiest = Math.max(1, ...days.map((day) => day.done + day.other));
 
@@ -278,11 +278,6 @@ async function AdminData() {
   );
 }
 
-/** "2026-11-10", in local time. */
-function isoDate(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
 /** "1.4 s" or "850 ms". */
 function seconds(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`;
@@ -351,7 +346,7 @@ function HealthSection({ stats, names }: { stats: AdminStats; names: Map<string,
       key: `unreachable-${board}`,
       name: names.get(board) ?? board,
       board,
-      problem: `Couldn't be reached in ${seen.count} ${seen.count === 1 ? "search" : "searches"}, last ${isoDate(new Date(seen.last))}`,
+      problem: `Couldn't be reached in ${seen.count} ${seen.count === 1 ? "search" : "searches"}, last ${ISO_DAY.format(new Date(seen.last))}`,
     })),
     ...missing.map((company) => ({
       key: `missing-${company.source}/${company.board}`,
@@ -376,7 +371,7 @@ function HealthSection({ stats, names }: { stats: AdminStats; names: Map<string,
         <ul className="mt-2 divide-y rounded-lg border text-sm">
           {failed.slice(0, RECENT_FAILURES).map((run) => (
             <li key={run.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2">
-              <span className="shrink-0 text-muted-foreground tabular-nums sm:w-24">{isoDate(new Date(run.created_at))}</span>
+              <span className="shrink-0 text-muted-foreground tabular-nums sm:w-24">{ISO_DAY.format(new Date(run.created_at))}</span>
               <span className="shrink-0 capitalize">{run.kind}</span>
               {run.error_code && (
                 <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{run.error_code.replace("_", " ")}</span>
@@ -696,18 +691,6 @@ function RefreshBoardTable({ boards, names }: { boards: AdminStats["refresh_boar
   );
 }
 
-const STEP_NAMES: Record<string, string> = {
-  scoring: "Scoring",
-  shortlist: "Title shortlist",
-  titles: "Related titles",
-  discovery: "Finding companies",
-  naming: "Labeling companies",
-  hacker_news: "Hacker News posts",
-  gap_analysis: "Gap analysis",
-  follow_up: "Follow-up drafts",
-  other: "Other",
-};
-
 /** "84%", or "–" when there is nothing to divide by. */
 function share(part: number, whole: number): string {
   return whole ? PERCENT.format(part / whole) : "–";
@@ -762,7 +745,7 @@ function ModelQualitySection({ stats }: { stats: AdminStats }) {
           <TableBody>
             {stats.prompt_versions.map((row) => (
               <TableRow key={`${row.step}-${row.prompt_version}-${row.model}`}>
-                <TableCell>{STEP_NAMES[row.step] ?? row.step}</TableCell>
+                <TableCell>{STEP_LABELS[row.step] ?? row.step}</TableCell>
                 <TableCell className="font-mono text-xs">{row.prompt_version ?? "before versions"}</TableCell>
                 <TableCell className="font-mono text-xs">{row.model}</TableCell>
                 <TableCell className="text-right tabular-nums">{row.calls.toLocaleString()}</TableCell>

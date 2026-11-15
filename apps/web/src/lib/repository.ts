@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
+import { cache } from "react";
 
-import { JobFinderRepository } from "@/lib/db";
+import { JobFinderRepository, type ResumeRow, type ThemeRow } from "@/lib/db";
 
 import { createClient } from "./supabase/server";
 
@@ -14,17 +15,18 @@ export interface SignedInSource {
  * The signed-in user's repository. Sends the browser to /login when nobody is
  * signed in, and to /login?error=config when Supabase isn't configured.
  */
-export async function getSignedInSource(): Promise<SignedInSource> {
-  const supabase = await createClient();
-  if (!supabase) redirect("/login?error=config");
+export const getSignedInSource = cache(async (): Promise<SignedInSource> => {
+  const signedIn = await currentUser();
+  if (signedIn === undefined) redirect("/login?error=config");
+  if (!signedIn) redirect("/login");
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect("/login");
-
-  return { repository: new JobFinderRepository(supabase), email: user.email, admin: user.app_metadata?.role === "admin" };
-}
+  const { supabase, user } = signedIn;
+  return {
+    repository: new JobFinderRepository(supabase, user.id),
+    email: user.email,
+    admin: user.app_metadata?.role === "admin",
+  };
+});
 
 /** The signed-in admin's source; anyone else is sent to the Tracker. */
 export async function getAdminSource(): Promise<SignedInSource> {
@@ -32,3 +34,27 @@ export async function getAdminSource(): Promise<SignedInSource> {
   if (!source.admin) redirect("/tracker");
   return source;
 }
+
+/** The Supabase client and signed-in user for this request: undefined without Supabase, null when signed out. */
+export const currentUser = cache(async () => {
+  const supabase = await createClient();
+  if (!supabase) return undefined;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user ? { supabase, user } : null;
+});
+
+/** The signed-in user's saved theme for this request, or null when signed out or not saved. */
+export const currentTheme = cache(async (): Promise<ThemeRow | null> => {
+  const signedIn = await currentUser();
+  if (!signedIn) return null;
+  const { data } = await signedIn.supabase.from("profiles").select("theme").maybeSingle();
+  return data?.theme ?? null;
+});
+
+/** The signed-in user's primary resume, read once per request. */
+export const getPrimaryResume = cache(async (): Promise<ResumeRow | null> => {
+  const { repository } = await getSignedInSource();
+  return repository.getPrimaryResume();
+});

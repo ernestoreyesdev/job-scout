@@ -64,19 +64,13 @@ const RESUME_BUCKET = "resumes";
 
 /**
  * Reads and writes through Supabase. Row-level security scopes every query to
- * the signed-in user, so no user id is passed in here.
+ * the signed-in user; userId only fills owner columns and storage paths, which RLS checks.
  */
 export class JobFinderRepository {
-  constructor(private readonly client: JobFinderClient) {}
-
-  /** Inserts and storage paths need the owner explicitly; RLS then checks it matches the caller. */
-  private async userId(): Promise<string> {
-    const {
-      data: { user },
-    } = await this.client.auth.getUser();
-    if (!user) throw new Error("Not signed in.");
-    return user.id;
-  }
+  constructor(
+    private readonly client: JobFinderClient,
+    private readonly userId: string,
+  ) {}
 
   async getPrimaryResume(): Promise<ResumeRow | null> {
     const { data, error } = await this.client
@@ -90,7 +84,7 @@ export class JobFinderRepository {
 
   /** Stores the file as a new object and makes it the primary resume. */
   async uploadResume(file: File): Promise<ResumeRow> {
-    const userId = await this.userId();
+    const userId = this.userId;
     const storagePath = `${userId}/${crypto.randomUUID()}-${file.name}`;
 
     const upload = await this.client.storage.from(RESUME_BUCKET).upload(storagePath, file, {
@@ -127,12 +121,7 @@ export class JobFinderRepository {
           "*, posting:postings!inner(id, source, board, external_id, title, company, location, url, posted_at, workplace_type, closed_at, salary_min, salary_max, salary_currency, salary_period, clearance, visa_sponsorship, years_experience, tech_stack, details_extracted_at, created_at, updated_at), events:application_events(status, changed_at)",
           { count: "exact" },
         );
-      query =
-        view === "tracker"
-          ? query.eq("in_tracker", true)
-          : view === "rated"
-            ? query.not("fit_label", "is", null)
-            : query.neq("status", "new");
+      query = inView(query, view);
       if (filters.status) query = query.eq("status", filters.status);
       if (filters.company) query = query.eq("posting.company", filters.company);
       if (filters.hideClosed) query = query.is("posting.closed_at", null);
@@ -166,7 +155,7 @@ export class JobFinderRepository {
     if (error) throw error;
     const reposted = new Set(reposts.map((row) => row.id));
     const now = Date.now();
-    const days = (date: string) => Math.floor((now - new Date(date).getTime()) / DAY_MS);
+    const days = (date: string) => daysSince(date, now);
     return jobs.map((job) => {
       const applied = job.events.filter((event) => event.status === "applied").at(-1);
       return {
@@ -272,7 +261,7 @@ export class JobFinderRepository {
   async setCompanyHidden(companyId: string, hidden: boolean): Promise<void> {
     const { error } = await this.client
       .from("hidden_companies")
-      .upsert({ user_id: await this.userId(), company_id: companyId, hidden });
+      .upsert({ user_id: this.userId, company_id: companyId, hidden });
     if (error) throw error;
   }
 
@@ -305,7 +294,7 @@ export class JobFinderRepository {
       .from("applications")
       .select("id", { count: "exact", head: true })
       .or(`resume_id.is.null,resume_id.neq.${resumeId}`);
-    const { count, error } = await (scope === "tracker" ? query.eq("in_tracker", true) : query.neq("status", "new"));
+    const { count, error } = await inView(query, scope);
     if (error) throw error;
     return count ?? 0;
   }
@@ -313,11 +302,7 @@ export class JobFinderRepository {
   /** Companies of the jobs in a view, for its company filter. */
   async listTrackedCompanies(view: JobView): Promise<string[]> {
     const query = this.client.from("applications").select("posting:postings!inner(company)");
-    const { data, error } = await (view === "tracker"
-      ? query.eq("in_tracker", true)
-      : view === "rated"
-        ? query.not("fit_label", "is", null)
-        : query.neq("status", "new"));
+    const { data, error } = await inView(query, view);
     if (error) throw error;
     return [...new Set(data.map((row) => row.posting.company))].sort((a, b) => a.localeCompare(b));
   }
@@ -370,7 +355,7 @@ export class JobFinderRepository {
     return data
       .map((job) => {
         const applied = job.events.filter((event) => event.status === "applied").map((event) => event.changed_at).sort().at(-1);
-        const days = applied ? Math.floor((now - new Date(applied).getTime()) / DAY_MS) : 0;
+        const days = applied ? daysSince(applied, now) : 0;
         return { id: job.id, title: job.posting.title, company: job.posting.company, days };
       })
       .filter((job) => job.days >= FOLLOW_UP_DAYS)
@@ -392,7 +377,7 @@ export class JobFinderRepository {
 
   /** Saves the user's color theme, creating their profile row if it doesn't exist yet. */
   async saveTheme(theme: ThemeRow): Promise<void> {
-    const { error } = await this.client.from("profiles").upsert({ user_id: await this.userId(), theme });
+    const { error } = await this.client.from("profiles").upsert({ user_id: this.userId, theme });
     if (error) throw error;
   }
 
@@ -402,4 +387,21 @@ export class JobFinderRepository {
     if (error) throw error;
     return data as T;
   }
+}
+
+interface ViewFilter {
+  eq(column: string, value: unknown): this;
+  neq(column: string, value: unknown): this;
+  not(column: string, operator: string, value: unknown): this;
+}
+
+/** Narrows an applications query to a view's jobs: the Tracker, rated jobs, or every job past "new" on Jobs. */
+function inView<Q extends ViewFilter>(query: Q, view: JobView): Q {
+  if (view === "tracker") return query.eq("in_tracker", true);
+  if (view === "rated") return query.not("fit_label", "is", null);
+  return query.neq("status", "new");
+}
+
+function daysSince(date: string, now: number): number {
+  return Math.floor((now - new Date(date).getTime()) / DAY_MS);
 }

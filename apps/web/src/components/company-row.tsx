@@ -1,24 +1,20 @@
 "use client";
 
 import { Eye, EyeOff } from "lucide-react";
-import { useState, useTransition } from "react";
 
 import { setCompanyHidden } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
 import type { DirectoryCompany } from "@/lib/db";
+import { useAction } from "@/lib/use-action";
 import { cn } from "@/lib/utils";
 
 /** One directory company with a toggle that hides it from, or returns it to, this user's searches. */
 export function CompanyRow({ company, checked }: { company: DirectoryCompany; checked: string }) {
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const { run, pending, error } = useAction();
 
   function toggle() {
-    startTransition(async () => {
-      const result = await setCompanyHidden(company.id, !company.hidden);
-      setError(result.ok ? null : (result.error ?? "Could not update this company."));
-    });
+    run(() => setCompanyHidden(company.id, !company.hidden), "Could not update this company.");
   }
 
   return (

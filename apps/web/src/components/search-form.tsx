@@ -1,15 +1,14 @@
 "use client";
 
 import { Building2, ChevronDown, Search, SlidersHorizontal } from "lucide-react";
-import { useState, useTransition, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import { startSearch } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MAX_JOBS_PER_SEARCH, MIN_SCORES, POSTED_WITHIN_DAYS, WORKPLACE_TYPES } from "@/lib/db";
-
-const WORKPLACE_LABELS = { onsite: "On-site", hybrid: "Hybrid", remote: "Remote" } as const;
+import { MAX_JOBS_PER_SEARCH, MIN_SCORES, POSTED_WITHIN_DAYS, WORKPLACE_LABELS, WORKPLACE_TYPES } from "@/lib/db";
+import { useAction } from "@/lib/use-action";
 
 const SELECT =
   "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-base disabled:opacity-50 md:text-sm dark:bg-input/30";
@@ -19,19 +18,15 @@ const SELECT =
  * clear after each search. Scoring against the resume is only available once one is uploaded.
  */
 export function SearchForm({ hasResume }: { hasResume: boolean }) {
-  const [error, setError] = useState<string | null>(null);
+  const { run, pending, error } = useAction();
   const [keywordError, setKeywordError] = useState(false);
-  const [pending, startTransition] = useTransition();
 
   function search(formData: FormData) {
     if (!String(formData.get("keywords") ?? "").trim()) {
       setKeywordError(true);
       return;
     }
-    startTransition(async () => {
-      const result = await startSearch(formData);
-      setError(result.ok ? null : (result.error ?? "Could not start the search."));
-    });
+    run(() => startSearch(formData), "Could not start the search.");
   }
 
   return (

@@ -167,18 +167,8 @@ export async function rerunSearch(runId: string, webLookup = false): Promise<Act
     const input = previous.input as Partial<SearchRuleInput>;
     if (!input.keywords?.length) throw new Error("This search has no keywords. Start a new one instead.");
 
-    const rule: SearchRuleInput = {
-      keywords: input.keywords,
-      company: input.company ?? null,
-      workplace_types: input.workplace_types ?? [],
-      location: input.location ?? null,
-      limit: input.limit ?? 10,
-      web_lookup: webLookup || (input.web_lookup ?? false),
-      exclude: input.exclude ?? [],
-      posted_within_days: input.posted_within_days ?? null,
-      score: input.score ?? true,
-      min_score: input.min_score ?? null,
-    };
+    // The agent fills fields older runs lack with its own defaults.
+    const rule = { ...input, web_lookup: webLookup || (input.web_lookup ?? false) };
     await callAgent("/runs/search", { method: "POST", body: rule });
   });
 }

@@ -5,9 +5,7 @@ import { useState } from "react";
 
 import { JobRow } from "@/components/job-row";
 import type { TrackedJob } from "@/lib/db";
-
-// Swedish formatting is ISO: "2026-11-13".
-const DAY = new Intl.DateTimeFormat("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit" });
+import { ISO_DAY } from "@/lib/format";
 
 /**
  * The jobs on one page of the Tracker or Jobs, one card each. On the Tracker, a job moved past new or rated leaves
@@ -49,8 +47,8 @@ export function JobsTable({
             showNotes={showNotes}
             onMovedToJobs={onTracker ? (rated) => setMoved({ title: job.posting.title, rated }) : undefined}
             staleResume={currentResumeId !== null && job.resume_id !== null && job.resume_id !== currentResumeId}
-            closedOn={job.posting.closed_at ? DAY.format(new Date(job.posting.closed_at)) : null}
-            timeline={job.events.map((event) => `${event.status === "new" ? "added" : event.status} ${DAY.format(new Date(event.changed_at))}`)}
+            closedOn={job.posting.closed_at ? ISO_DAY.format(new Date(job.posting.closed_at)) : null}
+            timeline={job.events.map((event) => `${event.status === "new" ? "added" : event.status} ${ISO_DAY.format(new Date(event.changed_at))}`)}
           />
         ))}
       </ul>

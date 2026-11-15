@@ -48,19 +48,20 @@ def all_sources() -> tuple[JobSource, ...]:
     return tuple(source() for source in SOURCES)
 
 
-def find_company(company: str, sources: tuple[JobSource, ...] | None = None) -> CompanyBoard:
+def find_company(company: str, sources: tuple[JobSource, ...] | None = None, cached: bool = True) -> CompanyBoard:
     """
     A company's board and open postings, trying each system's spellings of the
     name. The board with the most open postings wins, since companies that
     switch systems often leave an old board behind with a few stale jobs. A
-    board with no postings still counts as finding the company.
+    board with no postings still counts as finding the company. With cached,
+    recent fetches are reused.
     """
     name = display_name(company)
     best: CompanyBoard | None = None
     for source in sources if sources is not None else all_sources():
         for board in source.board_candidates(company):
             try:
-                postings = source.fetch(board, name) if sources is not None else cached_fetch(source, board, name)
+                postings = cached_fetch(source, board, name) if cached else source.fetch(board, name)
             except BoardNotFound:
                 continue
             if best is None or len(postings) > len(best.postings):
@@ -77,11 +78,12 @@ def display_name(company: str) -> str:
     return name.title() if name == name.lower() else name
 
 
-def fetch_board(source: str, board: str, company: str, sources: tuple[JobSource, ...] | None = None) -> list[Posting]:
-    """Open postings on one known board; raises BoardNotFound when it no longer exists."""
-    if sources is not None:
-        return source_named(source, sources).fetch(board, company)
-    return cached_fetch(source_named(source), board, company)
+def fetch_board(
+    source: str, board: str, company: str, sources: tuple[JobSource, ...] | None = None, cached: bool = True
+) -> list[Posting]:
+    """Open postings on one known board, reusing a recent fetch when cached; raises BoardNotFound when it no longer exists."""
+    system = source_named(source, sources)
+    return cached_fetch(system, board, company) if cached else system.fetch(board, company)
 
 
 def source_named(name: str, sources: tuple[JobSource, ...] | None = None) -> JobSource:
@@ -138,4 +140,4 @@ def is_complete(source: str, postings: list[Posting], sources: tuple[JobSource, 
 
 def fetch_live(source: str, board: str, company: str) -> list[Posting]:
     """Open postings on one known board, fetched from its system even when a recent fetch is in memory."""
-    return source_named(source).fetch(board, company)
+    return fetch_board(source, board, company, cached=False)

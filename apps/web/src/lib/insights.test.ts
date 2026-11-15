@@ -62,7 +62,6 @@ describe("costs", () => {
       new Date("2026-11-10T12:00:00"),
     );
 
-    expect(summary.runs).toBe(3);
     expect(summary.perSearch).toBeCloseTo(0.62);
     expect(summary.thisMonth).toBeCloseTo(1.24);
   });

@@ -1,11 +1,9 @@
-from types import SimpleNamespace
-from typing import Any
-
 import pytest
 
-from app.agents.schemas import Shortlist, Usage
+from app.agents.schemas import Shortlist
 from app.agents.triage.agent import TriageError, shortlist
 from app.sources.base import Posting
+from tests.fakes import FakeParse, claude
 
 
 def posting(n: int) -> Posting:
@@ -22,24 +20,12 @@ def posting(n: int) -> Posting:
     )
 
 
-class FakeParse:
-    def __init__(self, ids: list[int] | None):
-        self.ids = ids
-        self.calls: list[dict[str, Any]] = []
-
-    def parse(self, **kwargs: Any) -> SimpleNamespace:
-        self.calls.append(kwargs)
-        output = Shortlist(ids=self.ids) if self.ids is not None else None
-        return SimpleNamespace(parsed_output=output, stop_reason="end_turn", usage=SimpleNamespace(input_tokens=900))
-
-
 def test_shortlist_keeps_valid_indexes_in_order_without_repeats():
-    parse = FakeParse([2, 0, 2, 9, -1, 1])
-    usage = Usage()
+    parse = FakeParse(Shortlist(ids=[2, 0, 2, 9, -1, 1]))
 
-    picked = shortlist(SimpleNamespace(beta=SimpleNamespace(messages=parse)), "m", "Python dev.", [posting(n) for n in range(3)], 2, usage)
+    picked = shortlist(claude(parse), "m", "Python dev.", [posting(n) for n in range(3)], 2)
 
-    assert picked == [2, 0, 1] and usage.input_tokens == 900
+    assert picked == [2, 0, 1]
     [call] = parse.calls
     resume_block, jobs_block = call["messages"][0]["content"]
     assert resume_block["cache_control"] == {"type": "ephemeral"} and "<resume>\nPython dev.\n</resume>" in resume_block["text"]
@@ -49,4 +35,4 @@ def test_shortlist_keeps_valid_indexes_in_order_without_repeats():
 
 def test_a_refused_shortlist_is_an_error():
     with pytest.raises(TriageError):
-        shortlist(SimpleNamespace(beta=SimpleNamespace(messages=FakeParse(None))), "m", "r", [posting(0)], 1, Usage())
+        shortlist(claude(FakeParse(None)), "m", "r", [posting(0)], 1)

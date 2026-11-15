@@ -1,5 +1,7 @@
 import logging
 import re
+import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -7,7 +9,7 @@ from typing import Any
 import httpx
 
 from app.agents.hiring_threads.prompts import EXTRACTION_SYSTEM, extraction_message
-from app.agents.schemas import HiringJobs, Usage
+from app.agents.schemas import HiringJobs
 from app.sources.base import Posting
 from app.sources.text import html_to_text
 from app.telemetry import ContextThreadPool
@@ -20,6 +22,11 @@ THREAD_TITLE = "Ask HN: Who is hiring?"
 THREADS = 2
 POSTS_PER_CALL = 25
 CALL_CONCURRENCY = 4
+# Threads read within this long are served from memory.
+CACHE_SECONDS = 60 * 60
+
+_cache: list[tuple[float, list["HiringPost"]]] = []
+_cache_lock = threading.Lock()
 
 
 @dataclass
@@ -35,33 +42,32 @@ def recent_posts(http: httpx.Client | None = None) -> list[HiringPost]:
     res = http.get(f"{API}/search_by_date", params={"tags": "story,author_whoishiring", "hitsPerPage": "10"})
     res.raise_for_status()
     threads = [hit["objectID"] for hit in res.json()["hits"] if hit["title"].startswith(THREAD_TITLE)][:THREADS]
-    posts = []
-    for thread in threads:
+
+    def thread_posts(thread: str) -> list[HiringPost]:
         item = http.get(f"{API}/items/{thread}")
         item.raise_for_status()
-        posts += [
+        return [
             HiringPost(str(child["id"]), html_to_text(child["text"]), datetime.fromisoformat(child["created_at"]))
             for child in item.json()["children"]
             if child.get("text")
         ]
-    return posts
+
+    with ContextThreadPool(max_workers=THREADS) as pool:
+        return [post for posts in pool.map(thread_posts, threads) for post in posts]
 
 
-def extract_jobs(client: Any, model: str, posts: list[HiringPost], usage: Usage) -> list[Posting]:
+def extract_jobs(client: Any, model: str, posts: list[HiringPost]) -> list[Posting]:
     """
     Lists the roles in each post, POSTS_PER_CALL posts per call with calls run in
     parallel. A batch that fails is skipped, so its posts are read again next time.
     """
     batches = [posts[i : i + POSTS_PER_CALL] for i in range(0, len(posts), POSTS_PER_CALL)]
-    spent = [Usage() for _ in batches]
     with ContextThreadPool(max_workers=CALL_CONCURRENCY) as pool:
-        found = list(pool.map(lambda batch, used: _extract(client, model, batch, used), batches, spent))
-    for batch_usage in spent:
-        usage.add(batch_usage)
+        found = list(pool.map(lambda batch: _extract(client, model, batch), batches))
     return [posting for postings in found for posting in postings]
 
 
-def _extract(client: Any, model: str, posts: list[HiringPost], usage: Usage) -> list[Posting]:
+def _extract(client: Any, model: str, posts: list[HiringPost]) -> list[Posting]:
     try:
         response = client.beta.messages.parse(
             model=model,
@@ -74,7 +80,6 @@ def _extract(client: Any, model: str, posts: list[HiringPost], usage: Usage) -> 
     except Exception as error:
         logger.warning("reading hiring posts failed: %s", error)
         return []
-    usage.add(response.usage)
     if response.parsed_output is None:
         return []
 
@@ -100,3 +105,19 @@ def _extract(client: Any, model: str, posts: list[HiringPost], usage: Usage) -> 
             )
         )
     return postings
+
+
+def post_id(posting: Posting) -> str:
+    """The Hacker News post a role was read from."""
+    return posting.external_id.split("-")[0]
+
+
+def cached_recent_posts() -> list[HiringPost]:
+    """recent_posts, reused for CACHE_SECONDS."""
+    with _cache_lock:
+        if _cache and time.monotonic() - _cache[0][0] < CACHE_SECONDS:
+            return _cache[0][1]
+    posts = recent_posts()
+    with _cache_lock:
+        _cache[:] = [(time.monotonic(), posts)]
+    return posts

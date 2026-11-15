@@ -12,11 +12,9 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageReady } from "@/components/web-vitals";
 import { COMPANY_SORTS, type CompanySort } from "@/lib/db";
+import { ISO_DAY } from "@/lib/format";
 import { jobListHref } from "@/lib/job-query";
 import { getSignedInSource } from "@/lib/repository";
-
-// Swedish formatting is ISO: "2026-11-13".
-const CHECKED = new Intl.DateTimeFormat("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit" });
 
 export const metadata: Metadata = { title: "Companies" };
 
@@ -124,7 +122,7 @@ async function CompaniesData({ searchParams }: Pick<PageProps<"/companies">, "se
             </TableHeader>
             <TableBody>
               {companies.items.map((company) => (
-                <CompanyRow key={company.id} company={company} checked={CHECKED.format(new Date(company.checked_at))} />
+                <CompanyRow key={company.id} company={company} checked={ISO_DAY.format(new Date(company.checked_at))} />
               ))}
             </TableBody>
           </Table>

@@ -1,14 +1,9 @@
-from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
-from app.config import Settings
 from scripts import refresh_boards as refresh
-
-
-def fake_settings(**fields: Any) -> Settings:
-    return cast(Settings, SimpleNamespace(**fields))
+from tests.fakes import fake_settings
 
 
 def capture_alerts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, list[str], str | None]]:

@@ -1,8 +1,7 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PERCENT } from "@/lib/format";
 import { DEFAULT_CUT, type CutAccuracy } from "@/lib/insights";
 import { cn } from "@/lib/utils";
-
-const PERCENT = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 });
 
 /** Precision and recall of each score cut against good or bad labels; the default cut is highlighted. */
 export function AccuracyTable({ rows }: { rows: CutAccuracy[] }) {

@@ -1,6 +1,7 @@
 from typing import Any
 
-from app.agents.schemas import Shortlist, Usage
+from app.agents.claude import parse
+from app.agents.schemas import Shortlist
 from app.agents.triage.prompts import TRIAGE_SYSTEM, triage_blocks
 from app.sources.base import Posting
 
@@ -12,26 +13,25 @@ class TriageError(Exception):
     pass
 
 
-def shortlist(client: Any, model: str, resume_text: str, postings: list[Posting], count: int, usage: Usage) -> list[int]:
+def shortlist(client: Any, model: str, resume_text: str, postings: list[Posting], count: int) -> list[int]:
     """
     One call that reads the postings' titles next to the resume and returns the
     indexes of the `count` most promising, best first. Indexes refer to `postings`.
     """
     candidates = postings[:MAX_CANDIDATES]
-    response = client.beta.messages.parse(
+    chosen = parse(
+        client,
         model=model,
         max_tokens=4000,
-        output_config={"effort": "low"},
         system=TRIAGE_SYSTEM,
-        messages=[{"role": "user", "content": triage_blocks(resume_text, candidates, count)}],
+        content=triage_blocks(resume_text, candidates, count),
         output_format=Shortlist,
+        error=TriageError,
+        failure="Shortlisting",
     )
-    usage.add(response.usage)
-    if response.stop_reason == "refusal" or response.parsed_output is None:
-        raise TriageError(f"Shortlisting failed (stop reason: {response.stop_reason}).")
 
     picked: list[int] = []
-    for index in response.parsed_output.ids:
+    for index in chosen.ids:
         if 0 <= index < len(candidates) and index not in picked:
             picked.append(index)
     return picked

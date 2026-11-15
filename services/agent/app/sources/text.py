@@ -31,13 +31,13 @@ def html_to_text(content: str) -> str:
     return "\n".join(line for line in lines if line)
 
 
-def join_locations(*locations: str | None) -> str | None:
-    """Distinct locations in order, joined with '; '."""
+def join_locations(*locations: str | None, separator: str = "; ") -> str | None:
+    """Distinct locations in order, joined with `separator`."""
     seen: list[str] = []
     for location in locations:
         if location and location.strip() and location.strip() not in seen:
             seen.append(location.strip())
-    return "; ".join(seen) or None
+    return separator.join(seen) or None
 
 
 def workplace_from_location(location: str | None) -> WorkplaceType | None:

@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, ExternalLink, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
 import { analyzeGaps, deleteApplication, draftFollowUp, updateApplication } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import {
   type GapItem,
   type TrackedJob,
 } from "@/lib/db";
+import { useAction } from "@/lib/use-action";
 import { cn } from "@/lib/utils";
 
 const PERIODS = { year: "yr", month: "mo", week: "wk", day: "day", hour: "hr" } as const;
@@ -52,10 +53,9 @@ export function JobRow({
   closedOn: string | null;
   timeline: string[];
 }) {
-  const [error, setError] = useState<string | null>(null);
+  const { run, pending, error } = useAction();
   const [expanded, setExpanded] = useState(false);
   const [followUp, setFollowUp] = useState<{ subject: string; body: string } | null>(null);
-  const [pending, startTransition] = useTransition();
   const { openDays, reposted, daysSinceApplied } = job.signals;
   const addedByUser = job.added_by === "user";
   const ghost = [
@@ -69,9 +69,7 @@ export function JobRow({
   function save(field: "status" | "notes" | "fitLabel", value: string) {
     const formData = new FormData();
     formData.set(field, value);
-    startTransition(async () => {
-      const result = await updateApplication(job.id, formData);
-      setError(result.ok ? null : (result.error ?? "Could not save."));
+    run(() => updateApplication(job.id, formData), "Could not save.", (result) => {
       if (result.ok && ((field === "status" && value !== "new") || (field === "fitLabel" && value))) {
         onMovedToJobs?.(field === "fitLabel");
       }
@@ -79,16 +77,11 @@ export function JobRow({
   }
 
   function analyze() {
-    startTransition(async () => {
-      const result = await analyzeGaps(job.id);
-      setError(result.ok ? null : (result.error ?? "Could not analyze this job."));
-    });
+    run(() => analyzeGaps(job.id), "Could not analyze this job.");
   }
 
   function draft() {
-    startTransition(async () => {
-      const result = await draftFollowUp(job.id);
-      setError(result.ok ? null : (result.error ?? "Could not draft a follow-up."));
+    run(() => draftFollowUp(job.id), "Could not draft a follow-up.", (result) => {
       if (result.ok && result.subject !== undefined && result.body !== undefined) {
         setFollowUp({ subject: result.subject, body: result.body });
       }
@@ -96,10 +89,7 @@ export function JobRow({
   }
 
   function remove() {
-    startTransition(async () => {
-      const result = await deleteApplication(job.id);
-      if (!result.ok) setError(result.error ?? "Could not delete.");
-    });
+    run(() => deleteApplication(job.id), "Could not delete.");
   }
 
   return (

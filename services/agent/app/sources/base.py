@@ -29,7 +29,7 @@ BOARD_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
 class Posting(BaseModel):
-    """A job posting normalized across sources; mirrors the postings table."""
+    """A job posting normalized across sources; mirrors the postings table, with its row id once saved or loaded."""
 
     source: SourceName
     board: str
@@ -41,6 +41,11 @@ class Posting(BaseModel):
     description: str
     posted_at: datetime | None
     workplace_type: WorkplaceType | None = None
+    id: str | None = None
+
+    def row(self) -> dict[str, Any]:
+        """The columns to save; an empty description is left out so a saved one stays."""
+        return self.model_dump(mode="json", exclude={"id"} if self.description else {"id", "description"})
 
 
 @dataclass

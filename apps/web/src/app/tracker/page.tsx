@@ -13,7 +13,7 @@ import { SearchForm } from "@/components/search-form";
 import { PageReady } from "@/components/web-vitals";
 import { parseJobQuery } from "@/lib/job-query";
 import { rescoreScope } from "@/lib/runs";
-import { getSignedInSource } from "@/lib/repository";
+import { getPrimaryResume, getSignedInSource } from "@/lib/repository";
 
 export const metadata: Metadata = { title: "Tracker" };
 
@@ -39,15 +39,17 @@ export default function TrackerPage({ searchParams }: PageProps<"/tracker">) {
 
 async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "searchParams">) {
   const { repository } = await getSignedInSource();
-  const resume = await repository.getPrimaryResume();
-  const query = parseJobQuery(await searchParams, resume?.text ? "desc" : "posted");
-  const [runs, jobs, companies, trackerTotal] = await Promise.all([
+  const [resume, runs, companies, trackerTotal] = await Promise.all([
+    getPrimaryResume(),
     repository.listRuns(10),
-    repository.listTrackedJobs("tracker", query.sort, query.page, query.filters),
     repository.listTrackedCompanies("tracker"),
     repository.countTrackerJobs(),
   ]);
-  const stale = resume ? await repository.countStaleJobs(resume.id, "tracker") : 0;
+  const query = parseJobQuery(await searchParams, resume?.text ? "desc" : "posted");
+  const [jobs, stale] = await Promise.all([
+    repository.listTrackedJobs("tracker", query.sort, query.page, query.filters),
+    resume ? repository.countStaleJobs(resume.id, "tracker") : 0,
+  ]);
   const banner = runs[0]?.kind === "rescore" && rescoreScope(runs[0]) === "jobs" ? null : runs[0];
 
   return (
@@ -115,7 +117,6 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
 }
 
 async function SearchFormData() {
-  const { repository } = await getSignedInSource();
-  const resume = await repository.getPrimaryResume();
+  const resume = await getPrimaryResume();
   return <SearchForm hasResume={Boolean(resume?.text)} />;
 }

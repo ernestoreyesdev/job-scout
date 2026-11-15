@@ -19,11 +19,12 @@ from app.agents.orchestrator import (
     remove_duplicate_names,
     run_search,
 )
-from app.agents.schemas import CompanyName, FitScore, JobDetails, RunStopped, SearchRule, Usage
+from app.agents.schemas import CompanyName, FitScore, JobDetails, RunStopped, SearchRule
 from app.agents.scoring.agent import ScoringError
 from app.config import Settings
 from app.db import Rest
 from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, Posting, SourceName
+from app.telemetry import CallLog, RecordingClient
 
 FIT = FitScore(
     score=72,
@@ -145,11 +146,16 @@ class FakeRest(Rest):
             return [row for row in self.labeled if params["fit_label"] == f"eq.{row['fit_label']}"]
         if "fit_label" in params:
             return self.labeled
-        if params.get("select") == "posting_id,posting:postings(company,title)":
-            return [
-                {"posting_id": posting_id, "posting": self.tracked_jobs.get(posting_id, {"company": "", "title": posting_id})}
+        if params.get("select") == "posting_id,fit_label,posting:postings(company,title)":
+            tracked = [
+                {
+                    "posting_id": posting_id,
+                    "fit_label": None,
+                    "posting": self.tracked_jobs.get(posting_id, {"company": "", "title": posting_id}),
+                }
                 for posting_id in self.tracked
             ]
+            return tracked + [{**row, "posting_id": f"labeled-{n}"} for n, row in enumerate(self.labeled)]
         if "posting:" in params.get("select", ""):
             return self.tracked_postings
         return [{"posting_id": posting_id} for posting_id in self.tracked]
@@ -194,26 +200,25 @@ def run(
     messages = messages or FakeMessages(set(fail_titles))
     user, service = overrides.pop("user", FakeRest(tracked)), overrides.pop("service", FakeRest())
     progress: list[str] = []
-    usage = Usage()
+    calls = CallLog()
     result = run_search(
         rule=rule or SearchRule(company="Acme", keywords=["software engineer"]),
-        client=SimpleNamespace(beta=SimpleNamespace(messages=messages)),
+        client=RecordingClient(SimpleNamespace(beta=SimpleNamespace(messages=messages)), calls),
         settings=SETTINGS,
         resume_id="resume-1",
         resume_text="Python developer, 8 years.",
         user_id="user-1",
         user=user,
         service=service,
-        usage=usage,
         report=overrides.pop("report", progress.append),
         finder=overrides.pop("finder", lambda company: CompanyBoard("ashby", "acme", "Acme", jobs)),
-        namer=overrides.pop("namer", lambda client, model, boards, usage: {}),
+        namer=overrides.pop("namer", lambda client, model, boards: {}),
         read_posts=overrides.pop("read_posts", list),
-        expander=overrides.pop("expander", lambda client, model, keywords, usage: []),
+        expander=overrides.pop("expander", lambda client, model, keywords: []),
         embed=overrides.pop("embed", fake_embed),
         **overrides,
     )
-    return result, messages, user, service, progress, usage
+    return result, messages, user, service, progress, calls.usage()
 
 
 def fake_embed(texts: list[str]) -> list[list[float]]:
@@ -227,12 +232,11 @@ def saved_ids(user: FakeRest) -> list[str]:
 def test_scores_and_saves_every_match():
     result, _messages, user, service, progress, usage = run()
 
-    assert (result.companies, result.found, result.matched, result.scored, result.failed) == (1, 4, 3, 3, 0)
+    assert (result.found, result.matched, result.scored, result.failed) == (4, 3, 3, 0)
     assert saved_ids(user) == ["posting-1", "posting-3", "posting-4"]
-    stored, matched = service.inserted("postings")
+    [stored] = service.inserted("postings")
     assert sorted(row["external_id"] for row in stored) == ["1", "2", "3", "4"]
     assert all(row["last_seen_at"] and row["closed_at"] is None for row in stored)
-    assert [row["external_id"] for row in matched] == ["1", "3", "4"] and "description" not in matched[0]
     saved = user.inserted("applications")[0]
     assert saved["fit_score"] == 72 and saved["gaps"] == ["Kubernetes"] and "status" not in saved
     assert saved["score_model"] == "claude-haiku-5-5" and len(saved["score_prompt_version"]) == 8
@@ -255,7 +259,7 @@ def test_skips_tracked_jobs_and_they_do_not_count_toward_the_limit():
         rule=SearchRule(company="Acme", keywords=["software engineer"], limit=1), tracked=["posting-1"]
     )
 
-    assert (result.already_tracked, result.scored, result.kept) == (1, 2, 1)
+    assert (result.scored, result.kept) == (2, 1)
     assert saved_ids(user) == ["posting-3", "posting-4"]
     assert "Scoring jobs against your resume (2 of 2)…" in progress
     assert hidden_ids(user) == ["posting-4"]
@@ -388,7 +392,7 @@ def directory_run(
         discover_calls.append(args)
         return [FoundBoard(source, board, [f"Jobs at {board}"]) for source, board in discovered]
 
-    def namer(client: Any, model: str, boards: list[FoundBoard], usage: Usage) -> dict[tuple[str, str], CompanyName]:
+    def namer(client: Any, model: str, boards: list[FoundBoard]) -> dict[tuple[str, str], CompanyName]:
         named_boards.append(boards)
         return {
             key: CompanyName(board=f"{key[0]}/{key[1]}", name=name, kind=(kinds or {}).get(key, "employer"))
@@ -431,11 +435,11 @@ def test_without_a_company_a_small_directory_is_topped_up_from_the_web():
         "globex": [posting("9", "Software Engineer, Globex", board="globex", company="Globex", workplace_type="remote")],
     }
 
-    (result, _, user, service, progress, _), fetched, discover_calls = directory_run(
+    (_, _, user, service, progress, _), fetched, discover_calls = directory_run(
         [company("acme")], [("ashby", "acme"), ("greenhouse", "globex"), ("lever", "gone")], boards
     )
 
-    [(_, model, keywords, workplace_types, location, _)] = discover_calls
+    [(_, model, keywords, workplace_types, location)] = discover_calls
     assert (model, keywords, workplace_types, location) == ("claude-haiku-5-5", ["software engineer"], ["remote"], None)
     assert sorted(fetched) == [("ashby", "acme", "Acme"), ("greenhouse", "globex", "Globex"), ("lever", "gone", "Gone")]
     [saved_companies] = service.inserted("companies")
@@ -444,7 +448,7 @@ def test_without_a_company_a_small_directory_is_topped_up_from_the_web():
         ("acme", "Acme", "lookup", 1),
         ("globex", "Globex", "discovery", 1),
     ]
-    assert result.companies == 2 and saved_ids(user) == ["posting-1", "posting-9"]
+    assert saved_ids(user) == ["posting-1", "posting-9"]
     assert progress[0] == "Gathering open jobs…"
     assert service.inserted("directory_discoveries") == [
         {"keywords": ["software engineer"], "boards_found": 3, "boards_added": 2}
@@ -459,7 +463,7 @@ def test_a_full_directory_with_a_recent_discovery_skips_it():
     )
 
     assert discover_calls == [] and len(fetched) == MIN_DIRECTORY
-    assert (result.companies, result.scored) == (1, 1)
+    assert result.scored == 1
 
 
 def test_a_directory_search_takes_at_most_three_jobs_per_company():
@@ -479,12 +483,12 @@ def test_a_directory_search_takes_at_most_three_jobs_per_company():
 def test_hidden_companies_are_skipped_and_not_rediscovered():
     boards = {"acme": [REMOTE_JOB], "globex": [posting("9", "Software Engineer, Globex", board="globex", workplace_type="remote")]}
 
-    (result, _, user, _, _, _), fetched, _ = directory_run(
+    (_, _, user, _, _, _), fetched, _ = directory_run(
         [company("acme"), company("globex")], [("ashby", "globex")], boards, hidden=["id-globex"]
     )
 
     assert fetched == [("ashby", "acme", "Acme")]
-    assert result.companies == 1 and saved_ids(user) == ["posting-1"]
+    assert saved_ids(user) == ["posting-1"]
 
 
 @pytest.fixture(autouse=True)
@@ -503,7 +507,7 @@ def test_a_board_that_fails_once_is_retried():
     )
 
     assert fetched.count(("ashby", "acme", "Acme")) == 2
-    assert result.unreachable == 0 and saved_ids(user) == ["posting-1"]
+    assert result.unreachable_boards == [] and saved_ids(user) == ["posting-1"]
 
 
 def test_a_board_that_keeps_failing_is_counted_and_kept():
@@ -512,7 +516,7 @@ def test_a_board_that_keeps_failing_is_counted_and_kept():
     )
 
     assert fetched.count(("ashby", "acme", "Acme")) == 2
-    assert result.unreachable == 1
+    assert len(result.unreachable_boards) == 1
     assert result.unreachable_boards == ["ashby/acme"]
     [fetch] = [f for f in result.board_fetches if f["board"] == "ashby/acme"]
     assert fetch["outcome"] == "unreachable" and fetch["ms"] >= 0
@@ -593,7 +597,7 @@ def lookup_run(company_name: str, found: list[FoundBoard], boards: dict[str, lis
 
     lookups: list[str] = []
 
-    def lookup(client: Any, model: str, company: str, usage: Usage) -> list[FoundBoard]:
+    def lookup(client: Any, model: str, company: str) -> list[FoundBoard]:
         lookups.append(company)
         return found
 
@@ -615,7 +619,7 @@ def test_a_missed_company_is_not_searched_on_the_web_unless_asked():
         run(
             rule=SearchRule(company="Publix", keywords=["engineer"]),
             finder=finder,
-            lookup=lambda client, model, company, usage: lookups.append(company) or [],
+            lookup=lambda client, model, company: lookups.append(company) or [],
         )
     assert lookups == []
 
@@ -729,7 +733,7 @@ def test_new_staffing_boards_are_saved_with_their_kind_but_not_searched():
         "talentco": [posting("t1", "Software Engineer, Talent", board="talentco", workplace_type="remote")],
     }
 
-    (result, _, user, service, _, _), fetched, _ = directory_run(
+    (_, _, user, service, _, _), fetched, _ = directory_run(
         [company("acme")],
         [("lever", "talentco")],
         boards,
@@ -739,7 +743,7 @@ def test_new_staffing_boards_are_saved_with_their_kind_but_not_searched():
 
     assert ("lever", "talentco", "TalentCo") in fetched
     assert ("companies", {"source": "eq.lever", "board": "eq.talentco"}, {"kind": "staffing"}) in service.updates
-    assert saved_ids(user) == ["posting-1"] and result.companies == 1
+    assert saved_ids(user) == ["posting-1"]
 
 
 def test_a_large_match_set_is_ranked_by_resume_similarity_before_scoring():
@@ -775,31 +779,10 @@ def test_no_ranking_when_the_matches_fit_in_the_pool():
     assert not any(function == "rank_postings" for function, _ in service.rpcs)
 
 
-def test_the_title_shortlist_runs_in_batches(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(orchestrator, "MAX_TRIAGE", 3)
-    fresh = [(f"posting-{n}", posting(str(n), f"Software Engineer {n}")) for n in range(1, 8)]
-    calls: list[list[str]] = []
-    lock = threading.Lock()
-
-    def triage(client: Any, model: str, resume_text: str, postings: list[Posting], count: int, usage: Usage) -> list[int]:
-        with lock:
-            calls.append([p.external_id for p in postings])
-        usage.input_tokens += 10
-        return [len(postings) - 1]
-
-    usage = Usage()
-    picked = orchestrator.by_title_fit(fresh, 1, None, SETTINGS, "Python developer.", usage, triage)
-
-    batches, final = sorted(calls[:-1]), calls[-1]
-    assert batches == [["1", "2", "3"], ["4", "5", "6"], ["7"]]
-    assert final == ["3", "6", "7"]
-    assert [posting_id for posting_id, _ in picked] == ["posting-7"] and usage.input_tokens >= 40
-
-
 def test_a_company_found_by_name_is_labeled_once():
     calls: list[list[FoundBoard]] = []
 
-    def namer(client: Any, model: str, boards: list[FoundBoard], usage: Usage) -> dict[tuple[str, str], CompanyName]:
+    def namer(client: Any, model: str, boards: list[FoundBoard]) -> dict[tuple[str, str], CompanyName]:
         calls.append(boards)
         return {("ashby", "acme"): CompanyName(board="ashby/acme", name="Acme Staffing", kind="staffing")}
 
@@ -834,7 +817,6 @@ def test_rescore_updates_only_jobs_unscored_or_scored_against_another_resume():
         user_id="user-1",
         user=user,
         service=FakeRest(),
-        usage=Usage(),
         report=progress.append,
         scope="tracker",
     )
@@ -863,7 +845,6 @@ def test_rescore_with_nothing_stale_scores_nothing():
         user_id="user-1",
         user=EmptyRest(),
         service=FakeRest(),
-        usage=Usage(),
         report=progress.append,
         scope="jobs",
     )
@@ -872,43 +853,20 @@ def test_rescore_with_nothing_stale_scores_nothing():
     assert progress == ["Every job is already scored with your current resume."]
 
 
-def tracked(posting_id: str, board: str, external_id: str, closed_at: str | None = None, source: str = "ashby") -> dict:
-    return {"posting": {"id": posting_id, "source": source, "board": board, "external_id": external_id, "closed_at": closed_at}}
-
-
-def test_tracked_jobs_missing_from_a_fetched_board_are_closed_and_reopened():
-    user, service = FakeRest(), FakeRest()
-    user.tracked_postings = [
-        tracked("p-gone", "acme", "gone"),
-        tracked("p-back", "acme", "1", closed_at="2026-10-01T00:00:00+00:00"),
-        tracked("p-open", "acme", "3"),
-        tracked("p-other", "globex", "9"),
-    ]
-
-    orchestrator.mark_closed(user, service, {"ashby/acme": JOBS})
-
-    closes = [f for t, f, p in service.updates if t == "postings" and p["closed_at"] is not None]
-    reopens = [f for t, f, p in service.updates if t == "postings" and p["closed_at"] is None]
-    assert closes == [{"id": "in.(p-gone)"}] and reopens == [{"id": "in.(p-back)"}]
-
-
 def test_a_board_cut_off_at_its_limit_closes_nothing():
-    user, service = FakeRest(), FakeRest()
-    user.tracked_postings = [tracked("p-gone", "acme.wd5/site", "/job/gone", source="workday")]
+    service = FakeRest()
     capped = [posting(str(n), "Engineer", source="workday", board="acme.wd5/site") for n in range(2000)]
 
-    orchestrator.mark_closed(user, service, {"workday/acme.wd5/site": capped})
+    orchestrator.store_jobs(service, {("workday", "acme.wd5/site"): capped})
 
     assert service.updates == []
 
 
 def test_a_company_search_checks_its_board_for_closed_jobs():
-    user = FakeRest()
-    user.tracked_postings = [tracked("p-gone", "acme", "gone")]
+    _, _, _, service, _, _ = run()
 
-    _, _, _, service, _, _ = run(user=user)
-
-    assert ("postings", {"id": "in.(p-gone)"}) in [(t, f) for t, f, p in service.updates if p.get("closed_at")]
+    closes = [f for t, f, p in service.updates if t == "postings" and p.get("closed_at")]
+    assert [(f["source"], f["board"]) for f in closes] == [("eq.ashby", "eq.acme")]
 
 
 def test_a_new_keyword_set_runs_discovery_even_after_a_recent_one():
@@ -950,7 +908,7 @@ def test_import_adds_names_and_urls_and_reports_the_rest():
         fetched.append((source, board, name))
         return [posting("2", "Data Engineer").model_copy(update={"company": name})]
 
-    def namer(client: Any, model: str, boards: list[FoundBoard], usage: Usage) -> dict[tuple[str, str], CompanyName]:
+    def namer(client: Any, model: str, boards: list[FoundBoard]) -> dict[tuple[str, str], CompanyName]:
         namer_calls.append(boards)
         return {
             ("greenhouse", "acme"): CompanyName(board="greenhouse/acme", name="Acme", kind="employer"),
@@ -971,7 +929,6 @@ def test_import_adds_names_and_urls_and_reports_the_rest():
         client=None,
         settings=SETTINGS,
         service=service,
-        usage=Usage(),
         report=lambda message: None,
         finder=finder,
         fetcher=fetcher,
@@ -997,7 +954,7 @@ def test_hiring_posts_are_read_once_and_reused():
     service.select = lambda table, params: [saved.model_dump(mode="json")] if table == "postings" else []
     extracted: list[list[str]] = []
 
-    def extractor(client: Any, model: str, posts: list[HiringPost], usage: Usage) -> list[Posting]:
+    def extractor(client: Any, model: str, posts: list[HiringPost]) -> list[Posting]:
         extracted.append([post.id for post in posts])
         return [posting("222-1", "ML Engineer", source="hackernews", board="globex", posted_at=when)]
 
@@ -1005,7 +962,6 @@ def test_hiring_posts_are_read_once_and_reused():
         None,
         SETTINGS,
         service,
-        Usage(),
         lambda message: None,
         lambda: [HiringPost("111", "PrairieLearn | Backend", when), HiringPost("222", "Globex | ML", when)],
         extractor,
@@ -1023,7 +979,7 @@ def test_an_unreachable_hacker_news_is_skipped():
     def unreachable() -> list[HiringPost]:
         raise RuntimeError("timed out")
 
-    assert hiring_thread_postings(None, SETTINGS, FakeRest(), Usage(), progress.append, unreachable, lambda *args: []) == []
+    assert hiring_thread_postings(None, SETTINGS, FakeRest(), progress.append, unreachable, lambda *args: []) == []
     assert progress == []
 
 
@@ -1062,10 +1018,9 @@ def test_an_import_that_duplicates_a_bigger_entry_counts_as_existing():
         client=None,
         settings=SETTINGS,
         service=service,
-        usage=Usage(),
         report=lambda message: None,
         finder=lambda name: CompanyBoard("workable", "acme", "Acme", []),
-        namer=lambda client, model, boards, usage: {},
+        namer=lambda client, model, boards: {},
     )
 
     assert (result.added, result.existing) == ([], 1)
@@ -1092,7 +1047,7 @@ def test_related_titles_match_jobs_the_keywords_alone_miss():
     jobs = [posting("1", "Senior Program Manager"), posting("2", "Program Management Lead"), posting("3", "Designer")]
     asked: list[list[str]] = []
 
-    def expander(client: Any, model: str, keywords: list[str], usage: Usage) -> list[str]:
+    def expander(client: Any, model: str, keywords: list[str]) -> list[str]:
         asked.append(keywords)
         return ["Program Manager", "Technical Program Manager"]
 
@@ -1159,7 +1114,7 @@ def test_labeled_jobs_are_those_nearest_the_jobs_being_scored_after_embedding_mi
     ]
     service.unembedded = [{"id": "posting-1"}]
 
-    examples = orchestrator.labeled_examples(user, service, [("posting-1", JOBS[0]), ("posting-3", JOBS[2])], fake_embed)
+    examples = orchestrator.labeled_examples(user, service, [("posting-1", JOBS[0]), ("posting-3", JOBS[2])], fake_embed, orchestrator.label_counts(user))
 
     [(function, args)] = service.rpcs
     assert function == "set_posting_embeddings"
@@ -1177,7 +1132,7 @@ def test_a_failed_embedding_falls_back_to_the_most_recent_labeled_jobs():
     def embed(texts: list[str]) -> list[list[float]]:
         raise RuntimeError("download failed")
 
-    examples = orchestrator.labeled_examples(user, service, [("posting-1", JOBS[0])], embed)
+    examples = orchestrator.labeled_examples(user, service, [("posting-1", JOBS[0])], embed, orchestrator.label_counts(user))
 
     assert [example.label for example in examples] == ["good"] * 3 + ["bad"] * 3
     assert user.rpcs == []
@@ -1190,7 +1145,7 @@ def test_nothing_is_embedded_until_each_label_has_enough():
     def embed(texts: list[str]) -> list[list[float]]:
         raise AssertionError("embedded")
 
-    assert orchestrator.labeled_examples(user, service, [("posting-1", JOBS[0])], embed) == []
+    assert orchestrator.labeled_examples(user, service, [("posting-1", JOBS[0])], embed, orchestrator.label_counts(user)) == []
     assert (user.rpcs, service.rpcs) == ([], [])
 
 
@@ -1295,7 +1250,7 @@ def test_saved_jobs_keep_their_description_when_a_job_list_leaves_it_out():
     service = FakeRest()
     listed = posting("1", "Engineer", description="")
 
-    orchestrator.store_jobs(service, {"workday/acme": [listed], "ashby/beta": [posting("2", "Engineer")]})
+    orchestrator.store_jobs(service, {("workday", "acme"): [listed], ("ashby", "beta"): [posting("2", "Engineer")]})
 
     described, bare = service.inserted("postings")
     assert [row["external_id"] for row in described] == ["2"] and described[0]["description"]
@@ -1305,7 +1260,7 @@ def test_saved_jobs_keep_their_description_when_a_job_list_leaves_it_out():
 def test_a_complete_fetch_closes_the_jobs_its_board_no_longer_lists():
     service = FakeRest()
 
-    orchestrator.store_jobs(service, {"ashby/acme": [posting("1", "Engineer")]})
+    orchestrator.store_jobs(service, {("ashby", "acme"): [posting("1", "Engineer")]})
 
     [(table, filters, patch)] = service.updates
     assert table == "postings" and (filters["source"], filters["board"], filters["closed_at"]) == ("eq.ashby", "eq.acme", "is.null")
@@ -1407,7 +1362,6 @@ def test_rescore_for_jobs_picks_only_jobs_past_new():
         user_id="user-1",
         user=EmptyRest(),
         service=FakeRest(),
-        usage=Usage(),
         report=lambda message: None,
         scope="jobs",
     )
@@ -1423,7 +1377,7 @@ def test_a_job_tracked_from_another_source_is_skipped():
 
     result, _, user, _, _, _ = run(rule=SearchRule(company="Acme", keywords=["software engineer"]), jobs=jobs, user=user)
 
-    assert (result.already_tracked, result.scored) == (1, 1)
+    assert result.scored == 1
     assert saved_ids(user) == ["posting-2"]
 
 
@@ -1432,7 +1386,7 @@ def test_saved_jobs_are_read_a_page_at_a_time_after_the_last_id():
     service = FakeRest()
     service.stored = [{**saved, "id": f"p-{n:04d}", "external_id": str(n), "board": "acme"} for n in range(1001)]
 
-    jobs = orchestrator.stored_jobs(service, [(saved["source"], "acme", "Acme", "discovery")])
+    jobs = orchestrator.stored_jobs(service, [orchestrator.Board(saved["source"], "acme", "Acme", "discovery")])
 
-    assert len(jobs[f"{saved['source']}/acme"]) == 1001
+    assert len(jobs[(saved["source"], "acme")]) == 1001
     assert [params.get("id") for table, params in service.selects if table == "postings"] == [None, "gt.p-0999"]

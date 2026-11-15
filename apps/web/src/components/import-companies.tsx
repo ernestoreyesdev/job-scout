@@ -1,24 +1,20 @@
 "use client";
 
 import { ChevronDown, Plus } from "lucide-react";
-import { useState, useTransition } from "react";
 
 import { importCompanies } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { MAX_COMPANY_IMPORT } from "@/lib/db";
+import { useAction } from "@/lib/use-action";
 
 /** Starts a run that adds companies to the directory from careers page URLs or company names. */
 export function ImportCompanies() {
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const { run, pending, error } = useAction();
 
   function submit(formData: FormData) {
-    startTransition(async () => {
-      const result = await importCompanies(formData);
-      setError(result.ok ? null : (result.error ?? "Could not start the import."));
-    });
+    run(() => importCompanies(formData), "Could not start the import.");
   }
 
   return (

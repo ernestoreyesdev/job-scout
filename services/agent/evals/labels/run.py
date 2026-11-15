@@ -19,7 +19,7 @@ import anthropic
 import numpy as np
 
 from app.agents.orchestrator import MAX_EXAMPLES, MIN_EXAMPLES, labeled_job
-from app.agents.schemas import FitScore, Usage
+from app.agents.schemas import FitScore
 from app.agents.scoring.agent import score_posting
 from app.agents.scoring.prompts import FIT_SYSTEM, LabeledJob
 from app.config import get_settings
@@ -27,7 +27,7 @@ from app.crypto import decrypt
 from app.db import service_db
 from app.embeddings import embed_jobs, job_text
 from app.sources.base import Posting
-from app.telemetry import prompt_version
+from app.telemetry import CallLog, RecordingClient, prompt_version
 from evals.results import save_result, usage_cost
 
 CUTS = (50, 60, 70, 80)
@@ -135,19 +135,19 @@ def main() -> None:
         save_result(db, "labels", {"skipped": f"Needs at least {MIN_EXAMPLES + MIN_HELD_OUT} rated jobs of each kind."})
         return
 
-    client = anthropic.Anthropic(api_key=api_key)
+    log = CallLog()
+    client = RecordingClient(anthropic.Anthropic(api_key=api_key), log)
     resume = resumes[user_id]
     examples = examples_from(train)
     closest = closest_from(train, held)
     if {(e.label, e.title, e.company) for e in closest} == {(e.label, e.title, e.company) for e in examples}:
         print(f"Neither label has more than {MAX_EXAMPLES} jobs to pick from, so recent and closest pick the same jobs.")
-    usage = Usage()
 
-    def score(row: dict, with_examples: list[LabeledJob]) -> tuple[str, int, object]:
-        fit, call_usage = score_posting(
+    def score(row: dict, with_examples: list[LabeledJob]) -> tuple[str, int]:
+        fit = score_posting(
             client, settings.scoring_model, settings.scoring_effort, resume, Posting.model_validate(row["posting"]), with_examples
         )
-        return row["fit_label"], fit.score, call_usage
+        return row["fit_label"], fit.score
 
     results: dict[str, Any] = {}
     arms = (("Without examples", []), (f"With {len(examples)} recent examples", examples), (f"With {len(closest)} closest examples", closest))
@@ -155,10 +155,9 @@ def main() -> None:
         # The first call runs alone so the cached prefix exists before the rest.
         first = score(held[0], with_examples)
         with ThreadPoolExecutor(max_workers=4) as pool:
-            calls = [first, *pool.map(score, held[1:], [with_examples] * (len(held) - 1))]
-        for *_, call_usage in calls:
-            usage.add(call_usage)
-        results[name] = report(name, [(label, value) for label, value, _ in calls])
+            scored = [first, *pool.map(score, held[1:], [with_examples] * (len(held) - 1))]
+        results[name] = report(name, scored)
+    usage = log.usage()
     cost = usage_cost(usage)
     print(f"\nCost: ${cost:.3f} ({usage.input_tokens:,} input, {usage.output_tokens:,} output tokens)")
     save_result(

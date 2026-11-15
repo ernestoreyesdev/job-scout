@@ -9,9 +9,9 @@ from app import main
 from app.agents.orchestrator import ImportResult, SearchResult
 from app.agents.schemas import FollowUpDraft, GapAnalysis, GapItem, SearchRule
 from app.auth import CurrentUser
-from app.config import Settings
 from app.db import Rest
 from app.sources.base import CompanyNotFound, Posting
+from tests.fakes import fake_settings
 
 
 class FakeRest(Rest):
@@ -64,10 +64,10 @@ def test_a_second_search_while_one_runs_is_refused(monkeypatch: pytest.MonkeyPat
 
 
 def test_summary_says_how_many_jobs_were_added_without_internal_counts():
-    scored_all = SearchResult(companies=30, found=900, matched=12, already_tracked=2, scored=10, failed=0, unreachable=2, kept=10)
-    unscored = SearchResult(companies=5, found=90, matched=8, already_tracked=0, scored=0, failed=0, kept=1)
-    nothing_new = SearchResult(companies=5, found=90, matched=8, already_tracked=8, scored=0, failed=0)
-    no_match = SearchResult(companies=5, found=90, matched=0, already_tracked=0, scored=0, failed=0)
+    scored_all = SearchResult(found=900, matched=12, scored=10, failed=0, kept=10)
+    unscored = SearchResult(found=90, matched=8, scored=0, failed=0, kept=1)
+    nothing_new = SearchResult(found=90, matched=8, scored=0, failed=0)
+    no_match = SearchResult(found=90, matched=0, scored=0, failed=0)
 
     assert main.summarize(scored_all) == "Added 10 jobs."
     assert main.summarize(unscored) == "Added the 1 newest job."
@@ -102,13 +102,13 @@ def test_a_company_that_isnt_found_fails_with_its_error_code(monkeypatch: pytest
 
 
 def test_summary_says_when_a_company_has_no_open_jobs():
-    result = SearchResult(companies=1, found=0, matched=0, already_tracked=0, scored=0, failed=0, company="Publix")
+    result = SearchResult(found=0, matched=0, scored=0, failed=0, company="Publix")
 
     assert main.summarize(result) == "Found Publix, but it has no open jobs listed."
 
 
 def test_summary_says_how_many_of_the_scored_jobs_were_kept():
-    result = SearchResult(companies=4, found=300, matched=40, already_tracked=0, scored=20, failed=0, kept=10)
+    result = SearchResult(found=300, matched=40, scored=20, failed=0, kept=10)
 
     assert main.summarize(result) == "Added your 10 best-matching jobs."
 
@@ -169,7 +169,7 @@ def test_gap_analysis_is_saved_on_the_application(monkeypatch: pytest.MonkeyPatc
     db = JobRest({"id": "app-1", "posting": POSTING})
 
     result = call_job_endpoint(
-        monkeypatch, main.post_gap_analysis, db, analyze_gaps=lambda client, model, resume, posting, usage: analysis
+        monkeypatch, main.post_gap_analysis, db, analyze_gaps=lambda client, model, resume, posting: analysis
     )
 
     assert result["gap_analysis"] == analysis.model_dump()
@@ -188,7 +188,7 @@ def test_gap_analysis_of_someone_elses_job_is_not_found(monkeypatch: pytest.Monk
 def test_follow_up_uses_the_latest_applied_date(monkeypatch: pytest.MonkeyPatch):
     seen: list[str] = []
 
-    def draft(client: Any, model: str, resume: str, title: str, company: str, applied_on: str, usage: Any) -> FollowUpDraft:
+    def draft(client: Any, model: str, resume: str, title: str, company: str, applied_on: str) -> FollowUpDraft:
         seen.append(applied_on)
         return FollowUpDraft(subject="Following up", body="Hi team")
 
@@ -220,7 +220,7 @@ def test_stopping_a_run_marks_it_stopped_only_while_it_is_unfinished(monkeypatch
 
     assert main.stop_run("run-1", user, fake_settings()) == {"status": "stopped"}
     [(table, filters, patch)] = db.updates
-    assert table == "agent_runs" and filters == {"id": "eq.run-1", "status": "in.(queued,running)"}
+    assert table == "agent_runs" and filters == {"id": "eq.run-1", "status": "in.(queued,running)", "select": "id"}
     assert patch["status"] == "stopped" and patch["progress"] == "Stopped." and patch["finished_at"]
 
     with pytest.raises(HTTPException) as finished:
@@ -252,8 +252,8 @@ def test_a_stopped_search_halts_at_its_next_progress_update_and_keeps_its_status
 
 
 def test_summary_mentions_the_min_score():
-    kept = SearchResult(companies=4, found=300, matched=40, already_tracked=0, scored=20, failed=0, kept=3, min_score=70)
-    none = SearchResult(companies=4, found=300, matched=40, already_tracked=0, scored=20, failed=0, kept=0, min_score=70)
+    kept = SearchResult(found=300, matched=40, scored=20, failed=0, kept=3, min_score=70)
+    none = SearchResult(found=300, matched=40, scored=20, failed=0, kept=0, min_score=70)
 
     assert main.summarize(kept) == "Added 3 jobs scoring 70 or higher."
     assert main.summarize(none) == "No new jobs scored 70 or higher."
@@ -294,7 +294,7 @@ def test_a_finished_search_records_how_many_jobs_it_added(monkeypatch: pytest.Mo
     monkeypatch.setattr(main, "user_db", lambda settings, token: db)
     monkeypatch.setattr(main, "service_db", lambda settings: db)
     monkeypatch.setattr(main, "decrypt", lambda ciphertext, key: "key")
-    result = SearchResult(companies=4, found=300, matched=40, already_tracked=0, scored=20, failed=0, kept=10)
+    result = SearchResult(found=300, matched=40, scored=20, failed=0, kept=10)
     monkeypatch.setattr(main, "orchestrate_search", lambda **kwargs: result)
 
     main.run_search("run-1", SearchRule(keywords=["engineer"]), fake_user(id="u", access_token="t"), fake_settings(agent_encryption_key="k"))
@@ -305,10 +305,6 @@ def test_a_finished_search_records_how_many_jobs_it_added(monkeypatch: pytest.Mo
 
 def fake_user(**fields: Any) -> CurrentUser:
     return cast(CurrentUser, SimpleNamespace(**fields))
-
-
-def fake_settings(**fields: Any) -> Settings:
-    return cast(Settings, SimpleNamespace(**fields))
 
 
 def test_an_unexpected_failure_shows_a_plain_message_and_keeps_the_error_for_the_admin(monkeypatch: pytest.MonkeyPatch):
@@ -325,7 +321,7 @@ def test_an_unexpected_failure_shows_a_plain_message_and_keeps_the_error_for_the
 
     main.run_search("run-1", SearchRule(keywords=["engineer"]), fake_user(id="u", access_token="t"), settings)
 
-    assert db.updates[-1][2]["error"] == main.SEARCH_FAILED
+    assert db.updates[-1][2]["error"] == main.RUN_FAILED["search"]
     assert ("run_errors", {"run_id": "run-1", "detail": "ValueError: Could not load model BAAI/bge-small-en-v1.5 from any source."}) in db.inserts
 
 
@@ -437,21 +433,6 @@ def test_a_rescore_saves_which_page_it_scores(monkeypatch: pytest.MonkeyPatch):
     assert ("agent_runs", {"user_id": "user-1", "kind": "rescore", "input": {"scope": "jobs"}}) in db.inserts
     [task] = background.tasks
     assert task.args[1] == main.RescoreRequest(scope="jobs")
-
-
-def test_select_all_pages_past_the_row_limit():
-    class Paged(Rest):
-        def __init__(self):
-            self.offsets: list[str] = []
-
-        def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
-            self.offsets.append(params["offset"])
-            start = int(params["offset"])
-            return [{"n": n} for n in range(start, min(start + int(params["limit"]), 5))]
-
-    service = Paged()
-    assert len(main.select_all(service, "llm_calls", {"order": "id"}, page=2)) == 5
-    assert service.offsets == ["0", "2", "4"]
 
 
 class AccountRest(Rest):

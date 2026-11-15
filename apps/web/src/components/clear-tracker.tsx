@@ -1,22 +1,18 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
 import { clearTracker } from "@/app/actions";
 import { Button } from "@/components/ui/button";
+import { useAction } from "@/lib/use-action";
 
 /** Two-step Clear: the first click asks, the second empties the Tracker. */
 export function ClearTracker({ count }: { count: number }) {
   const [confirming, setConfirming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const { run, pending, error } = useAction();
 
   function clear() {
-    startTransition(async () => {
-      const result = await clearTracker();
-      setConfirming(false);
-      setError(result.ok ? null : (result.error ?? "Could not clear the Tracker."));
-    });
+    run(clearTracker, "Could not clear the Tracker.", () => setConfirming(false));
   }
 
   if (!confirming) {

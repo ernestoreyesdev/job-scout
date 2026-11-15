@@ -4,16 +4,20 @@ import httpx
 
 from app.config import Settings
 
+# One connection pool shared by every Rest client and auth check, safe across threads.
+HTTP = httpx.Client(timeout=30)
+
 
 class Rest:
     """
     Thin PostgREST and Storage client. With a user's access token, row-level
     security applies exactly as it does in the browser; with the service role
     key it bypasses RLS, so callers must filter by the verified user id.
+    insert and update return the written rows only when given a select.
     """
 
     def __init__(self, settings: Settings, apikey: str, bearer: str, http: httpx.Client | None = None):
-        self._http = http or httpx.Client(timeout=30)
+        self._http = http or HTTP
         self._base = settings.supabase_url.rstrip("/")
         self._headers = {"apikey": apikey, "Authorization": f"Bearer {bearer}"}
 
@@ -25,7 +29,7 @@ class Rest:
     def insert(
         self, table: str, rows: list[dict[str, Any]] | dict[str, Any], on_conflict: str | None = None, select: str | None = None
     ) -> list[dict[str, Any]]:
-        prefer = ["return=representation"]
+        prefer = ["return=representation" if select else "return=minimal"]
         params = {"select": select} if select else {}
         if on_conflict:
             prefer.append("resolution=merge-duplicates")
@@ -37,17 +41,17 @@ class Rest:
             headers={**self._headers, "Prefer": ",".join(prefer)},
         )
         check(res)
-        return res.json()
+        return res.json() if select else []
 
     def update(self, table: str, filters: dict[str, str], patch: dict[str, Any]) -> list[dict[str, Any]]:
         res = self._http.patch(
             f"{self._base}/rest/v1/{table}",
             params=filters,
             json=patch,
-            headers={**self._headers, "Prefer": "return=representation"},
+            headers={**self._headers, "Prefer": "return=representation" if "select" in filters else "return=minimal"},
         )
         check(res)
-        return res.json()
+        return res.json() if "select" in filters else []
 
     def delete(self, table: str, filters: dict[str, str]) -> None:
         res = self._http.delete(f"{self._base}/rest/v1/{table}", params=filters, headers=self._headers)
@@ -79,6 +83,17 @@ class Rest:
                 "DELETE", f"{self._base}/storage/v1/object/{bucket}", json={"prefixes": paths}, headers=self._headers
             )
             check(res)
+
+    def select_all(self, table: str, params: dict[str, str], page: int = 1000) -> list[dict[str, Any]]:
+        """Every matching row in id order, a page at a time past the API's row limit; the select must include id."""
+        params = {**params, "order": "id", "limit": str(page)}
+        rows: list[dict[str, Any]] = []
+        while True:
+            batch = self.select(table, params)
+            rows += batch
+            if len(batch) < page:
+                return rows
+            params = {**params, "id": f"gt.{batch[-1]['id']}"}
 
 
 def user_db(settings: Settings, access_token: str) -> Rest:

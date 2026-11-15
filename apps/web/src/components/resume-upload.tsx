@@ -1,10 +1,11 @@
 "use client";
 
 import { FileUp } from "lucide-react";
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState } from "react";
 
 import { uploadResume } from "@/app/actions";
 import { Button } from "@/components/ui/button";
+import { useAction } from "@/lib/use-action";
 import { cn } from "@/lib/utils";
 
 /**
@@ -12,17 +13,14 @@ import { cn } from "@/lib/utils";
  * on the card or picked from it; Upload appears once one is chosen.
  */
 export function ResumeUpload() {
-  const [error, setError] = useState<string | null>(null);
+  const { run, pending, error } = useAction();
   const [fileName, setFileName] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [pending, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function upload(formData: FormData) {
-    startTransition(async () => {
-      const result = await uploadResume(formData);
-      setError(result.ok ? null : (result.error ?? "Could not upload the resume."));
+    run(() => uploadResume(formData), "Could not upload the resume.", (result) => {
       if (result.ok) {
         formRef.current?.reset();
         setFileName(null);

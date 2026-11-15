@@ -13,7 +13,7 @@ import { PageReady } from "@/components/web-vitals";
 import { APPLICATION_STATUSES, JOB_SORTS } from "@/lib/db";
 import { parseJobQuery } from "@/lib/job-query";
 import { rescoreScope } from "@/lib/runs";
-import { getSignedInSource } from "@/lib/repository";
+import { getPrimaryResume, getSignedInSource } from "@/lib/repository";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Jobs" };
@@ -41,10 +41,10 @@ export default function JobsPage({ searchParams }: PageProps<"/jobs">) {
 
 async function JobsData({ searchParams }: Pick<PageProps<"/jobs">, "searchParams">) {
   const { repository } = await getSignedInSource();
-  const resume = await repository.getPrimaryResume();
   const query = parseJobQuery(await searchParams, "status");
   const view = query.rated ? "rated" : "jobs";
-  const [jobs, companies, runs] = await Promise.all([
+  const [resume, jobs, companies, runs] = await Promise.all([
+    getPrimaryResume(),
     repository.listTrackedJobs(view, query.sort, query.page, query.filters),
     repository.listTrackedCompanies(view),
     repository.listRuns(1),

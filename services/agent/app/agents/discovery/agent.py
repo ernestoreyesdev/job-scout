@@ -8,7 +8,7 @@ from app.agents.discovery.prompts import (
     discovery_message,
     naming_message,
 )
-from app.agents.schemas import CompanyName, CompanyNames, Usage
+from app.agents.schemas import CompanyName, CompanyNames
 from app.sources import board_from_url, board_hosts
 from app.sources.base import SourceName
 
@@ -28,17 +28,16 @@ def discover_boards(
     keywords: list[str],
     workplace_types: list[str],
     location: str | None,
-    usage: Usage,
     searches: int = 3,
 ) -> list[FoundBoard]:
     """
     Web searches restricted to the job boards' own sites. Each result URL names
     its company's board, so the boards come from the URLs and not from Claude's reply.
     """
-    return search_boards(client, model, discovery_message(keywords, workplace_types, location, searches), searches, usage)
+    return search_boards(client, model, discovery_message(keywords, workplace_types, location, searches), searches)
 
 
-def search_boards(client: Any, model: str, message: str, searches: int, usage: Usage) -> list[FoundBoard]:
+def search_boards(client: Any, model: str, message: str, searches: int) -> list[FoundBoard]:
     """Runs a web search limited to job board sites and returns the boards its result URLs belong to, in order."""
     response = client.messages.create(
         model=model,
@@ -55,7 +54,6 @@ def search_boards(client: Any, model: str, message: str, searches: int, usage: U
         ],
         messages=[{"role": "user", "content": message}],
     )
-    usage.add(response.usage)
 
     found: dict[tuple[SourceName, str], FoundBoard] = {}
     for block in response.content:
@@ -72,14 +70,12 @@ def search_boards(client: Any, model: str, message: str, searches: int, usage: U
     return list(found.values())
 
 
-def find_company_boards(client: Any, model: str, company: str, usage: Usage, searches: int = 2) -> list[FoundBoard]:
+def find_company_boards(client: Any, model: str, company: str, searches: int = 2) -> list[FoundBoard]:
     """Web searches for one company's job board on any of the job systems."""
-    return search_boards(client, model, company_search_message(company, searches), searches, usage)
+    return search_boards(client, model, company_search_message(company, searches), searches)
 
 
-def name_companies(
-    client: Any, model: str, boards: list[FoundBoard], usage: Usage
-) -> dict[tuple[str, str], CompanyName]:
+def name_companies(client: Any, model: str, boards: list[FoundBoard]) -> dict[tuple[str, str], CompanyName]:
     """
     One small call that reads each board's search result titles and returns the
     company's name and kind, e.g. 'CVS Health', an employer, for
@@ -95,7 +91,6 @@ def name_companies(
         messages=[{"role": "user", "content": naming_message(boards)}],
         output_format=CompanyNames,
     )
-    usage.add(response.usage)
     if response.parsed_output is None:
         return {}
 

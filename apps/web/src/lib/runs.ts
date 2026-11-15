@@ -1,4 +1,4 @@
-import type { AgentRunRow, RescoreScope, SearchRuleInput, WorkplaceTypeRow } from "@/lib/db";
+import { WORKPLACE_LABELS, type AgentRunRow, type RescoreScope, type SearchRuleInput, type WorkplaceTypeRow } from "@/lib/db";
 
 /** One-line description of what a run did: the search rule, the re-score or the import. */
 export function describeRun(run: AgentRunRow): { title: string; detail: string } {
@@ -23,8 +23,6 @@ export function describeRun(run: AgentRunRow): { title: string; detail: string }
   ].filter(Boolean);
   return { title: input.company || "All companies", detail: parts.length ? ` · ${parts.join(" · ")}` : "" };
 }
-
-const WORKPLACE_LABELS = { onsite: "On-site", hybrid: "Hybrid", remote: "Remote" } as const;
 
 /** "Hybrid", "Hybrid or remote", "On-site, hybrid or remote". */
 function workplaces(types: WorkplaceTypeRow[]): string {

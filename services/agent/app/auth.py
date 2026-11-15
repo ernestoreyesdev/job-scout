@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 from typing import Annotated
 
-import httpx
 from fastapi import Depends, Header, HTTPException
 
 from app.config import Settings, get_settings
+from app.db import HTTP
 
 
 @dataclass(frozen=True)
@@ -25,7 +25,7 @@ def current_user(
         raise HTTPException(401, "Missing bearer token.")
     token = authorization.removeprefix("Bearer ")
 
-    res = httpx.get(
+    res = HTTP.get(
         f"{settings.supabase_url.rstrip('/')}/auth/v1/user",
         headers={"apikey": settings.supabase_anon_key, "Authorization": f"Bearer {token}"},
         timeout=10,

@@ -85,7 +85,7 @@ export function runCost(usage: RunUsage | null): number {
   );
 }
 
-export type CostSummary = { runs: number; total: number; perSearch: number | null; thisMonth: number };
+export type CostSummary = { total: number; perSearch: number | null; thisMonth: number };
 
 /** Spend across the given runs, the average per finished search, and the spend since the start of this month. */
 export function summarizeCosts(
@@ -96,7 +96,6 @@ export function summarizeCosts(
   const searches = runs.filter((run) => run.kind === "search" && run.status === "done");
   const total = runs.reduce((sum, run) => sum + runCost(run.usage), 0);
   return {
-    runs: runs.length,
     total,
     perSearch: searches.length ? searches.reduce((sum, run) => sum + runCost(run.usage), 0) / searches.length : null,
     thisMonth: runs.filter((run) => new Date(run.created_at) >= monthStart).reduce((sum, run) => sum + runCost(run.usage), 0),

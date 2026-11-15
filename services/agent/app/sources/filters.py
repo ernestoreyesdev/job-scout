@@ -2,8 +2,12 @@ import re
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from app.sources.base import Posting
+
+if TYPE_CHECKING:
+    from app.agents.schemas import SearchRule
 
 WORKPLACE_LABELS: dict[str, str] = {"onsite": "on-site", "hybrid": "hybrid", "remote": "remote"}
 
@@ -166,3 +170,14 @@ def _place_in_us(place: str) -> bool:
 
 def _names_any(lowered: str, places: tuple[str, ...]) -> bool:
     return any(re.search(rf"(?<![a-z]){re.escape(place)}(?![a-z])", lowered) for place in places)
+
+
+def matches_rule(posting: Posting, rule: "SearchRule", keywords: list[str]) -> bool:
+    """Whether a search with `rule` keeps the posting; `keywords` are the rule's plus their related titles."""
+    return (
+        matches_keywords(posting, keywords)
+        and matches_exclusions(posting, rule.exclude)
+        and matches_workplace(posting, rule.workplace_types)
+        and matches_location(posting, rule.location)
+        and posted_within(posting, rule.posted_within_days)
+    )

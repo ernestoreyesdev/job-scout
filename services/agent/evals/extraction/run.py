@@ -12,12 +12,13 @@ from pathlib import Path
 
 import anthropic
 
-from app.agents.schemas import JobDetails, Usage
+from app.agents.schemas import JobDetails
 from app.agents.scoring.agent import score_posting
 from app.config import get_settings
 from app.crypto import decrypt
 from app.db import service_db
 from app.sources.base import Posting
+from app.telemetry import CallLog, RecordingClient
 from evals.results import usage_cost
 
 HERE = Path(__file__).parent
@@ -53,9 +54,10 @@ def main() -> None:
     resumes = db.select("resumes", {"select": "user_id,text", "is_primary": "eq.true", "text": "not.is.null"})
     resume = next(row for row in resumes if row["user_id"] in credentials)
     credential = {"ciphertext": credentials[resume["user_id"]]}
-    client = anthropic.Anthropic(api_key=decrypt(credential["ciphertext"], settings.agent_encryption_key))
+    calls = CallLog()
+    client = RecordingClient(anthropic.Anthropic(api_key=decrypt(credential["ciphertext"], settings.agent_encryption_key)), calls)
 
-    def extract(label: dict) -> tuple[dict, JobDetails, object]:
+    def extract(label: dict) -> tuple[dict, JobDetails]:
         item = inputs[(label["source"], label["external_id"])]
         posting = Posting(
             source=item["source"],
@@ -68,22 +70,20 @@ def main() -> None:
             description=item["text"],
             posted_at=None,
         )
-        fit, usage = score_posting(client, settings.scoring_model, settings.scoring_effort, resume["text"], posting)
-        return label, fit.details, usage
+        return label, score_posting(client, settings.scoring_model, settings.scoring_effort, resume["text"], posting).details
 
     # The first call runs alone so the cached resume prefix exists before the rest.
     first = extract(labels[0])
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = [first, *pool.map(extract, labels[1:])]
 
-    usage = Usage()
+    usage = calls.usage()
     fields = ["salary_min", "salary_max", *EXACT_FIELDS]
     right = {field: 0 for field in fields}
     stated = {field: [0, 0] for field in fields}
     both = extra = missed = 0
     misses: list[str] = []
-    for label, details, call_usage in results:
-        usage.add(call_usage)
+    for label, details in results:
         actual = details.model_dump()
         for field in fields:
             if same(field, label[field], actual[field]):

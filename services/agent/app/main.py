@@ -7,6 +7,7 @@ from typing import Annotated, Any
 
 import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from pydantic import BaseModel
 
 from app.agents.follow_up.agent import FollowUpError, draft_follow_up
 from app.agents.gap_analysis.agent import GapAnalysisError, analyze_gaps
@@ -41,10 +42,13 @@ configure_logging()
 
 RUN_TIME_LIMIT = timedelta(minutes=10)
 UNFINISHED = "in.(queued,running)"
-# What users see when a run fails unexpectedly; the original error goes to run_errors.
-SEARCH_FAILED = "Something went wrong with this search. Try running it again."
-RESCORE_FAILED = "Something went wrong while rescoring. Try again."
-IMPORT_FAILED = "Something went wrong while adding these companies. Try again."
+# What users see when a run of each kind fails unexpectedly; the original error goes to run_errors.
+RUN_FAILED = {
+    "search": "Something went wrong with this search. Try running it again.",
+    "rescore": "Something went wrong while rescoring. Try again.",
+    "import": "Something went wrong while adding these companies. Try again.",
+}
+NO_KEY = "Searches aren't set up yet: the app has no Anthropic key. Ask the admin to add one."
 
 
 app = FastAPI(title="job-finder agent")
@@ -124,53 +128,33 @@ def extract_resume(resume_id: str, user: User, settings: Config) -> dict[str, An
 
 @app.post("/runs/search", status_code=202)
 def start_search(body: SearchRule, user: User, settings: Config, background: BackgroundTasks) -> dict[str, str]:
-    db = user_db(settings, user.access_token)
-    cutoff = (datetime.now(UTC) - RUN_TIME_LIMIT).isoformat()
-    fail_runs(db, {"status": UNFINISHED, "created_at": f"lt.{cutoff}"}, "Stopped after running for more than 10 minutes.")
-    try:
-        run = db.insert("agent_runs", {"user_id": user.id, "kind": "search", "input": body.model_dump()})[0]
-    except httpx.HTTPStatusError as error:
-        if error.response.status_code == 409:
-            raise HTTPException(409, "A search is already running. Wait for it to finish.")
-        raise
-    background.add_task(run_search, run["id"], body, user, settings)
-    return {"run_id": run["id"]}
+    return queue_run("search", body, user, settings, background, run_search)
 
 
 def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Settings) -> None:
-    db = user_db(settings, user.access_token)
-    service = service_db(settings)
-    usage = Usage()
-    report = start_run(db, run_id)
-    calls, timings = CallLog(run_id), {}
-    outcome: dict[str, Any] = {}
-    detail: str | None = None
-    try:
-        api_key = anthropic_key(service, user.id, settings)
-        if not api_key:
-            raise RunError("Searches aren't set up yet: the app has no Anthropic key. Ask the admin to add one.")
-
+    def work(client: Any, db: Rest, service: Rest, report: Callable[[str], None], timings: dict[str, int]) -> dict[str, Any]:
         resume = None
         if body.score:
             resumes = db.select("resumes", {"is_primary": "eq.true", "select": "id,text"})
             if not resumes or not resumes[0]["text"]:
                 raise RunError("Upload a resume first, or search without scoring.")
             resume = resumes[0]
-
-        result = orchestrate_search(
-            rule=body,
-            client=RecordingClient(make_client(api_key), calls),
-            settings=settings,
-            resume_id=resume["id"] if resume else None,
-            resume_text=resume["text"] if resume else None,
-            user_id=user.id,
-            user=db,
-            service=service,
-            usage=usage,
-            report=report,
-            timings=timings,
-        )
-        outcome = {
+        try:
+            result = orchestrate_search(
+                rule=body,
+                client=client,
+                settings=settings,
+                resume_id=resume["id"] if resume else None,
+                resume_text=resume["text"] if resume else None,
+                user_id=user.id,
+                user=db,
+                service=service,
+                report=report,
+                timings=timings,
+            )
+        except CompanyNotFound as exc:
+            return {"status": "failed", "error": str(exc), "error_code": "company_not_found", "progress": None}
+        return {
             "status": "done",
             "error": None,
             "error_code": None,
@@ -179,20 +163,8 @@ def run_search(run_id: str, body: SearchRule, user: CurrentUser, settings: Setti
             "unreachable_boards": result.unreachable_boards,
             "board_fetches": result.board_fetches,
         }
-    except RunStopped:
-        pass
-    except CompanyNotFound as exc:
-        outcome = {"status": "failed", "error": str(exc), "error_code": "company_not_found", "progress": None}
-    except RunError as exc:
-        outcome = {"status": "failed", "error": str(exc), "error_code": None, "progress": None}
-    except Exception as exc:
-        logger.exception("search run %s failed", run_id)
-        detail = f"{exc.__class__.__name__}: {exc}"
-        outcome = {"status": "failed", "error": SEARCH_FAILED, "error_code": None, "progress": None}
 
-    finish_run(db, run_id, outcome, usage, timings)
-    save_run_error(service, run_id, detail)
-    calls.save(service)
+    execute_run(run_id, "search", user, settings, work)
 
 
 def extract_pdf_text(data: bytes) -> str:
@@ -243,45 +215,22 @@ def fail_runs(db: Rest, filters: dict[str, str], error: str) -> None:
 
 @app.post("/runs/rescore", status_code=202)
 def start_rescore(body: RescoreRequest, user: User, settings: Config, background: BackgroundTasks) -> dict[str, str]:
-    db = user_db(settings, user.access_token)
-    cutoff = (datetime.now(UTC) - RUN_TIME_LIMIT).isoformat()
-    fail_runs(db, {"status": UNFINISHED, "created_at": f"lt.{cutoff}"}, "Stopped after running for more than 10 minutes.")
-    try:
-        run = db.insert("agent_runs", {"user_id": user.id, "kind": "rescore", "input": body.model_dump()})[0]
-    except httpx.HTTPStatusError as error:
-        if error.response.status_code == 409:
-            raise HTTPException(409, "A search is already running. Wait for it to finish.")
-        raise
-    background.add_task(run_rescore, run["id"], body, user, settings)
-    return {"run_id": run["id"]}
+    return queue_run("rescore", body, user, settings, background, run_rescore)
 
 
 def run_rescore(run_id: str, body: RescoreRequest, user: CurrentUser, settings: Settings) -> None:
-    db = user_db(settings, user.access_token)
-    service = service_db(settings)
-    usage = Usage()
-    report = start_run(db, run_id)
-    calls, timings = CallLog(run_id), {}
-    outcome: dict[str, Any] = {}
-    detail: str | None = None
-    try:
-        api_key = anthropic_key(service, user.id, settings)
-        if not api_key:
-            raise RunError("Searches aren't set up yet: the app has no Anthropic key. Ask the admin to add one.")
-
+    def work(client: Any, db: Rest, service: Rest, report: Callable[[str], None], timings: dict[str, int]) -> dict[str, Any]:
         resumes = db.select("resumes", {"is_primary": "eq.true", "select": "id,text"})
         if not resumes or not resumes[0]["text"]:
             raise RunError("Upload a resume first.")
-
         count = orchestrate_rescore(
-            client=RecordingClient(make_client(api_key), calls),
+            client=client,
             settings=settings,
             resume_id=resumes[0]["id"],
             resume_text=resumes[0]["text"],
             user_id=user.id,
             user=db,
             service=service,
-            usage=usage,
             report=report,
             scope=body.scope,
             timings=timings,
@@ -291,70 +240,22 @@ def run_rescore(run_id: str, body: RescoreRequest, user: CurrentUser, settings: 
             if count
             else "Every job is already scored with your current resume."
         )
-        outcome = {"status": "done", "error": None, "progress": progress}
-    except RunStopped:
-        pass
-    except RunError as exc:
-        outcome = {"status": "failed", "error": str(exc), "progress": None}
-    except Exception as exc:
-        logger.exception("rescore run %s failed", run_id)
-        detail = f"{exc.__class__.__name__}: {exc}"
-        outcome = {"status": "failed", "error": RESCORE_FAILED, "progress": None}
+        return {"status": "done", "error": None, "error_code": None, "progress": progress}
 
-    finish_run(db, run_id, outcome, usage, timings)
-    save_run_error(service, run_id, detail)
-    calls.save(service)
+    execute_run(run_id, "rescore", user, settings, work)
 
 
 @app.post("/runs/import", status_code=202)
 def start_import(body: CompanyImport, user: User, settings: Config, background: BackgroundTasks) -> dict[str, str]:
-    db = user_db(settings, user.access_token)
-    cutoff = (datetime.now(UTC) - RUN_TIME_LIMIT).isoformat()
-    fail_runs(db, {"status": UNFINISHED, "created_at": f"lt.{cutoff}"}, "Stopped after running for more than 10 minutes.")
-    try:
-        run = db.insert("agent_runs", {"user_id": user.id, "kind": "import", "input": body.model_dump()})[0]
-    except httpx.HTTPStatusError as error:
-        if error.response.status_code == 409:
-            raise HTTPException(409, "A search is already running. Wait for it to finish.")
-        raise
-    background.add_task(run_import, run["id"], body, user, settings)
-    return {"run_id": run["id"]}
+    return queue_run("import", body, user, settings, background, run_import)
 
 
 def run_import(run_id: str, body: CompanyImport, user: CurrentUser, settings: Settings) -> None:
-    db = user_db(settings, user.access_token)
-    service = service_db(settings)
-    usage = Usage()
-    report = start_run(db, run_id)
-    calls, timings = CallLog(run_id), {}
-    outcome: dict[str, Any] = {}
-    detail: str | None = None
-    try:
-        api_key = anthropic_key(service, user.id, settings)
-        if not api_key:
-            raise RunError("Searches aren't set up yet: the app has no Anthropic key. Ask the admin to add one.")
+    def work(client: Any, db: Rest, service: Rest, report: Callable[[str], None], timings: dict[str, int]) -> dict[str, Any]:
+        result = import_companies(entries=body.entries, client=client, settings=settings, service=service, report=report)
+        return {"status": "done", "error": None, "error_code": None, "progress": summarize_import(result)}
 
-        result = import_companies(
-            entries=body.entries,
-            client=RecordingClient(make_client(api_key), calls),
-            settings=settings,
-            service=service,
-            usage=usage,
-            report=report,
-        )
-        outcome = {"status": "done", "error": None, "progress": summarize_import(result)}
-    except RunStopped:
-        pass
-    except RunError as exc:
-        outcome = {"status": "failed", "error": str(exc), "progress": None}
-    except Exception as exc:
-        logger.exception("import run %s failed", run_id)
-        detail = f"{exc.__class__.__name__}: {exc}"
-        outcome = {"status": "failed", "error": IMPORT_FAILED, "progress": None}
-
-    finish_run(db, run_id, outcome, usage, timings)
-    save_run_error(service, run_id, detail)
-    calls.save(service)
+    execute_run(run_id, "import", user, settings, work)
 
 
 def summarize_import(result: ImportResult) -> str:
@@ -393,12 +294,12 @@ def post_gap_analysis(application_id: str, user: User, settings: Config) -> dict
     if not rows:
         raise HTTPException(404, "Job not found.")
     client, resume_text, calls = claude_and_resume(user, settings)
-    usage = Usage()
     try:
-        analysis = analyze_gaps(client, settings.analysis_model, resume_text, Posting.model_validate(rows[0]["posting"]), usage)
+        analysis = analyze_gaps(client, settings.analysis_model, resume_text, Posting.model_validate(rows[0]["posting"]))
     except (GapAnalysisError, anthropic.APIError) as error:
         raise HTTPException(502, f"Couldn't analyze this job: {error}")
     finally:
+        usage = calls.usage()
         calls.save(service_db(settings))
     db.update(
         "applications",
@@ -426,15 +327,13 @@ def post_follow_up(application_id: str, user: User, settings: Config) -> dict[st
     if not applied:
         raise HTTPException(400, "This job was never marked applied.")
     client, resume_text, calls = claude_and_resume(user, settings)
-    usage = Usage()
     posting = rows[0]["posting"]
     try:
-        draft = draft_follow_up(
-            client, settings.analysis_model, resume_text, posting["title"], posting["company"], applied[-1][:10], usage
-        )
+        draft = draft_follow_up(client, settings.analysis_model, resume_text, posting["title"], posting["company"], applied[-1][:10])
     except (FollowUpError, anthropic.APIError) as error:
         raise HTTPException(502, f"Couldn't draft a follow-up: {error}")
     finally:
+        usage = calls.usage()
         calls.save(service_db(settings))
     return {**draft.model_dump(), "usage": usage.model_dump()}
 
@@ -465,7 +364,7 @@ def start_run(db: Rest, run_id: str) -> Callable[[str], None]:
     db.update("agent_runs", {"id": f"eq.{run_id}", "status": "eq.queued"}, {"status": "running", "progress": "Starting…"})
 
     def report(message: str) -> None:
-        if not db.update("agent_runs", {"id": f"eq.{run_id}", "status": "eq.running"}, {"progress": message}):
+        if not db.update("agent_runs", {"id": f"eq.{run_id}", "status": "eq.running", "select": "id"}, {"progress": message}):
             raise RunStopped()
 
     return report
@@ -482,7 +381,7 @@ def finish_run(db: Rest, run_id: str, outcome: dict[str, Any], usage: Usage, tim
         extra={"status": outcome.get("status", "stopped"), "timings": timings, "input_tokens": usage.input_tokens},
     )
     finished = {**measured, "finished_at": datetime.now(UTC).isoformat()}
-    if outcome and db.update("agent_runs", {"id": f"eq.{run_id}", "status": "eq.running"}, {**outcome, **finished}):
+    if outcome and db.update("agent_runs", {"id": f"eq.{run_id}", "status": "eq.running", "select": "id"}, {**outcome, **finished}):
         return
     db.update("agent_runs", {"id": f"eq.{run_id}"}, measured)
 
@@ -493,7 +392,7 @@ def stop_run(run_id: str, user: User, settings: Config) -> dict[str, str]:
     db = user_db(settings, user.access_token)
     stopped = db.update(
         "agent_runs",
-        {"id": f"eq.{run_id}", "status": UNFINISHED},
+        {"id": f"eq.{run_id}", "status": UNFINISHED, "select": "id"},
         {"status": "stopped", "progress": "Stopped.", "finished_at": datetime.now(UTC).isoformat()},
     )
     if not stopped:
@@ -531,16 +430,6 @@ def put_shared_key(body: AnthropicKeyRequest, admin: Admin, settings: Config) ->
 @app.delete("/admin/anthropic-key", status_code=204)
 def delete_shared_key(admin: Admin, settings: Config) -> None:
     service_db(settings).delete("shared_credentials", {"provider": "eq.anthropic"})
-
-
-def select_all(service: Rest, table: str, params: dict[str, str], page: int = 1000) -> list[dict[str, Any]]:
-    """Every matching row, fetched a page at a time past the API's row limit; params need a stable order."""
-    rows: list[dict[str, Any]] = []
-    while True:
-        batch = service.select(table, {**params, "limit": str(page), "offset": str(len(rows))})
-        rows += batch
-        if len(batch) < page:
-            return rows
 
 
 def save_run_error(service: Rest, run_id: str, detail: str | None) -> None:
@@ -597,8 +486,7 @@ def outside_posting(service: Rest, body: OutsideJob) -> str:
         segments = set(link.split("/"))
         match = next((p for p in listed if p.url.split("?")[0].rstrip("/") == link or p.external_id in segments), None)
         if match:
-            row = match.model_dump(mode="json", exclude=None if match.description else {"description"})
-            [row] = service.insert("postings", row, on_conflict="source,external_id", select="id")
+            [row] = service.insert("postings", match.row(), on_conflict="source,external_id", select="id")
             return row["id"]
     if not (body.title and body.company):
         raise HTTPException(422, "Couldn't find this job from its link. Enter its title and company to add it.")
@@ -613,7 +501,7 @@ def outside_posting(service: Rest, body: OutsideJob) -> str:
         description=body.description or "",
         posted_at=None,
     )
-    [row] = service.insert("postings", manual.model_dump(mode="json"), select="id")
+    [row] = service.insert("postings", manual.row(), select="id")
     return row["id"]
 
 
@@ -641,3 +529,66 @@ def same_job(user: Rest, service: Rest, posting_id: str) -> list[dict[str, Any]]
         for row in rows
         if job_key(row["posting"]["company"], row["posting"]["title"]) == key
     ][:1]
+
+
+def queue_run(
+    kind: str,
+    body: BaseModel,
+    user: CurrentUser,
+    settings: Settings,
+    background: BackgroundTasks,
+    task: Callable[..., None],
+) -> dict[str, str]:
+    """
+    Fails the user's runs stuck past RUN_TIME_LIMIT, then queues a run of `kind`
+    and starts `task` on it in the background; a 409 while another run is going.
+    """
+    db = user_db(settings, user.access_token)
+    cutoff = (datetime.now(UTC) - RUN_TIME_LIMIT).isoformat()
+    fail_runs(db, {"status": UNFINISHED, "created_at": f"lt.{cutoff}"}, "Stopped after running for more than 10 minutes.")
+    try:
+        [run] = db.insert("agent_runs", {"user_id": user.id, "kind": kind, "input": body.model_dump()}, select="id")
+    except httpx.HTTPStatusError as error:
+        if error.response.status_code == 409:
+            raise HTTPException(409, "A search is already running. Wait for it to finish.")
+        raise
+    background.add_task(task, run["id"], body, user, settings)
+    return {"run_id": run["id"]}
+
+
+def execute_run(
+    run_id: str,
+    kind: str,
+    user: CurrentUser,
+    settings: Settings,
+    work: Callable[[Any, Rest, Rest, Callable[[str], None], dict[str, int]], dict[str, Any]],
+) -> None:
+    """
+    Runs `work` with the user's recording Claude client, their database, the
+    service database, the progress reporter and the step timings, then saves its
+    outcome, the run's usage and its Claude calls. A RunError fails the run with
+    its message; any other error fails it with RUN_FAILED and is kept in run_errors.
+    """
+    db = user_db(settings, user.access_token)
+    service = service_db(settings)
+    report = start_run(db, run_id)
+    calls, timings = CallLog(run_id), {}
+    outcome: dict[str, Any] = {}
+    detail: str | None = None
+    try:
+        api_key = anthropic_key(service, user.id, settings)
+        if not api_key:
+            raise RunError(NO_KEY)
+        outcome = work(RecordingClient(make_client(api_key), calls), db, service, report, timings)
+    except RunStopped:
+        pass
+    except RunError as exc:
+        outcome = {"status": "failed", "error": str(exc), "error_code": None, "progress": None}
+    except Exception as exc:
+        logger.exception("%s run %s failed", kind, run_id)
+        detail = f"{exc.__class__.__name__}: {exc}"
+        outcome = {"status": "failed", "error": RUN_FAILED[kind], "error_code": None, "progress": None}
+
+    finish_run(db, run_id, outcome, calls.usage(), timings)
+    save_run_error(service, run_id, detail)
+    calls.save(service)

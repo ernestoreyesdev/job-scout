@@ -1,34 +1,29 @@
 "use client";
 
 import { KeyRound } from "lucide-react";
-import { useRef, useState, useTransition } from "react";
+import { useRef } from "react";
 
 import { removeSharedKey, saveSharedKey } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAction } from "@/lib/use-action";
 
 /**
  * Adds, replaces or removes the shared Anthropic key; shows only its hint. `fallback` says whether the
  * ANTHROPIC_API_KEY setting still covers runs when no shared key is saved.
  */
 export function KeyForm({ hint, fallback }: { hint: string | null; fallback: boolean }) {
-  const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const { run, pending, error } = useAction();
   const formRef = useRef<HTMLFormElement>(null);
 
   function save(formData: FormData) {
-    startTransition(async () => {
-      const result = await saveSharedKey(formData);
-      setError(result.ok ? null : (result.error ?? "Could not save the key."));
+    run(() => saveSharedKey(formData), "Could not save the key.", (result) => {
       if (result.ok) formRef.current?.reset();
     });
   }
 
   function remove() {
-    startTransition(async () => {
-      const result = await removeSharedKey();
-      setError(result.ok ? null : (result.error ?? "Could not remove the key."));
-    });
+    run(removeSharedKey, "Could not remove the key.");
   }
 
   return (

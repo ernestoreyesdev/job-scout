@@ -16,6 +16,7 @@ from app.agents.discovery.prompts import DISCOVERY_SYSTEM, NAMING_SYSTEM
 from app.agents.follow_up.prompts import FOLLOW_UP_SYSTEM
 from app.agents.gap_analysis.prompts import GAP_SYSTEM
 from app.agents.hiring_threads.prompts import EXTRACTION_SYSTEM
+from app.agents.schemas import Usage
 from app.agents.scoring.prompts import FIT_SYSTEM
 from app.agents.titles.prompts import TITLES_SYSTEM
 from app.agents.triage.prompts import TRIAGE_SYSTEM
@@ -78,6 +79,12 @@ class CallLog:
             service.insert("llm_calls", rows)
         except Exception as error:
             logger.warning("saving %d Claude calls failed: %s", len(rows), error)
+
+    def usage(self) -> Usage:
+        """Tokens and web searches of the calls recorded since the last save()."""
+        with self._lock:
+            rows = list(self.rows)
+        return Usage(**{field: sum(row[field] for row in rows) for field in Usage.model_fields})
 
 
 class RecordingClient:

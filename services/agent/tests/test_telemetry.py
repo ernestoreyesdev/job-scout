@@ -129,3 +129,18 @@ def test_calls_are_recorded_with_their_prompt_version():
 
     [row] = log.rows
     assert row["prompt_version"] == prompt_version(FIT_SYSTEM, FitScore)
+
+
+def test_usage_adds_up_every_recorded_call_until_saved():
+    log = CallLog("run-1")
+    recording = RecordingClient(client(), log)
+    recording.beta.messages.parse(model="m", system=FIT_SYSTEM, messages=[])
+    recording.messages.create(model="m", system=TITLES_SYSTEM, messages=[])
+    with pytest.raises(RuntimeError):
+        RecordingClient(client(fail=True), log).beta.messages.parse(model="m", system=FIT_SYSTEM, messages=[])
+
+    usage = log.usage()
+
+    assert (usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens) == (1800, 80, 1600)
+    log.save(Insert())
+    assert log.usage().input_tokens == 0

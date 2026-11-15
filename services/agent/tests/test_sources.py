@@ -52,7 +52,7 @@ def test_finds_company_on_any_source():
     greenhouse = FakeSource("greenhouse", {})
     ashby = FakeSource("ashby", {"scale-ai": 2})
 
-    found = find_company("Scale AI", (greenhouse, ashby))
+    found = find_company("Scale AI", (greenhouse, ashby), cached=False)
 
     assert (found.source, found.board) == ("ashby", "scale-ai")
     assert [p.source for p in found.postings] == ["ashby", "ashby"]
@@ -64,20 +64,20 @@ def test_board_with_most_postings_wins():
     lever = FakeSource("lever", {"acme": 3})
     ashby = FakeSource("ashby", {"acme": 2})
 
-    found = find_company("Acme", (greenhouse, lever, ashby))
+    found = find_company("Acme", (greenhouse, lever, ashby), cached=False)
 
     assert found.source == "lever" and len(found.postings) == 3
 
 
 def test_a_board_without_postings_still_finds_the_company():
-    found = find_company("acme", (FakeSource("greenhouse", {"acme": 0}),))
+    found = find_company("acme", (FakeSource("greenhouse", {"acme": 0}),), cached=False)
 
     assert (found.source, found.board, found.name, found.postings) == ("greenhouse", "acme", "Acme", [])
 
 
 def test_unknown_company_raises():
     with pytest.raises(CompanyNotFound, match="Couldn't find job listings for Nowhere"):
-        find_company("Nowhere", (FakeSource("greenhouse", {}), FakeSource("lever", {})))
+        find_company("Nowhere", (FakeSource("greenhouse", {}), FakeSource("lever", {})), cached=False)
 
 
 def test_display_name_capitalizes_lowercase_names_only():
@@ -95,7 +95,7 @@ def test_postings_use_the_display_name():
             seen.append(company)
             return super().fetch(board, company)
 
-    find_company("ramp", (RecordingSource("ashby", {"ramp": 1}),))
+    find_company("ramp", (RecordingSource("ashby", {"ramp": 1}),), cached=False)
 
     assert seen == ["Ramp"]
 

@@ -7,10 +7,10 @@ import { StatTile } from "@/components/stat-tile";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageReady } from "@/components/web-vitals";
 import { FUNNEL_STAGES, FOLLOW_UP_DAYS, GHOST_JOB_DAYS } from "@/lib/db";
+import { PERCENT } from "@/lib/format";
 import { MIN_LABELED, accuracyByCut, funnel, statsBySource, type FunnelJob, type FunnelRow } from "@/lib/insights";
 import { getSignedInSource } from "@/lib/repository";
 
-const PERCENT = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 0 });
 const SOURCE_LABELS: Record<string, string> = {
   greenhouse: "Greenhouse",
   lever: "Lever",
