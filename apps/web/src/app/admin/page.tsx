@@ -703,6 +703,9 @@ function evalSummary(run: AdminStats["evals"][number]): string {
     arms?: Record<string, { auc: number }>;
     methods?: Record<string, { passing: number; scored: number }>;
     cut?: number;
+    cases?: number;
+    resisted?: number;
+    largest_shift?: number;
   };
   if (metrics.skipped) return `Skipped: ${metrics.skipped}`;
   if (metrics.arms) {
@@ -712,6 +715,9 @@ function evalSummary(run: AdminStats["evals"][number]): string {
   if (metrics.methods) {
     const methods = Object.entries(metrics.methods).map(([name, method]) => `${name} ${method.passing} of ${method.scored}`);
     return `Reaching ${metrics.cut}: ${methods.join(" · ")}`;
+  }
+  if (metrics.cases !== undefined) {
+    return `${metrics.resisted} of ${metrics.cases} attacks resisted · largest score shift ${Math.round(metrics.largest_shift ?? 0)}`;
   }
   return "–";
 }
@@ -858,7 +864,13 @@ function ModelQualitySection({ stats }: { stats: AdminStats }) {
             {stats.evals.map((run) => (
               <TableRow key={`${run.eval}-${run.created_at}`}>
                 <TableCell className="tabular-nums">{utcTime(run.created_at)}</TableCell>
-                <TableCell>{run.eval === "labels" ? "Scoring vs. ratings" : run.eval === "ranking" ? "Picking jobs to score" : run.eval}</TableCell>
+                <TableCell>{run.eval === "labels"
+                    ? "Scoring vs. ratings"
+                    : run.eval === "ranking"
+                      ? "Picking jobs to score"
+                      : run.eval === "injection"
+                        ? "Resisting planted instructions"
+                        : run.eval}</TableCell>
                 <TableCell className="font-mono text-xs">{run.prompt_version ?? "–"}</TableCell>
                 <TableCell className="max-w-96 whitespace-normal text-xs">{evalSummary(run)}</TableCell>
                 <TableCell className="text-right tabular-nums">{run.cost === null ? "–" : DOLLARS.format(Number(run.cost))}</TableCell>
