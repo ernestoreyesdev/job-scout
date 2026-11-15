@@ -9,7 +9,6 @@ import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
-from app.agents.follow_up.agent import FollowUpError, draft_follow_up
 from app.agents.gap_analysis.agent import GapAnalysisError, analyze_gaps
 from app.agents.orchestrator import (
     ImportResult,
@@ -308,35 +307,6 @@ def post_gap_analysis(application_id: str, user: User, settings: Config) -> dict
         {"gap_analysis": analysis.model_dump(), "gap_analyzed_at": datetime.now(UTC).isoformat()},
     )
     return {"gap_analysis": analysis.model_dump(), "usage": usage.model_dump()}
-
-
-@app.post("/applications/{application_id}/follow-up")
-def post_follow_up(application_id: str, user: User, settings: Config) -> dict[str, Any]:
-    import anthropic
-
-    db = user_db(settings, user.access_token)
-    rows = db.select(
-        "applications",
-        {
-            "id": f"eq.{application_id}",
-            "select": "id,posting:postings(title,company),events:application_events(status,changed_at)",
-        },
-    )
-    if not rows:
-        raise HTTPException(404, "Job not found.")
-    applied = sorted(event["changed_at"] for event in rows[0]["events"] if event["status"] == "applied")
-    if not applied:
-        raise HTTPException(400, "This job was never marked applied.")
-    client, resume_text, calls = claude_and_resume(user, settings)
-    posting = rows[0]["posting"]
-    try:
-        draft = draft_follow_up(client, settings.analysis_model, resume_text, posting["title"], posting["company"], applied[-1][:10])
-    except (FollowUpError, anthropic.APIError) as error:
-        raise HTTPException(502, f"Couldn't draft a follow-up: {error}")
-    finally:
-        usage = calls.usage()
-        calls.save(service_db(settings))
-    return {**draft.model_dump(), "usage": usage.model_dump()}
 
 
 def anthropic_key(service: Rest, user_id: str, settings: Settings) -> str | None:

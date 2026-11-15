@@ -157,11 +157,6 @@ class GapAnalysis(BaseModel):
     missing: list[GapItem] = Field(description="Requirements the resume doesn't show at all.")
 
 
-class FollowUpDraft(BaseModel):
-    subject: str = Field(description="Email subject line.")
-    body: str = Field(description="Short, polite email body, signed with the candidate's name from the resume.")
-
-
 class RelatedTitles(BaseModel):
     titles: list[str] = Field(description="Core job titles employers use for these roles, without seniority words.")
 

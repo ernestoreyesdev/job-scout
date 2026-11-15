@@ -6,7 +6,7 @@ import { SectionCard } from "@/components/section-card";
 import { StatTile } from "@/components/stat-tile";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageReady } from "@/components/web-vitals";
-import { FUNNEL_STAGES, FOLLOW_UP_DAYS, GHOST_JOB_DAYS } from "@/lib/db";
+import { FUNNEL_STAGES, GHOST_JOB_DAYS } from "@/lib/db";
 import { PERCENT } from "@/lib/format";
 import { MIN_LABELED, accuracyByCut, funnel, statsBySource, type FunnelJob, type FunnelRow } from "@/lib/insights";
 import { getSignedInSource } from "@/lib/repository";
@@ -47,10 +47,9 @@ export default function InsightsPage() {
 
 async function InsightsData() {
   const { repository } = await getSignedInSource();
-  const [jobs, funnelJobs, followUps, aging] = await Promise.all([
+  const [jobs, funnelJobs, aging] = await Promise.all([
     repository.listScoredJobs(),
     repository.listFunnelJobs(),
-    repository.listFollowUpsDue(),
     repository.countAgingJobs(),
   ]);
   const [overall] = funnel(funnelJobs);
@@ -105,30 +104,12 @@ async function InsightsData() {
         )}
       </SectionCard>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <SectionCard title="Follow-ups due" description={`Jobs still applied ${FOLLOW_UP_DAYS} or more days later, with a draft email on Jobs.`}>
-          {followUps.length === 0 ? (
-            <p className="text-sm text-muted-foreground">None right now.</p>
-          ) : (
-            <ul className="space-y-2 text-sm">
-              {followUps.map((job) => (
-                <li key={job.id} className="flex items-baseline justify-between gap-3">
-                  <span className="min-w-0 truncate">
-                    {job.title} <span className="text-muted-foreground">at {job.company}</span>
-                  </span>
-                  <span className="shrink-0 text-amber-600 dark:text-amber-400">{job.days} days</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </SectionCard>
-        <SectionCard title="Possible ghost jobs" description={`Postings still listed ${GHOST_JOB_DAYS}+ days after they went up.`}>
-          <p className="text-3xl font-semibold tabular-nums">{aging}</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {aging === 1 ? "job is" : "jobs are"} flagged on the Tracker and Jobs, along with reposted ones.
-          </p>
-        </SectionCard>
-      </div>
+      <SectionCard title="Possible ghost jobs" description={`Postings still listed ${GHOST_JOB_DAYS}+ days after they went up.`}>
+        <p className="text-3xl font-semibold tabular-nums">{aging}</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {aging === 1 ? "job is" : "jobs are"} flagged on the Tracker and Jobs, along with reposted ones.
+        </p>
+      </SectionCard>
 
       <SectionCard title="Where your jobs come from" description="Every job scored for you, by the system it came from.">
         {sources.length === 0 ? (

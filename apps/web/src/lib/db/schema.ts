@@ -29,8 +29,6 @@ export const FUNNEL_STAGES = ["applied", "interviewing", "offer"] as const;
 /** A still-listed posting this many days old is flagged as a possible ghost job. */
 export const GHOST_JOB_DAYS = 60;
 
-/** An application still "applied" this many days after it was marked so gets a follow-up reminder. */
-export const FOLLOW_UP_DAYS = 7;
 
 /** A posting counts as reposted when the same title went up at the company at least this many days earlier. */
 export const REPOST_DAYS = 15;

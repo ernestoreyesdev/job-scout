@@ -3,13 +3,12 @@
 import { ChevronDown, ExternalLink, ThumbsDown, ThumbsUp, Trash2 } from "lucide-react";
 import { useState } from "react";
 
-import { analyzeGaps, deleteApplication, draftFollowUp, updateApplication } from "@/app/actions";
+import { analyzeGaps, deleteApplication, updateApplication } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   APPLICATION_STATUSES,
-  FOLLOW_UP_DAYS,
   GHOST_JOB_DAYS,
   type FitLabelRow,
   type GapItem,
@@ -55,8 +54,7 @@ export function JobRow({
 }) {
   const { run, pending, error } = useAction();
   const [expanded, setExpanded] = useState(false);
-  const [followUp, setFollowUp] = useState<{ subject: string; body: string } | null>(null);
-  const { openDays, reposted, daysSinceApplied, duplicateOf } = job.signals;
+  const { openDays, reposted, duplicateOf } = job.signals;
   const addedByUser = job.added_by === "user";
   const ghost = [
     openDays !== null && openDays >= GHOST_JOB_DAYS && `Open ${openDays} days`,
@@ -78,14 +76,6 @@ export function JobRow({
 
   function analyze() {
     run(() => analyzeGaps(job.id), "Could not analyze this job.");
-  }
-
-  function draft() {
-    run(() => draftFollowUp(job.id), "Could not draft a follow-up.", (result) => {
-      if (result.ok && result.subject !== undefined && result.body !== undefined) {
-        setFollowUp({ subject: result.subject, body: result.body });
-      }
-    });
   }
 
   function remove() {
@@ -153,34 +143,6 @@ export function JobRow({
         )}
         {job.fit_summary && (
           <p className={cn("mt-2 text-sm text-muted-foreground", !expanded && "line-clamp-2")}>{job.fit_summary}</p>
-        )}
-        {daysSinceApplied !== null && daysSinceApplied >= FOLLOW_UP_DAYS && (
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-            <span className={WARNING_CHIP}>No response in {daysSinceApplied} days</span>
-            {!followUp && (
-              <button type="button" onClick={draft} disabled={pending} className="underline hover:text-foreground">
-                {pending ? "Drafting…" : "Draft follow-up"}
-              </button>
-            )}
-          </div>
-        )}
-        {followUp && (
-          <div className="mt-2 space-y-1 rounded-lg border p-3 text-sm">
-            <p className="font-medium">{followUp.subject}</p>
-            <Textarea readOnly value={followUp.body} rows={6} />
-            <div className="flex gap-3 text-xs">
-              <button
-                type="button"
-                onClick={() => navigator.clipboard.writeText(`${followUp.subject}\n\n${followUp.body}`)}
-                className="underline hover:text-foreground"
-              >
-                Copy
-              </button>
-              <button type="button" onClick={() => setFollowUp(null)} className="text-muted-foreground hover:text-foreground">
-                Close
-              </button>
-            </div>
-          </div>
         )}
         <button
           type="button"

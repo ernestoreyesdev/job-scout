@@ -15,7 +15,7 @@ import type {
   ResumeRow,
   ThemeRow,
 } from "./schema";
-import { FOLLOW_UP_DAYS, GHOST_JOB_DAYS, REPOST_DAYS, SKIPPED_COMPANY_KINDS } from "./schema";
+import { GHOST_JOB_DAYS, REPOST_DAYS, SKIPPED_COMPANY_KINDS } from "./schema";
 import type { FunnelJob, ScoredJob } from "../insights";
 import { jobKey } from "../job-key";
 
@@ -33,7 +33,6 @@ type TrackedJobRow = ApplicationRow & {
 export type JobSignals = {
   openDays: number | null;
   reposted: boolean;
-  daysSinceApplied: number | null;
   duplicateOf: ApplicationStatusRow | null;
 };
 
@@ -174,13 +173,11 @@ export class JobFinderRepository {
     const now = Date.now();
     const days = (date: string) => daysSince(date, now);
     return jobs.map((job) => {
-      const applied = job.events.filter((event) => event.status === "applied").at(-1);
       return {
         ...job,
         signals: {
           openDays: job.posting.closed_at ? null : days(job.posting.posted_at ?? job.posting.created_at),
           reposted: reposted.has(job.posting.id),
-          daysSinceApplied: job.status === "applied" && applied ? days(applied.changed_at) : null,
           duplicateOf:
             copies.get(jobKey(job.posting.company, job.posting.title))?.find((copy) => copy.id !== job.id)?.status ?? null,
         },
@@ -361,24 +358,6 @@ export class JobFinderRepository {
       resume: job.resume?.file_name ?? "Unknown resume",
       addedBy: job.added_by,
     }));
-  }
-
-  /** Jobs still "applied" FOLLOW_UP_DAYS or more after being marked so, longest waiting first. */
-  async listFollowUpsDue(): Promise<{ id: string; title: string; company: string; days: number }[]> {
-    const { data, error } = await this.client
-      .from("applications")
-      .select("id, posting:postings!inner(title, company), events:application_events(status, changed_at)")
-      .eq("status", "applied");
-    if (error) throw error;
-    const now = Date.now();
-    return data
-      .map((job) => {
-        const applied = job.events.filter((event) => event.status === "applied").map((event) => event.changed_at).sort().at(-1);
-        const days = applied ? daysSince(applied, now) : 0;
-        return { id: job.id, title: job.posting.title, company: job.posting.company, days };
-      })
-      .filter((job) => job.days >= FOLLOW_UP_DAYS)
-      .sort((a, b) => b.days - a.days);
   }
 
   /** The user's tracked jobs whose posting is still listed GHOST_JOB_DAYS or more after it went up. */

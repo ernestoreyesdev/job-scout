@@ -222,22 +222,6 @@ export async function analyzeGaps(id: string): Promise<ActionResult> {
   });
 }
 
-export type FollowUpResult = ActionResult & { subject?: string; body?: string };
-
-/** Drafts a follow-up email for an application with no response; nothing is sent. */
-export async function draftFollowUp(id: string): Promise<FollowUpResult> {
-  try {
-    const draft = await callAgent<{ subject: string; body: string }>(
-      `/applications/${encodeURIComponent(id)}/follow-up`,
-      { method: "POST" },
-    );
-    return { ok: true, subject: draft.subject, body: draft.body };
-  } catch (error) {
-    unstable_rethrow(error);
-    return { ok: false, error: error instanceof Error ? error.message : "Could not draft a follow-up." };
-  }
-}
-
 /** Stops a queued or running search, re-score or import; jobs it already added stay. */
 export async function stopRun(runId: string): Promise<ActionResult> {
   return run(["/tracker", "/jobs"], async () => {

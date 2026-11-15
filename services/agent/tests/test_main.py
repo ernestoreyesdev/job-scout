@@ -7,7 +7,7 @@ from fastapi import BackgroundTasks, HTTPException
 
 from app import main
 from app.agents.orchestrator import ImportResult, SearchResult
-from app.agents.schemas import FollowUpDraft, GapAnalysis, GapItem, SearchRule
+from app.agents.schemas import GapAnalysis, GapItem, SearchRule
 from app.auth import CurrentUser
 from app.db import Rest
 from app.sources.base import CompanyNotFound, Posting
@@ -183,34 +183,6 @@ def test_gap_analysis_of_someone_elses_job_is_not_found(monkeypatch: pytest.Monk
         call_job_endpoint(monkeypatch, main.post_gap_analysis, JobRest(None))
 
     assert missing.value.status_code == 404
-
-
-def test_follow_up_uses_the_latest_applied_date(monkeypatch: pytest.MonkeyPatch):
-    seen: list[str] = []
-
-    def draft(client: Any, model: str, resume: str, title: str, company: str, applied_on: str) -> FollowUpDraft:
-        seen.append(applied_on)
-        return FollowUpDraft(subject="Following up", body="Hi team")
-
-    events = [
-        {"status": "saved", "changed_at": "2026-10-01T10:00:00+00:00"},
-        {"status": "applied", "changed_at": "2026-10-03T10:00:00+00:00"},
-        {"status": "applied", "changed_at": "2026-10-20T10:00:00+00:00"},
-    ]
-    db = JobRest({"id": "app-1", "posting": {"title": "Backend Engineer", "company": "Acme"}, "events": events})
-
-    result = call_job_endpoint(monkeypatch, main.post_follow_up, db, draft_follow_up=draft)
-
-    assert seen == ["2026-10-20"] and (result["subject"], result["body"]) == ("Following up", "Hi team")
-
-
-def test_follow_up_needs_an_applied_job(monkeypatch: pytest.MonkeyPatch):
-    db = JobRest({"id": "app-1", "posting": {"title": "T", "company": "C"}, "events": [{"status": "saved", "changed_at": "x"}]})
-
-    with pytest.raises(HTTPException) as refused:
-        call_job_endpoint(monkeypatch, main.post_follow_up, db)
-
-    assert refused.value.status_code == 400
 
 
 def test_stopping_a_run_marks_it_stopped_only_while_it_is_unfinished(monkeypatch: pytest.MonkeyPatch):
