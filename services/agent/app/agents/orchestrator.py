@@ -1024,22 +1024,21 @@ def stored_jobs(service: Rest, boards: list[Board]) -> dict[str, list[Posting]]:
         return jobs
     names = ",".join(f'"{board}"' for board in sorted({board for _, board, _, _ in boards}))
     params = {
-        "select": "source,board,external_id,title,company,location,url,posted_at,workplace_type",
+        "select": "id,source,board,external_id,title,company,location,url,posted_at,workplace_type",
         "board": f"in.({names})",
         "closed_at": "is.null",
         "order": "id",
+        "limit": "1000",
     }
-    page = 1000
-    offset = 0
     while True:
-        rows = service.select("postings", {**params, "limit": str(page), "offset": str(offset)})
+        rows = service.select("postings", params)
         for row in rows:
             key = f"{row['source']}/{row['board']}"
             if key in jobs:
                 jobs[key].append(Posting.model_validate({**row, "description": ""}))
-        if len(rows) < page:
+        if len(rows) < int(params["limit"]):
             return jobs
-        offset += page
+        params = {**params, "id": f"gt.{rows[-1]['id']}"}
 
 
 def refresh_boards(

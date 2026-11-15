@@ -137,7 +137,8 @@ class FakeRest(Rest):
         if table == "postings" and params.get("select") == "id,description":
             return self.descriptions
         if table == "postings":
-            return self.stored[int(params.get("offset", "0")) :][: int(params.get("limit", "1000"))]
+            after = params.get("id", "gt.")[3:]
+            return [row for row in self.stored if row["id"] > after][: int(params.get("limit", "1000"))]
         if "posting.embedding" in params:
             return self.unembedded_labeled
         if params.get("fit_label", "").startswith("eq."):
@@ -1271,7 +1272,7 @@ def test_a_recently_fetched_board_is_read_from_saved_jobs_instead_of_its_system(
     saved = {k: v for k, v in REMOTE_JOB.model_dump(mode="json").items() if k != "description"}
 
     (result, _, _, service, _, _), fetched, _ = directory_run(
-        [*full_directory(), {**workday_company("acme"), "checked_at": checked}], [], {}, stored=[{**saved, "board": "acme", "source": "workday"}]
+        [*full_directory(), {**workday_company("acme"), "checked_at": checked}], [], {}, stored=[{**saved, "id": "p-1", "board": "acme", "source": "workday"}]
     )
 
     assert not any(board == "acme" for _, board, _ in fetched)
@@ -1424,3 +1425,14 @@ def test_a_job_tracked_from_another_source_is_skipped():
 
     assert (result.already_tracked, result.scored) == (1, 1)
     assert saved_ids(user) == ["posting-2"]
+
+
+def test_saved_jobs_are_read_a_page_at_a_time_after_the_last_id():
+    saved = {k: v for k, v in REMOTE_JOB.model_dump(mode="json").items() if k != "description"}
+    service = FakeRest()
+    service.stored = [{**saved, "id": f"p-{n:04d}", "external_id": str(n), "board": "acme"} for n in range(1001)]
+
+    jobs = orchestrator.stored_jobs(service, [(saved["source"], "acme", "Acme", "discovery")])
+
+    assert len(jobs[f"{saved['source']}/acme"]) == 1001
+    assert [params.get("id") for table, params in service.selects if table == "postings"] == [None, "gt.p-0999"]
