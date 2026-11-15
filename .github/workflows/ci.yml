@@ -102,11 +102,12 @@ jobs:
       - run: supabase test db --workdir infra
 
   # Applies new migrations to the hosted database once every check passes; Vercel's Deployment Checks hold the
-  # production deploy until this job succeeds, so new code goes live after its migrations.
+  # production deploy until this job succeeds, so new code goes live after its migrations. It also runs when a check
+  # failed, and fails then, since Vercel treats a skipped check as passed.
   migrate:
     name: Apply migrations to production
     needs: [agent, web, e2e, migrations, secrets]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     concurrency: production-migrations
     env:
@@ -115,6 +116,11 @@ jobs:
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       POOLER_HOST: aws-0-us-east-1.pooler.supabase.com
     steps:
+      - name: Hold the deploy when a check didn't pass
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: |
+          echo "A check didn't pass, so migrations don't run and Vercel holds the production deploy."
+          exit 1
       - uses: actions/checkout@v7
       - uses: supabase/setup-cli@v3
         with:

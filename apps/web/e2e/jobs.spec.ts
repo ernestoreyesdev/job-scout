@@ -24,7 +24,7 @@ test("a status change moves the job to Jobs and survives a reload", async ({ pag
 test("a good rating saves the job to Jobs and keeps it under Rated", async ({ page }) => {
   await page.goto("/tracker");
   await page.getByRole("button", { name: `Mark ${RATED_TITLE} as a good fit` }).click();
-  await expect(page.getByText(`${RATED_TITLE} moved to Jobs.`)).toBeVisible();
+  await expect(page.getByRole("link", { name: RATED_TITLE })).toHaveCount(0);
 
   await page.goto("/jobs");
   const saved = page.getByRole("link", { name: RATED_TITLE }).locator("xpath=ancestor::*[.//button[@role='combobox']][1]");
