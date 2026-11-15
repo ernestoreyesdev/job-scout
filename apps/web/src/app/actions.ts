@@ -7,6 +7,7 @@ import {
   APPLICATION_STATUSES,
   FIT_LABELS,
   MAX_COMPANY_IMPORT,
+  MAX_LESSON_LENGTH,
   MAX_JOBS_PER_SEARCH,
   MIN_SCORES,
   OUTSIDE_STATUSES,
@@ -273,5 +274,29 @@ export async function addOutsideJob(formData: FormData): Promise<AddJobResult> {
 export async function deleteAccount(): Promise<ActionResult> {
   return run([], async () => {
     await callAgent("/me", { method: "DELETE" });
+  });
+}
+
+export async function addLesson(formData: FormData): Promise<ActionResult> {
+  return run("/resume", async () => {
+    const lesson = text(formData.get("lesson"));
+    if (!lesson) throw new Error("Write a preference, such as \"No jobs that need a security clearance\".");
+    if (lesson.length > MAX_LESSON_LENGTH) throw new Error(`Keep it under ${MAX_LESSON_LENGTH} characters.`);
+    const { repository } = await getSignedInSource();
+    await repository.addLesson(lesson);
+  });
+}
+
+export async function deleteLesson(id: string): Promise<ActionResult> {
+  return run("/resume", async () => {
+    const { repository } = await getSignedInSource();
+    await repository.deleteLesson(id);
+  });
+}
+
+/** Learns the lessons again from the user's ratings and statuses now. */
+export async function refreshLessons(): Promise<ActionResult> {
+  return run("/resume", async () => {
+    await callAgent("/me/lessons/refresh", { method: "POST" });
   });
 }

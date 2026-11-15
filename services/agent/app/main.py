@@ -10,6 +10,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from app.agents.gap_analysis.agent import GapAnalysisError, analyze_gaps
+from app.agents.lessons.agent import MIN_JOBS, LessonsError, relearn, signal_jobs
 from app.agents.orchestrator import (
     ImportResult,
     SearchResult,
@@ -563,3 +564,26 @@ def execute_run(
     finish_run(db, run_id, outcome, calls.usage(), timings)
     save_run_error(service, run_id, detail)
     calls.save(service)
+
+
+@app.post("/me/lessons/refresh")
+def post_lessons_refresh(user: User, settings: Config) -> dict[str, Any]:
+    import anthropic
+
+    service = service_db(settings)
+    api_key = anthropic_key(service, user.id, settings)
+    if not api_key:
+        raise HTTPException(400, "This isn't set up yet: the app has no Anthropic key. Ask the admin to add one.")
+    db = user_db(settings, user.access_token)
+    jobs = signal_jobs(db)
+    if len(jobs) < MIN_JOBS:
+        raise HTTPException(400, f"Rate or apply to at least {MIN_JOBS} jobs first.")
+    calls = CallLog()
+    try:
+        relearn(RecordingClient(make_client(api_key), calls), settings.analysis_model, db, user.id, jobs, datetime.now(UTC))
+    except (LessonsError, anthropic.APIError) as error:
+        raise HTTPException(502, f"Couldn't update what Job Scout has learned: {error}")
+    finally:
+        usage = calls.usage()
+        calls.save(service)
+    return {"usage": usage.model_dump()}

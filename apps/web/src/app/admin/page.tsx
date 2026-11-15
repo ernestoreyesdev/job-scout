@@ -36,6 +36,7 @@ const STEP_LABELS: Record<string, string> = {
   discovery: "Finding companies",
   naming: "Labeling companies",
   gap_analysis: "Gap analysis",
+  lessons: "Learning preferences",
   other: "Other",
 };
 

@@ -15,6 +15,7 @@ from typing import Any
 from app.agents.discovery.prompts import DISCOVERY_SYSTEM, NAMING_SYSTEM
 from app.agents.gap_analysis.prompts import GAP_SYSTEM
 from app.agents.hiring_threads.prompts import EXTRACTION_SYSTEM
+from app.agents.lessons.prompts import LESSONS_SYSTEM
 from app.agents.schemas import Usage
 from app.agents.scoring.prompts import FIT_SYSTEM
 from app.agents.titles.prompts import TITLES_SYSTEM
@@ -35,6 +36,7 @@ STEPS = {
     NAMING_SYSTEM: "naming",
     EXTRACTION_SYSTEM: "hacker_news",
     GAP_SYSTEM: "gap_analysis",
+    LESSONS_SYSTEM: "lessons",
 }
 MAX_ERROR_LENGTH = 500
 

@@ -127,6 +127,8 @@ class FakeRest(Rest):
 
     def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
         self.selects.append((table, params))
+        if table in ("lessons", "profiles"):
+            return []
         if table == "companies":
             return self.companies
         if table == "hidden_companies":
@@ -803,7 +805,7 @@ def test_rescore_updates_only_jobs_unscored_or_scored_against_another_resume():
 
     class StaleRest(FakeRest):
         def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
-            if "fit_label" in params:
+            if "fit_label" in params or table == "lessons":
                 return []
             selects.append(params)
             return [{"posting_id": "posting-1", "posting": {**JOBS[0].model_dump(mode="json"), "id": "posting-1"}}]

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { FileText } from "lucide-react";
 import { Suspense } from "react";
 
+import { Lessons } from "@/components/lessons";
 import { ResumeUpload } from "@/components/resume-upload";
 import { SectionCard } from "@/components/section-card";
 import { PageReady } from "@/components/web-vitals";
@@ -20,6 +21,9 @@ export default function ResumePage() {
         </SectionCard>
         <Suspense fallback={<div className="h-40 animate-pulse rounded-xl border bg-card" />}>
           <PrimaryResume />
+        </Suspense>
+        <Suspense fallback={<div className="h-40 animate-pulse rounded-xl border bg-card" />}>
+          <LearnedLessons />
         </Suspense>
       </div>
     </main>
@@ -52,5 +56,19 @@ async function PrimaryResume() {
         )}
       </SectionCard>
     </>
+  );
+}
+
+async function LearnedLessons() {
+  const { repository } = await getSignedInSource();
+  const lessons = await repository.listLessons();
+
+  return (
+    <SectionCard
+      title="What Job Scout has learned"
+      description="Scoring weighs these preferences, learned from your ratings and applications. Ones you write count as firm rules."
+    >
+      <Lessons lessons={lessons} />
+    </SectionCard>
   );
 }

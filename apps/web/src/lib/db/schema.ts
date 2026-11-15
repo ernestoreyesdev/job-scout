@@ -68,6 +68,7 @@ export type ProfileRow = {
   user_id: string;
   anthropic_key_hint: string | null;
   theme: ThemeRow;
+  lessons_fingerprint: string | null;
   updated_at: string;
 };
 
@@ -234,6 +235,24 @@ export type AgentRunRow = {
   finished_at: string | null;
 };
 
+/** A learned lesson no update has confirmed for this many days stops counting. */
+export const LESSON_FADE_DAYS = 60;
+
+export const MAX_LESSON_LENGTH = 200;
+
+/** A preference the user wrote, or one learned from their ratings and statuses; a deleted one keeps its row. */
+export type LessonRow = {
+  id: string;
+  user_id: string;
+  text: string;
+  source: "learned" | "user";
+  evidence: number;
+  confirmed_at: string;
+  deleted_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 /** The database shape supabase-js types queries with; `__InternalSupabase` sets its PostgREST behavior. */
 export type Database = {
   __InternalSupabase: { PostgrestVersion: "12" };
@@ -308,6 +327,12 @@ export type Database = {
         Row: HiddenCompanyRow;
         Insert: Partial<HiddenCompanyRow> & Pick<HiddenCompanyRow, "user_id" | "company_id">;
         Update: never;
+        Relationships: [];
+      };
+      lessons: {
+        Row: LessonRow;
+        Insert: Pick<LessonRow, "user_id" | "text" | "source">;
+        Update: Pick<LessonRow, "deleted_at">;
         Relationships: [];
       };
       web_vitals: {

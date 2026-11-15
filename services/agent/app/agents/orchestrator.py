@@ -10,9 +10,10 @@ from typing import Any, NamedTuple
 
 from app.agents.discovery.agent import FoundBoard, discover_boards, find_company_boards, name_companies
 from app.agents.hiring_threads.agent import HiringPost, cached_recent_posts, extract_jobs, post_id
+from app.agents.lessons.agent import refresh_lessons, saved_lessons
 from app.agents.schemas import CompanyName, RescoreScope, SearchRule
 from app.agents.scoring.agent import score_and_save
-from app.agents.scoring.prompts import LabeledJob
+from app.agents.scoring.prompts import LabeledJob, Lesson
 from app.agents.titles.agent import related_titles
 from app.config import Settings
 from app.db import Rest
@@ -199,6 +200,7 @@ def run_search(
     scores: dict[str, int] = {}
     scored = failed = picked = 0
     examples: list[LabeledJob] = []
+    lessons: list[Lesson] = []
     for round_number in range(rounds):
         chosen = pick(fresh, pool_size * (round_number + 1), per_company)
         if len(chosen) == picked:
@@ -209,6 +211,8 @@ def run_search(
         if round_number == 0:
             with timed(timings, "examples"):
                 examples = labeled_examples(user, service, batch, embed, labels)
+            with timed(timings, "lessons"):
+                lessons = current_lessons(client, settings, user, user_id)
         with timed(timings, "scoring"):
             scoring = score_and_save(
                 client=client,
@@ -222,6 +226,7 @@ def run_search(
                 service=service,
                 report=report,
                 examples=examples,
+                lessons=lessons,
                 min_score=rule.min_score,
             )
         todo += batch
@@ -536,6 +541,7 @@ def rescore(
     todo = with_descriptions(todo, service, describer)
     with timed(timings, "examples"):
         examples = labeled_examples(user, service, todo, embed, label_counts(user))
+    lessons = saved_lessons(user, datetime.now(UTC))
     with timed(timings, "scoring"):
         scoring = score_and_save(
             client=client,
@@ -549,6 +555,7 @@ def rescore(
             service=service,
             report=report,
             examples=examples,
+            lessons=lessons,
         )
     return scoring.scored
 
@@ -1053,3 +1060,16 @@ def timed_call(timings: dict[str, int] | None, step: str, fn: Callable[..., Any]
     """fn(*args), its milliseconds added to timings[step]."""
     with timed(timings, step):
         return fn(*args)
+
+
+def current_lessons(client: Any, settings: Settings, user: Rest, user_id: str) -> list[Lesson]:
+    """
+    Learns the user's lessons again when their ratings or statuses changed, then
+    returns the saved ones; a failed update leaves the saved ones as they were.
+    """
+    now = datetime.now(UTC)
+    try:
+        refresh_lessons(client, settings.analysis_model, user, user_id, now)
+    except Exception as error:
+        logger.warning("learning preferences failed: %s", error)
+    return saved_lessons(user, now)

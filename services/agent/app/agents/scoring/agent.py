@@ -8,7 +8,7 @@ from typing import Any
 
 from app.agents.claude import parse
 from app.agents.schemas import FitScore, JobDetails, RunStopped
-from app.agents.scoring.prompts import FIT_SYSTEM, LabeledJob, fit_blocks
+from app.agents.scoring.prompts import FIT_SYSTEM, LabeledJob, Lesson, fit_blocks
 from app.db import Rest
 from app.sources.base import Posting
 from app.telemetry import ContextThreadPool, prompt_version
@@ -32,16 +32,22 @@ class ScoringResult:
 
 
 def score_posting(
-    client: Any, model: str, effort: str, resume_text: str, posting: Posting, examples: Sequence[LabeledJob] = ()
+    client: Any,
+    model: str,
+    effort: str,
+    resume_text: str,
+    posting: Posting,
+    examples: Sequence[LabeledJob] = (),
+    lessons: Sequence[Lesson] = (),
 ) -> FitScore:
-    """One Claude call: the resume, the user's labeled examples and one job in, a structured fit score out."""
+    """One Claude call: the resume, the user's labeled examples and lessons and one job in, a structured fit score out."""
     return parse(
         client,
         model=model,
         max_tokens=16000,
         effort=effort,
         system=FIT_SYSTEM,
-        content=fit_blocks(resume_text, posting, examples),
+        content=fit_blocks(resume_text, posting, examples, lessons),
         output_format=FitScore,
         error=ScoringError,
         failure="Scoring",
@@ -61,6 +67,7 @@ def score_and_save(
     service: Rest,
     report: Callable[[str], None],
     examples: Sequence[LabeledJob] = (),
+    lessons: Sequence[Lesson] = (),
     min_score: int | None = None,
 ) -> ScoringResult:
     """
@@ -74,7 +81,7 @@ def score_and_save(
     scores: dict[str, int] = {}
 
     def score_one(posting_id: str, posting: Posting) -> None:
-        fit = score_posting(client, model, effort, resume_text, posting, examples)
+        fit = score_posting(client, model, effort, resume_text, posting, examples, lessons)
         user.insert(
             "applications",
             {

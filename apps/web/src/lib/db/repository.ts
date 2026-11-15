@@ -10,12 +10,13 @@ import type {
   Database,
   FitLabelRow,
   JobSort,
+  LessonRow,
   PostingRow,
   RescoreScope,
   ResumeRow,
   ThemeRow,
 } from "./schema";
-import { GHOST_JOB_DAYS, REPOST_DAYS, SKIPPED_COMPANY_KINDS } from "./schema";
+import { GHOST_JOB_DAYS, LESSON_FADE_DAYS, REPOST_DAYS, SKIPPED_COMPANY_KINDS } from "./schema";
 import type { FunnelJob, ScoredJob } from "../insights";
 import { jobKey } from "../job-key";
 
@@ -388,6 +389,30 @@ export class JobFinderRepository {
     const { data, error } = await this.client.rpc("admin_stats");
     if (error) throw error;
     return data as T;
+  }
+
+  /** The user's own lessons and their learned ones confirmed within LESSON_FADE_DAYS, oldest first. */
+  async listLessons(): Promise<LessonRow[]> {
+    const cutoff = new Date(Date.now() - LESSON_FADE_DAYS * DAY_MS).toISOString();
+    const { data, error } = await this.client
+      .from("lessons")
+      .select("*")
+      .is("deleted_at", null)
+      .or(`source.eq.user,confirmed_at.gt.${cutoff}`)
+      .order("created_at");
+    if (error) throw error;
+    return data;
+  }
+
+  async addLesson(text: string): Promise<void> {
+    const { error } = await this.client.from("lessons").insert({ user_id: this.userId, text, source: "user" });
+    if (error) throw error;
+  }
+
+  /** Marks the lesson deleted, keeping its row so it isn't learned again. */
+  async deleteLesson(id: string): Promise<void> {
+    const { error } = await this.client.from("lessons").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+    if (error) throw error;
   }
 }
 

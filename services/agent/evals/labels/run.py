@@ -3,9 +3,10 @@ Measures whether labeled examples improve fit scores: `uv run python -m
 evals.labels.run`. Takes the account with the most good/bad labels and a
 primary resume, holds out a third of each label, and scores the held-out jobs
 three times with the same call a search makes: without examples, with the most
-recent examples, and with the examples nearest the held-out batch by embedding,
-all drawn only from the rest. A run costs about three scoring calls per
-held-out job. Point it at the hosted project by setting SUPABASE_URL and
+recent examples, with the examples nearest the held-out batch by embedding, and
+with those examples plus lessons, all drawn only from the rest. The lessons are
+learned from the rest in one call, alongside the account's own lessons. A run
+costs about four scoring calls per held-out job. Point it at the hosted project by setting SUPABASE_URL and
 SUPABASE_SERVICE_ROLE_KEY for that project, plus ANTHROPIC_API_KEY or that
 project's AGENT_ENCRYPTION_KEY to use the account's saved key.
 """
@@ -18,10 +19,11 @@ from typing import Any
 import anthropic
 import numpy as np
 
+from app.agents.lessons.agent import MAX_LESSONS, learn
 from app.agents.orchestrator import MAX_EXAMPLES, MIN_EXAMPLES, labeled_job
 from app.agents.schemas import FitScore
 from app.agents.scoring.agent import score_posting
-from app.agents.scoring.prompts import FIT_SYSTEM, LabeledJob
+from app.agents.scoring.prompts import FIT_SYSTEM, LabeledJob, Lesson
 from app.config import get_settings
 from app.crypto import decrypt
 from app.db import service_db
@@ -123,7 +125,7 @@ def main() -> None:
         row
         for row in db.select(
             "applications",
-            {"select": "posting_id,fit_label,updated_at,posting:postings(*)", "user_id": f"eq.{user_id}", "fit_label": "not.is.null"},
+            {"select": "posting_id,fit_label,status,updated_at,posting:postings(*)", "user_id": f"eq.{user_id}", "fit_label": "not.is.null"},
         )
         if row["posting"]["description"]
     ]
@@ -143,19 +145,33 @@ def main() -> None:
     if {(e.label, e.title, e.company) for e in closest} == {(e.label, e.title, e.company) for e in examples}:
         print(f"Neither label has more than {MAX_EXAMPLES} jobs to pick from, so recent and closest pick the same jobs.")
 
-    def score(row: dict, with_examples: list[LabeledJob]) -> tuple[str, int]:
+    own = [
+        Lesson(row["text"], "user")
+        for row in db.select(
+            "lessons", {"select": "text", "user_id": f"eq.{user_id}", "source": "eq.user", "deleted_at": "is.null", "order": "created_at"}
+        )
+    ]
+    lessons = [*own, *lessons_from(client, settings.analysis_model, train, [lesson.text for lesson in own])]
+    print("Lessons:\n" + "\n".join(f"  {lesson.source}: {lesson.text}" for lesson in lessons))
+
+    def score(row: dict, arm: tuple[list[LabeledJob], list[Lesson]]) -> tuple[str, int]:
         fit = score_posting(
-            client, settings.scoring_model, settings.scoring_effort, resume, Posting.model_validate(row["posting"]), with_examples
+            client, settings.scoring_model, settings.scoring_effort, resume, Posting.model_validate(row["posting"]), *arm
         )
         return row["fit_label"], fit.score
 
     results: dict[str, Any] = {}
-    arms = (("Without examples", []), (f"With {len(examples)} recent examples", examples), (f"With {len(closest)} closest examples", closest))
-    for name, with_examples in arms:
+    arms = (
+        ("Without examples", ([], [])),
+        (f"With {len(examples)} recent examples", (examples, [])),
+        (f"With {len(closest)} closest examples", (closest, [])),
+        (f"With {len(closest)} closest examples and {len(lessons)} lessons", (closest, lessons)),
+    )
+    for name, arm in arms:
         # The first call runs alone so the cached prefix exists before the rest.
-        first = score(held[0], with_examples)
+        first = score(held[0], arm)
         with ThreadPoolExecutor(max_workers=4) as pool:
-            scored = [first, *pool.map(score, held[1:], [with_examples] * (len(held) - 1))]
+            scored = [first, *pool.map(score, held[1:], [arm] * (len(held) - 1))]
         results[name] = report(name, scored)
     usage = log.usage()
     cost = usage_cost(usage)
@@ -168,6 +184,12 @@ def main() -> None:
         settings.scoring_model,
         prompt_version(FIT_SYSTEM, FitScore),
     )
+
+
+def lessons_from(client: Any, model: str, train: list[dict], own: list[str]) -> list[Lesson]:
+    """The lessons a first update learns from the training jobs alone."""
+    update = learn(client, model, [], own, [], train)
+    return [Lesson(lesson.text, "learned") for lesson in update.lessons[:MAX_LESSONS]]
 
 
 if __name__ == "__main__":

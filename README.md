@@ -8,14 +8,14 @@ Live at [job-role-scout-ai.vercel.app](https://job-role-scout-ai.vercel.app).
 
 - **Shared company directory.** Jobs come straight from the public APIs of 11 applicant tracking systems (Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable, BambooHR, iCIMS, Jobvite, Personio, Recruitee) plus Hacker News "Who is hiring?" threads. Claude's web search finds new companies and their boards, and a daily refresh saves every open job, closes the ones that disappear and removes stale ones.
 - **Resume-matched search.** Each search ranks matching jobs by semantic similarity to the user's resume, then scores the closest ones with Claude for fit, strengths and gaps, in rounds until enough reach the user's minimum score.
-- **Scoring that learns from feedback.** Jobs the user rated good or bad are embedded, and the most similar ones go into the scoring prompt as examples.
+- **Scoring that learns from feedback.** Jobs the user rated good or bad are embedded, and the most similar ones go into the scoring prompt as examples. Ratings and applications also teach it short preferences, such as "prefers remote roles", that fade unless new ratings confirm them; the user can delete any or write their own, which count as firm rules.
 - **Application tracker.** Jobs found by search and jobs applied to elsewhere, added by their link, in one list sorted by how far along each one is. Status history, resume gap analysis per job, and signals for reposted and likely ghost jobs.
 - **Insights** on application outcomes, and an **admin console** for usage, cost, speed, failures and model quality.
 
 ## Using the app
 
 1. **Sign in** with your email; the app sends a one-time sign-in link.
-2. **Upload your resume** on the Resume page (PDF or Word). Searches rank and score jobs against your primary resume.
+2. **Upload your resume** on the Resume page (PDF or Word). Searches rank and score jobs against your primary resume. The same page lists what Job Scout has learned about your preferences: delete any you disagree with, add your own, or update them now. Searches update them when your ratings or statuses changed.
 3. **Search from the Tracker.** Enter job titles or keywords, and optionally a company, location type, location, how recent the posting is, words to leave out, how many jobs to add and a minimum score. Matches appear on the Tracker as they're scored, each with its fit score, a summary of strengths and gaps, and warnings for reposted or long-open jobs.
 4. **Rate and track.** Thumbs up or down tells future searches what a good fit looks like for you. Moving a job past "new" (saved, applied, interviewing, offer, rejected) takes it to the Jobs page, which keeps its status history and lists offers first and rejections last. From a job you can run a gap analysis against your resume.
 5. **Add jobs you applied to elsewhere** on the Jobs page by pasting the job's link, with its status and the date you applied. The app reads the job from its board and scores it against your resume; for a site it can't read, you enter the title and company yourself.
@@ -45,7 +45,7 @@ Both services deploy to Vercel as one project (Vercel Services, configured in `v
 
 1. Match the user's rule (keywords, company, location, remote or on-site, posting age, exclusions) against the saved open jobs.
 2. Rank the matches by similarity between each job's embedding and the resume's section embeddings (FastEmbed `bge-small-en-v1.5`, 384 dimensions, stored in pgvector).
-3. Score the top candidates with Claude using structured outputs, prompt caching and the user's most similar past ratings as examples.
+3. Score the top candidates with Claude using structured outputs, prompt caching the user's most similar past ratings as examples and the preferences learned from their ratings and applications.
 4. Repeat for up to three rounds until enough jobs reach the minimum score; jobs below it are saved outside the tracker.
 
 ## Tech stack
@@ -66,7 +66,7 @@ Both services deploy to Vercel as one project (Vercel Services, configured in `v
 
 - **Every Claude call** is logged with its model, prompt version, tokens, cost and duration. The prompt version is a fingerprint of the system prompt and output schema, so a prompt change shows up as a new version.
 - **The admin console** shows usage and Claude cost by step and by user, search speed, failures, board fetch and refresh results, page speed from real visits, and fit scores week by week for each prompt version.
-- **Weekly evaluations** run in GitHub Actions: one scores held-out labeled jobs with and without examples, the other compares ways of picking which jobs to score. Results are saved and charted next to the live numbers.
+- **Weekly evaluations** run in GitHub Actions: one scores held-out labeled jobs with and without examples and learned preferences, the other compares ways of picking which jobs to score. Results are saved and charted next to the live numbers.
 - **Alerts** email the admin when the daily board refresh fails or can't reach job boards.
 
 ## CI/CD and infrastructure

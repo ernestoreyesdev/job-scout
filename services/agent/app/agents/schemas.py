@@ -191,3 +191,14 @@ class RescoreRequest(BaseModel):
     """Which page's jobs a rescore scores: the Tracker's or the ones on Jobs."""
 
     scope: RescoreScope
+
+
+class LearnedLesson(BaseModel):
+    text: str = Field(max_length=200, description="One short preference in plain words, such as 'Prefers remote roles'.")
+    evidence: int = Field(ge=1, description="How many of the listed jobs support it.")
+    restates: int | None = Field(description="Number of the current lesson this restates or confirms; null for a new one.")
+
+
+class LessonUpdate(BaseModel):
+    lessons: list[LearnedLesson] = Field(description="Every preference the jobs support, current ones included.")
+    contradicted: list[int] = Field(description="Numbers of current lessons the jobs now go against.")
