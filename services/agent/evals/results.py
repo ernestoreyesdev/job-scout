@@ -2,7 +2,11 @@
 
 from typing import Any
 
+from app.agents.schemas import Usage
 from app.db import Rest
+
+# Haiku 5.5 prices per million tokens: input, output, cache read, cache write.
+PRICES = (0.10, 0.50, 0.01, 0.125)
 
 
 def save_result(
@@ -18,3 +22,9 @@ def save_result(
         {"eval": eval_name, "metrics": metrics, "cost": cost, "model": model, "prompt_version": prompt_version},
         select="id",
     )
+
+
+def usage_cost(usage: Usage) -> float:
+    """Dollars for a run's tokens at PRICES."""
+    tokens = (usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens)
+    return sum(n * price / 1_000_000 for n, price in zip(tokens, PRICES, strict=True))

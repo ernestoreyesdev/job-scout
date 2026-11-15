@@ -1,6 +1,5 @@
-from urllib.parse import urlparse
 
-from app.sources.base import BOARD_SLUG, JobSource, Posting
+from app.sources.base import JobSource, Posting
 from app.sources.text import html_to_text, workplace_from_location
 
 HOST = "bamboohr.com"
@@ -28,6 +27,7 @@ class BambooHRSource(JobSource):
     name = "bamboohr"
     label = "BambooHR"
     board_hosts = (HOST,)
+    subdomain_boards = True
     reserved_paths = frozenset({"www", "api", "app", "help", "partners", "marketplace", "status"})
     not_found_statuses = frozenset({301, 302, 404})
 
@@ -53,13 +53,6 @@ class BambooHRSource(JobSource):
         details = self._get_json(posting.board, f"https://{posting.board}.{HOST}/careers/{posting.external_id}/detail")
         opening = (details.get("result") or {}).get("jobOpening") or {}
         return html_to_text(opening.get("description") or "")
-
-    def board_from_url(self, url: str) -> str | None:
-        host = (urlparse(url).hostname or "").lower()
-        if not host.endswith(f".{HOST}"):
-            return None
-        board = host.removesuffix(f".{HOST}")
-        return board if BOARD_SLUG.match(board) and board not in self.reserved_paths else None
 
     def careers_url(self, board: str) -> str:
         return f"https://{board}.{HOST}/careers"

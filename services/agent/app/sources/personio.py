@@ -1,8 +1,7 @@
 from datetime import datetime
-from urllib.parse import urlparse
 from xml.etree import ElementTree
 
-from app.sources.base import BOARD_SLUG, JobSource, Posting
+from app.sources.base import JobSource, Posting
 from app.sources.text import html_to_text, join_locations, workplace_from_location
 
 HOSTS = ("jobs.personio.de", "jobs.personio.com")
@@ -31,6 +30,7 @@ class PersonioSource(JobSource):
     name = "personio"
     label = "Personio"
     board_hosts = HOSTS
+    subdomain_boards = True
     reserved_paths = frozenset({"www", "api", "app"})
 
     def fetch(self, board: str, company: str) -> list[Posting]:
@@ -63,14 +63,6 @@ class PersonioSource(JobSource):
         return ElementTree.fromstring(
             self._get_text(board, f"https://{board}.{HOSTS[0]}/xml", params).encode()
         ).findall("position")
-
-    def board_from_url(self, url: str) -> str | None:
-        host = (urlparse(url).hostname or "").lower()
-        suffix = next((f".{h}" for h in HOSTS if host.endswith(f".{h}")), None)
-        if suffix is None:
-            return None
-        board = host.removesuffix(suffix)
-        return board if BOARD_SLUG.match(board) and board not in self.reserved_paths else None
 
     def careers_url(self, board: str) -> str:
         return f"https://{board}.{HOSTS[0]}/"

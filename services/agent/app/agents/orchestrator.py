@@ -133,13 +133,12 @@ def run_search(
                     raise
                 report("Gathering open jobs…")
                 found = web_lookup(rule.company, client, settings, usage, fetcher, lookup)
-            store_jobs(service, {f"{found.source}/{found.board}": found.postings})
-            save_companies(
-                service, [(found.source, found.board, found.name, "lookup")], {f"{found.source}/{found.board}": found.postings}
-            )
+            fetched = {f"{found.source}/{found.board}": found.postings}
+            store_jobs(service, fetched)
+            save_companies(service, [(found.source, found.board, found.name, "lookup")], fetched)
             label_if_new(found, client, settings, service, usage, namer)
             remove_duplicate_names(service)
-            mark_closed(user, service, {f"{found.source}/{found.board}": found.postings})
+            mark_closed(user, service, fetched)
         if not found.postings:
             report(f"Found {found.name}, but it has no open jobs listed.")
             return SearchResult(1, 0, 0, 0, 0, 0, company=found.name)
@@ -529,7 +528,7 @@ def keep_best(
 def record_kinds(service: Rest, kinds: dict[tuple[str, str], str]) -> None:
     """Saves the kind (employer, staffing, aggregator) labeled for newly discovered companies."""
     for (source, board), kind in kinds.items():
-        service.update("companies", {"source": f"eq.{source}", "board": f"eq.{board}"}, {"kind": kind})
+        record_kind(service, source, board, kind)
 
 
 def by_title_fit(
@@ -583,7 +582,7 @@ def label_if_new(
         return
     named = namer(client, settings.discovery_model, [FoundBoard(found.source, found.board, [found.name])], usage)
     if (found.source, found.board) in named:
-        record_kinds(service, {(found.source, found.board): named[(found.source, found.board)].kind})
+        record_kind(service, found.source, found.board, named[(found.source, found.board)].kind)
 
 
 def rescore(
@@ -610,7 +609,7 @@ def rescore(
     rows = user.select(
         "applications",
         {
-            "select": "posting_id,posting:postings(*)",
+            "select": f"posting_id,posting:postings({','.join(Posting.model_fields)})",
             "and": f"(or(resume_id.is.null,resume_id.neq.{resume_id}),{RESCORE_SCOPES[scope]})",
         },
     )
@@ -794,7 +793,7 @@ def hiring_thread_postings(
     if not posts:
         return []
     since = min(post.posted_at for post in posts).isoformat()
-    rows = service.select("postings", {"select": "*", "source": "eq.hackernews", "posted_at": f"gte.{since}"})
+    rows = service.select("postings", {"select": ",".join(Posting.model_fields), "source": "eq.hackernews", "posted_at": f"gte.{since}"})
     saved = [Posting.model_validate(row) for row in rows]
     read = {posting.external_id.split("-")[0] for posting in saved}
     new = [post for post in posts if post.id not in read]
@@ -1128,3 +1127,7 @@ def job_key(company: str, title: str) -> tuple[str, str]:
     """
     words: list[str] = re.findall(r"[a-z0-9]+", title.lower())
     return compact(company), " ".join(TITLE_ABBREVIATIONS.get(word, word) for word in words)
+
+
+def record_kind(service: Rest, source: str, board: str, kind: str) -> None:
+    service.update("companies", {"source": f"eq.{source}", "board": f"eq.{board}"}, {"kind": kind})

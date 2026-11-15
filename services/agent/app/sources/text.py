@@ -98,3 +98,8 @@ def job_posting_ld(page: str) -> dict:
         if isinstance(data, dict) and data.get("@type") == "JobPosting":
             return data
     return {}
+
+
+def inline_text(fragment: str) -> str:
+    """Text of a short HTML fragment, such as a title or location, on one line."""
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", fragment)).split())

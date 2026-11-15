@@ -70,7 +70,8 @@ class JobSource(ABC):
 
     board_hosts are the hosts of the system's public job pages, where the first
     path segment is the board, and reserved_paths are the segments on them that
-    are site pages. not_found_statuses are the response codes meaning a board
+    are site pages. With subdomain_boards, the board is the subdomain of a board
+    host instead, and reserved_paths are subdomains. not_found_statuses are the response codes meaning a board
     doesn't exist. max_jobs is the most one fetch returns, so a board at that
     size may have more.
     """
@@ -79,6 +80,7 @@ class JobSource(ABC):
     label: ClassVar[str]
     board_hosts: ClassVar[tuple[str, ...]]
     reserved_paths: ClassVar[frozenset[str]] = frozenset()
+    subdomain_boards: ClassVar[bool] = False
     not_found_statuses: ClassVar[frozenset[int]] = frozenset({404})
     max_jobs: ClassVar[int | None] = None
 
@@ -106,9 +108,16 @@ class JobSource(ABC):
     def board_from_url(self, url: str) -> str | None:
         """The board a public job page URL belongs to, or None when the URL isn't one of this system's boards."""
         parsed = urlparse(url)
-        if (parsed.hostname or "") not in self.board_hosts:
+        if self.subdomain_boards:
+            host = (parsed.hostname or "").lower()
+            suffix = next((f".{h}" for h in self.board_hosts if host.endswith(f".{h}")), None)
+            if suffix is None:
+                return None
+            board = host.removesuffix(suffix)
+        elif (parsed.hostname or "") not in self.board_hosts:
             return None
-        board = parsed.path.strip("/").split("/")[0].lower()
+        else:
+            board = parsed.path.strip("/").split("/")[0].lower()
         return board if BOARD_SLUG.match(board) and board not in self.reserved_paths else None
 
     def _get_json(self, board: str, url: str, params: dict[str, Any] | None = None) -> Any:

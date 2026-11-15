@@ -29,15 +29,6 @@ PAY_LINE = re.compile(r"(\$|USD|€|£)\s?\d")
 MAX_PAY_LINES = 5
 
 
-def fit_message(resume_text: str, posting: Posting) -> str:
-    return (
-        "Assess the fit of this resume for this job.\n"
-        f"<resume>\n{resume_text}\n</resume>\n"
-        f"<job>\nTitle: {posting.title}\nCompany: {posting.company}\n"
-        f"Location: {posting.location or 'Not stated'}\n\n{posting.description}\n</job>"
-    )
-
-
 def fit_blocks(resume_text: str, posting: Posting, examples: Sequence["LabeledJob"] = ()) -> list[dict]:
     """
     The fit request as content blocks: the resume and labeled examples form a

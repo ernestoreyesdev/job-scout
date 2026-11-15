@@ -389,7 +389,7 @@ def post_gap_analysis(application_id: str, user: User, settings: Config) -> dict
     import anthropic
 
     db = user_db(settings, user.access_token)
-    rows = db.select("applications", {"id": f"eq.{application_id}", "select": "id,posting:postings(*)"})
+    rows = db.select("applications", {"id": f"eq.{application_id}", "select": f"id,posting:postings({','.join(Posting.model_fields)})"})
     if not rows:
         raise HTTPException(404, "Job not found.")
     client, resume_text, calls = claude_and_resume(user, settings)

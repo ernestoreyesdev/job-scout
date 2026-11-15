@@ -1,7 +1,6 @@
 from datetime import UTC, datetime
-from urllib.parse import urlparse
 
-from app.sources.base import BOARD_SLUG, JobSource, Posting, WorkplaceType
+from app.sources.base import JobSource, Posting, WorkplaceType
 from app.sources.text import html_to_text
 
 HOST = "recruitee.com"
@@ -30,6 +29,7 @@ class RecruiteeSource(JobSource):
     name = "recruitee"
     label = "Recruitee"
     board_hosts = (HOST,)
+    subdomain_boards = True
     reserved_paths = frozenset({"www", "api", "app", "careers", "blog", "support"})
 
     def fetch(self, board: str, company: str) -> list[Posting]:
@@ -52,13 +52,6 @@ class RecruiteeSource(JobSource):
             for job in data["offers"]
             if job.get("status", "published") == "published"
         ]
-
-    def board_from_url(self, url: str) -> str | None:
-        host = (urlparse(url).hostname or "").lower()
-        if not host.endswith(f".{HOST}"):
-            return None
-        board = host.removesuffix(f".{HOST}")
-        return board if BOARD_SLUG.match(board) and board not in self.reserved_paths else None
 
     def careers_url(self, board: str) -> str:
         return f"https://{board}.{HOST}/"

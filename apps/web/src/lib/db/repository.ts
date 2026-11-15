@@ -11,7 +11,6 @@ import type {
   FitLabelRow,
   JobSort,
   PostingRow,
-  ProfileRow,
   RescoreScope,
   ResumeRow,
   ThemeRow,
@@ -22,7 +21,7 @@ import type { FunnelJob, ScoredJob } from "../insights";
 export type JobFinderClient = SupabaseClient<Database>;
 
 type TrackedJobRow = ApplicationRow & {
-  posting: PostingRow;
+  posting: Omit<PostingRow, "description">;
   events: Pick<ApplicationEventRow, "status" | "changed_at">[];
 };
 
@@ -79,12 +78,6 @@ export class JobFinderRepository {
     return user.id;
   }
 
-  async getProfile(): Promise<ProfileRow | null> {
-    const { data, error } = await this.client.from("profiles").select("*").maybeSingle();
-    if (error) throw error;
-    return data;
-  }
-
   async getPrimaryResume(): Promise<ResumeRow | null> {
     const { data, error } = await this.client
       .from("resumes")
@@ -130,7 +123,10 @@ export class JobFinderRepository {
     const result = await this.paged<TrackedJobRow>(page, (from, to) => {
       let query = this.client
         .from("applications")
-        .select("*, posting:postings!inner(*), events:application_events(status, changed_at)", { count: "exact" });
+        .select(
+          "*, posting:postings!inner(id, source, board, external_id, title, company, location, url, posted_at, workplace_type, closed_at, salary_min, salary_max, salary_currency, salary_period, clearance, visa_sponsorship, years_experience, tech_stack, details_extracted_at, created_at, updated_at), events:application_events(status, changed_at)",
+          { count: "exact" },
+        );
       query =
         view === "tracker"
           ? query.eq("in_tracker", true)
@@ -205,7 +201,9 @@ export class JobFinderRepository {
   async listRuns(limit = 5): Promise<AgentRunRow[]> {
     const { data, error } = await this.client
       .from("agent_runs")
-      .select("*")
+      .select(
+        "id, user_id, kind, input, status, error, error_code, progress, usage, timings, jobs_added, created_at, updated_at, finished_at",
+      )
       .order("created_at", { ascending: false })
       .limit(limit);
     if (error) throw error;

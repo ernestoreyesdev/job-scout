@@ -13,7 +13,6 @@ import {
   GHOST_JOB_DAYS,
   type FitLabelRow,
   type GapItem,
-  type PostingRow,
   type TrackedJob,
 } from "@/lib/db";
 import { cn } from "@/lib/utils";
@@ -296,7 +295,7 @@ export function JobRow({
 }
 
 /** Short labels for the facts read from a posting: pay, clearance, visa sponsorship and experience. */
-function postingFacts(posting: PostingRow): string[] {
+function postingFacts(posting: TrackedJob["posting"]): string[] {
   const facts: string[] = [];
   if (posting.salary_min !== null || posting.salary_max !== null) {
     const money = new Intl.NumberFormat("en-US", {

@@ -18,12 +18,11 @@ from app.config import get_settings
 from app.crypto import decrypt
 from app.db import service_db
 from app.sources.base import Posting
+from evals.results import usage_cost
 
 HERE = Path(__file__).parent
 EXACT_FIELDS = ("salary_currency", "salary_period", "clearance", "visa_sponsorship", "years_experience", "workplace_type")
 SALARY_TOLERANCE = 0.01
-# Haiku 5.5 prices per million tokens: input, output, cache read, cache write.
-PRICES = (0.10, 0.50, 0.01, 0.125)
 
 
 def same(field: str, expected: object, actual: object) -> bool:
@@ -107,13 +106,7 @@ def main() -> None:
     precision = both / (both + extra) if both + extra else 0
     recall = both / (both + missed) if both + missed else 0
     print(f"\ntech_stack        precision {precision:.0%}, recall {recall:.0%} ({both} shared, {extra} extra, {missed} missed)")
-    cost = sum(
-        n * price / 1_000_000
-        for n, price in zip(
-            (usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens),
-            PRICES,
-        )
-    )
+    cost = usage_cost(usage)
     print(f"\nCost: ${cost:.3f} ({usage.input_tokens:,} input, {usage.output_tokens:,} output tokens)")
     if misses:
         print("\nMismatches:")

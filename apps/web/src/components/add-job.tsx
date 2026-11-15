@@ -19,7 +19,6 @@ const FIELD = "h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-x
 export function AddJob() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [needsDetails, setNeedsDetails] = useState(false);
   const [pending, startTransition] = useTransition();
 
   function submit(formData: FormData) {
@@ -27,7 +26,6 @@ export function AddJob() {
       const result = await addOutsideJob(formData);
       setError(result.ok ? null : (result.error ?? "Could not add the job."));
       setMessage(result.ok ? (result.message ?? null) : null);
-      setNeedsDetails(!result.ok);
     });
   }
 
@@ -65,7 +63,7 @@ export function AddJob() {
             <Input id="applied_on" name="applied_on" type="date" />
           </div>
         </div>
-        {needsDetails && (
+        {error !== null && (
           <div className="space-y-3 rounded-lg border border-dashed p-3">
             <p className="text-muted-foreground">
               If the app can&apos;t read the link, enter the job yourself. A description lets it score the job against

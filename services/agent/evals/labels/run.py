@@ -28,13 +28,11 @@ from app.db import service_db
 from app.embeddings import embed_jobs, job_text
 from app.sources.base import Posting
 from app.telemetry import prompt_version
-from evals.results import save_result
+from evals.results import save_result, usage_cost
 
 CUTS = (50, 60, 70, 80)
 HOLD_OUT_EVERY = 3
 MIN_HELD_OUT = 2
-# Haiku 5.5 prices per million tokens: input, output, cache read, cache write.
-PRICES = (0.10, 0.50, 0.01, 0.125)
 
 
 def split(rows: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -161,13 +159,7 @@ def main() -> None:
         for *_, call_usage in calls:
             usage.add(call_usage)
         results[name] = report(name, [(label, value) for label, value, _ in calls])
-    cost = sum(
-        n * price / 1_000_000
-        for n, price in zip(
-            (usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens),
-            PRICES,
-        )
-    )
+    cost = usage_cost(usage)
     print(f"\nCost: ${cost:.3f} ({usage.input_tokens:,} input, {usage.output_tokens:,} output tokens)")
     save_result(
         db,

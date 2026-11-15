@@ -2,10 +2,9 @@ import html
 import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
-from urllib.parse import urlparse
 
-from app.sources.base import BOARD_SLUG, JobSource, Posting
-from app.sources.text import country_name, html_to_text, job_posting_ld, workplace_from_location
+from app.sources.base import JobSource, Posting
+from app.sources.text import country_name, html_to_text, inline_text, job_posting_ld, workplace_from_location
 
 HOST = "icims.com"
 # Search pages read; boards list about 20 jobs per page.
@@ -18,10 +17,6 @@ POSTED = re.compile(r'Posted Date</span>\s*<span title="([^"]+)"')
 PAGES = re.compile(r"Page \d+ of ([\d,]+)")
 # 'US-MA-Pittsfield', 'US-Remote', 'IN-Hyderabad'
 CODED_PLACE = re.compile(r"^([A-Z]{2})-(?:([A-Z]{2})-)?(.+)$")
-
-
-def _text(fragment: str) -> str:
-    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", fragment)).split())
 
 
 def _place(text: str | None) -> str | None:
@@ -57,6 +52,7 @@ class ICIMSSource(JobSource):
     name = "icims"
     label = "iCIMS"
     board_hosts = (HOST,)
+    subdomain_boards = True
     reserved_paths = frozenset({"www", "careers", "community", "developer", "help", "info", "status"})
     max_jobs = MAX_PAGES * 20
 
@@ -79,13 +75,13 @@ class ICIMSSource(JobSource):
             seen.add(link[2])
             location = LOCATION.search(card)
             posted = POSTED.search(card)
-            place = _place(_text(location[1])) if location else None
+            place = _place(inline_text(location[1])) if location else None
             postings.append(
                 Posting(
                     source="icims",
                     board=board,
                     external_id=link[2],
-                    title=_text(link[3]),
+                    title=inline_text(link[3]),
                     company=company,
                     location=place,
                     url=html.unescape(link[1]).split("?")[0],
@@ -105,13 +101,6 @@ class ICIMSSource(JobSource):
 
     def default_name(self, board: str) -> str:
         return super().default_name(re.sub(r"^[a-z]*careers-", "", board))
-
-    def board_from_url(self, url: str) -> str | None:
-        host = (urlparse(url).hostname or "").lower()
-        if not host.endswith(f".{HOST}"):
-            return None
-        board = host.removesuffix(f".{HOST}")
-        return board if BOARD_SLUG.match(board) and board not in self.reserved_paths else None
 
     def careers_url(self, board: str) -> str:
         return f"https://{board}.{HOST}/jobs/search?ss=1"

@@ -58,21 +58,6 @@ class Rest:
         check(res)
         return res.content
 
-    def list_users(self, per_page: int = 1000) -> list[dict[str, Any]]:
-        """Every Supabase Auth user; needs the service role key."""
-        users: list[dict[str, Any]] = []
-        page = 1
-        while True:
-            res = self._http.get(
-                f"{self._base}/auth/v1/admin/users", params={"page": page, "per_page": per_page}, headers=self._headers
-            )
-            check(res)
-            batch = res.json()["users"]
-            users += batch
-            if len(batch) < per_page:
-                return users
-            page += 1
-
     def rpc(self, function: str, args: dict[str, Any]) -> Any:
         res = self._http.post(f"{self._base}/rest/v1/rpc/{function}", json=args, headers=self._headers)
         check(res)

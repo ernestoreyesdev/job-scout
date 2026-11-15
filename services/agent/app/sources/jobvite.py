@@ -1,8 +1,7 @@
-import html
 import re
 
 from app.sources.base import JobSource, Posting
-from app.sources.text import html_to_text, job_posting_ld, workplace_from_location
+from app.sources.text import html_to_text, inline_text, job_posting_ld, workplace_from_location
 
 HOST = "jobs.jobvite.com"
 ROW = re.compile(
@@ -10,10 +9,6 @@ ROW = re.compile(
     r'<td class="jv-job-list-location">(.*?)</td>',
     re.DOTALL,
 )
-
-
-def _text(fragment: str) -> str:
-    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", fragment)).split())
 
 
 class JobviteSource(JobSource):
@@ -38,13 +33,13 @@ class JobviteSource(JobSource):
             if job_id in seen:
                 continue
             seen.add(job_id)
-            place = _text(location) or None
+            place = inline_text(location) or None
             postings.append(
                 Posting(
                     source="jobvite",
                     board=board,
                     external_id=job_id,
-                    title=_text(title),
+                    title=inline_text(title),
                     company=company,
                     location=place,
                     url=f"https://{HOST}/{board}/job/{job_id}",

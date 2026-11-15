@@ -39,11 +39,9 @@ from app.sources import describe
 from app.sources.base import Posting
 from app.sources.filters import matches_exclusions, matches_keywords, matches_location, matches_workplace, posted_within
 from app.telemetry import prompt_version
-from evals.results import save_result
+from evals.results import save_result, usage_cost
 
 DEFAULT_CUT = 70
-# Haiku 5.5 prices per million tokens: input, output, cache read, cache write.
-PRICES = (0.10, 0.50, 0.01, 0.125)
 
 
 def main() -> None:
@@ -137,13 +135,7 @@ def main() -> None:
         print(f"  {passing} of {len(values)} reach {cut}; mean score {sum(values) / len(values):.1f}")
     both = {posting_id for posting_id, _ in by_title} & {posting_id for posting_id, _ in by_resume}
     print(f"\n{len(both)} jobs are in both pools")
-    cost = sum(
-        n * price / 1_000_000
-        for n, price in zip(
-            (usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens, usage.cache_creation_input_tokens),
-            PRICES,
-        )
-    )
+    cost = usage_cost(usage)
     print(f"Cost: ${cost:.3f} ({usage.input_tokens:,} input, {usage.output_tokens:,} output tokens)")
     save_result(
         db,

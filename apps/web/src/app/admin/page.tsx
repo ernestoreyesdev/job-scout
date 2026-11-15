@@ -136,6 +136,7 @@ async function AdminData() {
   const kinds = { employer: 0, staffing: 0, aggregator: 0, unlabeled: 0 };
   for (const company of stats.companies) kinds[company.kind ?? "unlabeled"] += 1;
   const openJobs = stats.companies.reduce((sum, company) => sum + company.open_jobs, 0);
+  const names = new Map(stats.companies.map((company) => [`${company.source}/${company.board}`, company.name]));
 
   const days = Array.from({ length: CHART_DAYS }, (_, i) => {
     const start = new Date(now - (CHART_DAYS - 1 - i) * DAY_MS);
@@ -192,19 +193,19 @@ async function AdminData() {
         </div>
       </SectionCard>
 
-      <HealthSection stats={stats} />
+      <HealthSection stats={stats} names={names} />
 
       <PageSpeedSection vitals={stats.vitals} days={stats.days} />
 
       <SpeedSection runs={searches} />
 
-      <BoardSection boards={stats.boards} companies={stats.companies} days={stats.days} />
+      <BoardSection boards={stats.boards} names={names} days={stats.days} />
 
       <RefreshSection
         refreshes={stats.refreshes}
         boards={stats.refresh_boards}
         storage={stats.storage}
-        companies={stats.companies}
+        names={names}
         days={stats.days}
       />
 
@@ -334,8 +335,7 @@ function SpeedSection({ runs }: { runs: AdminStats["runs"] }) {
 const RECENT_FAILURES = 8;
 
 /** Failed and timed-out runs, and the boards searches couldn't reach or found gone. */
-function HealthSection({ stats }: { stats: AdminStats }) {
-  const names = new Map(stats.companies.map((company) => [`${company.source}/${company.board}`, company.name]));
+function HealthSection({ stats, names }: { stats: AdminStats; names: Map<string, string> }) {
   const failed = stats.runs.filter((run) => run.status === "failed");
   const timedOut = failed.filter((run) => run.error_code === "timed_out").length;
   const unreachable = new Map<string, { count: number; last: string }>();
@@ -483,8 +483,7 @@ function PageSpeedSection({ vitals, days }: { vitals: AdminStats["vitals"]; days
 }
 
 /** Where the "Checking companies" step spends its time: totals per job system and the slowest boards. */
-function BoardSection({ boards, companies, days }: { boards: AdminStats["boards"]; companies: AdminStats["companies"]; days: number }) {
-  const names = new Map(companies.map((company) => [`${company.source}/${company.board}`, company.name]));
+function BoardSection({ boards, names, days }: { boards: AdminStats["boards"]; names: Map<string, string>; days: number }) {
 
   return (
     <SectionCard collapsible
@@ -576,16 +575,15 @@ function RefreshSection({
   refreshes,
   boards,
   storage,
-  companies,
+  names,
   days,
 }: {
   refreshes: AdminStats["refreshes"];
   boards: AdminStats["refresh_boards"];
   storage: AdminStats["storage"];
-  companies: AdminStats["companies"];
+  names: Map<string, string>;
   days: number;
 }) {
-  const names = new Map(companies.map((company) => [`${company.source}/${company.board}`, company.name]));
   const { bytes: totalBytes, unembedded } = storage;
   const worth = boards.filter((row, rank) => rank < SLOWEST_BOARDS || row.failures > 0);
 
