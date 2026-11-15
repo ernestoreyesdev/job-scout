@@ -115,6 +115,7 @@ select is(
 delete from llm_calls;
 delete from agent_runs;
 delete from applications;
+delete from former_scores;
 insert into postings (source, board, external_id, title, company, url) values
   ('lever', 'acme', 'job-1', 'Engineer', 'Acme', 'https://jobs.lever.co/acme/job-1'),
   ('lever', 'acme', 'job-2', 'Engineer II', 'Acme', 'https://jobs.lever.co/acme/job-2'),
@@ -200,6 +201,7 @@ select ok(
 
 -- Fit scores per version, checked against ratings.
 delete from applications;
+delete from former_scores;
 insert into applications (user_id, posting_id, fit_score, fit_label, score_prompt_version, score_model)
 select '00000000-0000-0000-0000-0000000000a1', p.id, s.score, s.label, 'v1', 'haiku'
 from (values ('job-1', 85, 'good'), ('job-2', 75, 'bad'), ('job-3', 30, null)) as s (job, score, label)

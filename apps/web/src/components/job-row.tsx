@@ -34,20 +34,21 @@ const WARNING_CHIP =
 
 /**
  * One tracked job as a card with its score, facts, fit summary, status and actions. Thumbs up or down rates the fit,
- * and clicking the active one clears it. `onMovedToJobs` runs when a status change or a rating takes the job off the
- * Tracker; `rated` says which.
+ * and clicking the active one clears it. `onLeftTracker` runs when a status change or a rating takes the job off the
+ * Tracker, saying where it went: to Jobs for a status past new or a good rating, which saves the job, and to Rated for
+ * a bad rating.
  */
 export function JobRow({
   job,
   showNotes,
-  onMovedToJobs,
+  onLeftTracker,
   staleResume,
   closedOn,
   timeline,
 }: {
   job: TrackedJob;
   showNotes: boolean;
-  onMovedToJobs?: (rated: boolean) => void;
+  onLeftTracker?: (to: "jobs" | "rated") => void;
   staleResume: boolean;
   closedOn: string | null;
   timeline: string[];
@@ -68,9 +69,9 @@ export function JobRow({
     const formData = new FormData();
     formData.set(field, value);
     run(() => updateApplication(job.id, formData), "Could not save.", (result) => {
-      if (result.ok && ((field === "status" && value !== "new") || (field === "fitLabel" && value))) {
-        onMovedToJobs?.(field === "fitLabel");
-      }
+      if (!result.ok) return;
+      if ((field === "status" && value !== "new") || (field === "fitLabel" && value === "good")) onLeftTracker?.("jobs");
+      if (field === "fitLabel" && value === "bad") onLeftTracker?.("rated");
     });
   }
 

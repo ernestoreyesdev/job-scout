@@ -1,6 +1,6 @@
 import { APPLICATION_STATUSES, JOB_SORTS, type ApplicationStatusRow, type JobFilters, type JobSort } from "@/lib/db";
 
-/** The Tracker or Jobs list settings read from the address: sort, filters, page and whether Jobs shows rated jobs. */
+/** The Tracker or Jobs list settings read from the address: sort, filters, page and whether the Tracker shows rated jobs. */
 export type JobQuery = {
   rated: boolean;
   sort: JobSort;

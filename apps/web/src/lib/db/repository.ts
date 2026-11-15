@@ -187,7 +187,7 @@ export class JobFinderRepository {
 
   /**
    * The Tracker holds only new, unrated jobs: moving a job past new or rating it takes it off, setting it back to new
-   * or clearing the rating of a new job returns it.
+   * or clearing the rating of a new job returns it. Rating a new job good also saves it.
    */
   async updateApplication(id: string, patch: ApplicationPatch): Promise<void> {
     const update = {
@@ -197,6 +197,10 @@ export class JobFinderRepository {
     };
     const { error } = await this.client.from("applications").update(update).eq("id", id);
     if (error) throw error;
+    if (patch.fit_label === "good") {
+      const saved = await this.client.from("applications").update({ status: "saved" }).eq("id", id).eq("status", "new");
+      if (saved.error) throw saved.error;
+    }
     if (patch.fit_label === null) {
       const returned = await this.client.from("applications").update({ in_tracker: true }).eq("id", id).eq("status", "new");
       if (returned.error) throw returned.error;

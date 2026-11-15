@@ -1,7 +1,7 @@
 import { expect, test as setup } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 
-import { EMAIL, JOB_TITLE } from "./test-user";
+import { EMAIL, JOB_TITLE, RATED_TITLE } from "./test-user";
 
 /** Local Supabase admin client; the service key comes from `supabase status`. */
 function admin() {
@@ -10,7 +10,7 @@ function admin() {
   });
 }
 
-setup("seed a user with one new job and sign in by email link", async ({ page }) => {
+setup("seed a user with two new jobs and sign in by email link", async ({ page }) => {
   const db = admin();
   const { data: users, error: listError } = await db.auth.admin.listUsers();
   if (listError) throw listError;
@@ -21,28 +21,33 @@ setup("seed a user with one new job and sign in by email link", async ({ page })
     user = data.user;
   }
   await db.from("applications").delete().eq("user_id", user.id);
-  const { data: posting, error: postingError } = await db
-    .from("postings")
-    .upsert(
-      {
-        source: "manual",
-        board: "manual",
-        external_id: "e2e-job",
-        title: JOB_TITLE,
-        company: "Playwright Labs",
-        location: "Remote",
-        url: "https://example.com/e2e-job",
-        description: "A job the browser tests track.",
-      },
-      { onConflict: "source,external_id" },
-    )
-    .select("id")
-    .single();
-  if (postingError) throw postingError;
-  const { error: applicationError } = await db
-    .from("applications")
-    .insert({ user_id: user.id, posting_id: posting.id, status: "new", in_tracker: true });
-  if (applicationError) throw applicationError;
+  for (const [externalId, title] of [
+    ["e2e-job", JOB_TITLE],
+    ["e2e-rated-job", RATED_TITLE],
+  ]) {
+    const { data: posting, error: postingError } = await db
+      .from("postings")
+      .upsert(
+        {
+          source: "manual",
+          board: "manual",
+          external_id: externalId,
+          title,
+          company: "Playwright Labs",
+          location: "Remote",
+          url: `https://example.com/${externalId}`,
+          description: "A job the browser tests track.",
+        },
+        { onConflict: "source,external_id" },
+      )
+      .select("id")
+      .single();
+    if (postingError) throw postingError;
+    const { error: applicationError } = await db
+      .from("applications")
+      .insert({ user_id: user.id, posting_id: posting.id, status: "new", in_tracker: true });
+    if (applicationError) throw applicationError;
+  }
 
   const sent = Date.now();
   await page.goto("/login");

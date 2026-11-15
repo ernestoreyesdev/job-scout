@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Suspense } from "react";
 
 import { ClearTracker } from "@/components/clear-tracker";
@@ -11,11 +12,18 @@ import { RescoreButton } from "@/components/rescore-button";
 import { RunStatus } from "@/components/run-status";
 import { SearchForm } from "@/components/search-form";
 import { PageReady } from "@/components/web-vitals";
+import { JOB_SORTS } from "@/lib/db";
 import { parseJobQuery } from "@/lib/job-query";
 import { rescoreScope } from "@/lib/runs";
 import { getPrimaryResume, getSignedInSource } from "@/lib/repository";
+import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Tracker" };
+
+const VIEWS = [
+  { rated: false, href: "/tracker", label: "New" },
+  { rated: true, href: "/tracker?view=rated", label: "Rated" },
+] as const;
 
 export default function TrackerPage({ searchParams }: PageProps<"/tracker">) {
   return (
@@ -23,7 +31,7 @@ export default function TrackerPage({ searchParams }: PageProps<"/tracker">) {
       <h1 className="text-2xl font-semibold tracking-tight">Tracker</h1>
       <p className="mt-1 text-sm text-muted-foreground">
         Search every company the app knows, or one you name. With your resume, each match gets a fit score. You always
-        apply yourself.
+        apply yourself. Rated keeps every job you marked good or bad; a good one is also saved to Jobs.
       </p>
       <div className="mt-6">
         <Suspense fallback={<SearchForm hasResume={false} />}>
@@ -39,16 +47,18 @@ export default function TrackerPage({ searchParams }: PageProps<"/tracker">) {
 
 async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "searchParams">) {
   const { repository } = await getSignedInSource();
+  const params = await searchParams;
+  const view = parseJobQuery(params).rated ? "rated" : "tracker";
   const [resume, runs, companies, trackerTotal] = await Promise.all([
     getPrimaryResume(),
     repository.listRuns(10),
-    repository.listTrackedCompanies("tracker"),
+    repository.listTrackedCompanies(view),
     repository.countTrackerJobs(),
   ]);
-  const query = parseJobQuery(await searchParams, resume?.text ? "desc" : "posted");
+  const query = parseJobQuery(params, resume?.text ? "desc" : "posted");
   const [jobs, stale] = await Promise.all([
-    repository.listTrackedJobs("tracker", query.sort, query.page, query.filters),
-    resume ? repository.countStaleJobs(resume.id, "tracker") : 0,
+    repository.listTrackedJobs(view, query.sort, query.page, query.filters),
+    resume && !query.rated ? repository.countStaleJobs(resume.id, "tracker") : 0,
   ]);
   const banner = runs[0]?.kind === "rescore" && rescoreScope(runs[0]) === "jobs" ? null : runs[0];
 
@@ -58,7 +68,26 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
       {banner && !(trackerTotal === 0 && banner.status === "done" && (banner.jobs_added ?? 0) > 0) && <RunStatus run={banner} />}
       <RecentRuns runs={runs} />
       <section className="mt-8">
-        {trackerTotal === 0 ? (
+        <nav aria-label="Tracker view" className="mb-4 flex gap-1 text-sm">
+          {VIEWS.map((option) => (
+            <Link
+              key={option.href}
+              href={option.href}
+              aria-current={option.rated === query.rated ? "page" : undefined}
+              className={cn(
+                "rounded-full px-3 py-1 text-muted-foreground transition-colors hover:text-foreground",
+                option.rated === query.rated && "bg-muted font-medium text-foreground",
+              )}
+            >
+              {option.label}
+            </Link>
+          ))}
+        </nav>
+        {query.rated && companies.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No rated jobs yet. Mark a job with thumbs up or down and it shows up here.
+          </p>
+        ) : !query.rated && trackerTotal === 0 ? (
           <div className="rounded-xl border border-dashed px-6 py-12 text-center">
             {banner?.status === "queued" || banner?.status === "running" ? (
               <>
@@ -86,11 +115,14 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
               query={query}
               companies={companies}
               total={jobs.total}
+              sorts={query.rated ? JOB_SORTS : undefined}
               actions={
-                <>
-                  {stale > 0 && <RescoreButton count={stale} scope="tracker" />}
-                  <ClearTracker count={trackerTotal} />
-                </>
+                !query.rated && (
+                  <>
+                    {stale > 0 && <RescoreButton count={stale} scope="tracker" />}
+                    <ClearTracker count={trackerTotal} />
+                  </>
+                )
               }
             />
             {jobs.total === 0 && <p className="mt-4 text-sm text-muted-foreground">No jobs match these filters.</p>}
@@ -98,7 +130,7 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
               <JobsTable
                 jobs={jobs.items}
                 showNotes={false}
-                onTracker
+                onTracker={!query.rated}
                 currentResumeId={resume?.id ?? null}
               />
             </div>
