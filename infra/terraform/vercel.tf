@@ -15,6 +15,8 @@ locals {
       ADMIN_EMAIL                   = { value = var.admin_email, sensitive = false, target = local.production }
     },
     nonsensitive(var.resend_api_key == null) ? {} : { RESEND_API_KEY = { value = var.resend_api_key, sensitive = true, target = local.production } },
+    var.sentry_dsn_agent == null ? {} : { SENTRY_DSN = { value = var.sentry_dsn_agent, sensitive = false, target = local.production } },
+    var.sentry_dsn_web == null ? {} : { NEXT_PUBLIC_SENTRY_DSN = { value = var.sentry_dsn_web, sensitive = false, target = local.production } },
   )
 }
 

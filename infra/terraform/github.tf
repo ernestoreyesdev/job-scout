@@ -10,6 +10,9 @@ locals {
       SUPABASE_URL              = local.supabase_url
     },
     nonsensitive(var.resend_api_key == null) ? {} : { RESEND_API_KEY = var.resend_api_key },
+    var.sentry_dsn_agent == null ? {} : { SENTRY_DSN = var.sentry_dsn_agent },
+    nonsensitive(var.healthcheck_refresh_url == null) ? {} : { HEALTHCHECK_REFRESH_URL = var.healthcheck_refresh_url },
+    nonsensitive(var.healthcheck_evals_url == null) ? {} : { HEALTHCHECK_EVALS_URL = var.healthcheck_evals_url },
   )
 }
 

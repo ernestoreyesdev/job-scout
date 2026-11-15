@@ -35,10 +35,11 @@ from app.crypto import decrypt, encrypt, key_hint
 from app.db import Rest, service_db, user_db
 from app.sources import board_from_url, default_name, fetch_live
 from app.sources.base import CompanyNotFound, Posting
-from app.telemetry import CallLog, RecordingClient, configure_logging, current_run
+from app.telemetry import CallLog, RecordingClient, configure_logging, configure_sentry, current_run
 
 logger = logging.getLogger("agent")
 configure_logging()
+configure_sentry()
 
 RUN_TIME_LIMIT = timedelta(minutes=10)
 UNFINISHED = "in.(queued,running)"

@@ -13,7 +13,7 @@ from app.agents.orchestrator import refresh_boards
 from app.config import Settings, get_settings
 from app.db import service_db
 from app.mail import alert_admin
-from app.telemetry import configure_logging
+from app.telemetry import configure_logging, configure_sentry
 
 logger = logging.getLogger("agent")
 
@@ -53,4 +53,5 @@ def run_refresh(settings: Settings) -> bool:
 
 if __name__ == "__main__":
     configure_logging()
+    configure_sentry()
     sys.exit(0 if run_refresh(get_settings()) else 1)

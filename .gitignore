@@ -24,3 +24,8 @@ infra/terraform/.terraform/
 
 # Extraction eval inputs, read from the local database
 services/agent/evals/extraction/postings.local.json
+
+# Playwright sign-in state and reports
+apps/web/e2e/.auth/
+apps/web/playwright-report/
+apps/web/test-results/

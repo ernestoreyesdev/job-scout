@@ -23,14 +23,24 @@ jobs:
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+      HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_REFRESH_URL }}
       # Required by the agent's settings, unused by the refresh.
       SUPABASE_ANON_KEY: unused
       AGENT_ENCRYPTION_KEY: unused
     steps:
       - uses: actions/checkout@v7
+      - name: Report the start to Healthchecks.io
+        if: env.HEALTHCHECK_URL != ''
+        continue-on-error: true
+        run: curl -fsS -m 10 --retry 3 "$HEALTHCHECK_URL/start" > /dev/null
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
       - run: uv python install 3.12
       - run: uv sync --locked --no-dev
       - run: uv run python -m scripts.refresh_boards
+      - name: Report the result to Healthchecks.io
+        if: always() && env.HEALTHCHECK_URL != ''
+        continue-on-error: true
+        run: curl -fsS -m 10 --retry 3 "$HEALTHCHECK_URL${{ job.status == 'success' && '' || '/fail' }}" > /dev/null

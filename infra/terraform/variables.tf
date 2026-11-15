@@ -46,3 +46,25 @@ variable "resend_api_key" {
   sensitive = true
   default   = null
 }
+
+variable "sentry_dsn_agent" {
+  type    = string
+  default = null
+}
+
+variable "sentry_dsn_web" {
+  type    = string
+  default = null
+}
+
+variable "healthcheck_refresh_url" {
+  type      = string
+  sensitive = true
+  default   = null
+}
+
+variable "healthcheck_evals_url" {
+  type      = string
+  sensitive = true
+  default   = null
+}

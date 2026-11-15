@@ -17,11 +17,16 @@ jobs:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_EVALS_URL }}
       # Required by the agent's settings, unused by the evals.
       SUPABASE_ANON_KEY: unused
       AGENT_ENCRYPTION_KEY: unused
     steps:
       - uses: actions/checkout@v7
+      - name: Report the start to Healthchecks.io
+        if: env.HEALTHCHECK_URL != ''
+        continue-on-error: true
+        run: curl -fsS -m 10 --retry 3 "$HEALTHCHECK_URL/start" > /dev/null
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
@@ -32,3 +37,7 @@ jobs:
       - name: Picking jobs to score
         if: always()
         run: uv run python -m evals.ranking.run
+      - name: Report the result to Healthchecks.io
+        if: always() && env.HEALTHCHECK_URL != ''
+        continue-on-error: true
+        run: curl -fsS -m 10 --retry 3 "$HEALTHCHECK_URL${{ job.status == 'success' && '' || '/fail' }}" > /dev/null

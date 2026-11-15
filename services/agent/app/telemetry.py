@@ -186,3 +186,10 @@ def prompt_version(system: Any, output_format: Any = None) -> str | None:
     schema = output_format.model_json_schema() if hasattr(output_format, "model_json_schema") else None
     text = json.dumps([system, schema], sort_keys=True, default=str)
     return hashlib.sha256(text.encode()).hexdigest()[:8]
+
+
+def configure_sentry() -> None:
+    """Reports unhandled errors to Sentry when SENTRY_DSN is set; otherwise does nothing."""
+    import sentry_sdk
+
+    sentry_sdk.init()

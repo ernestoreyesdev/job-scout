@@ -41,6 +41,42 @@ jobs:
       - name: Audit dependencies for high-severity vulnerabilities
         run: npm audit --audit-level=high
 
+  e2e:
+    name: Web browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: supabase/setup-cli@v3
+        with:
+          version: 3.1.0
+      # Auth, the REST API and the Mailpit inbox are all the browser tests use.
+      - run: supabase start --workdir infra -x realtime,storage-api,imgproxy,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+      - name: Point the web app at the local stack
+        run: |
+          eval "$(supabase status -o env --workdir infra)"
+          echo "::add-mask::$SERVICE_ROLE_KEY"
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON_KEY"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
+            echo "MAILPIT_URL=$MAILPIT_URL"
+          } >> "$GITHUB_ENV"
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - run: npm run build -w @job-finder/web
+      - run: npm run e2e -w @job-finder/web
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          retention-days: 7
+
   secrets:
     name: Secret scan of git history
     runs-on: ubuntu-latest
@@ -69,7 +105,7 @@ jobs:
   # production deploy until this job succeeds, so new code goes live after its migrations.
   migrate:
     name: Apply migrations to production
-    needs: [agent, web, migrations, secrets]
+    needs: [agent, web, e2e, migrations, secrets]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     concurrency: production-migrations

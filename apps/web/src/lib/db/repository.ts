@@ -17,6 +17,7 @@ import type {
 } from "./schema";
 import { FOLLOW_UP_DAYS, GHOST_JOB_DAYS, REPOST_DAYS, SKIPPED_COMPANY_KINDS } from "./schema";
 import type { FunnelJob, ScoredJob } from "../insights";
+import { jobKey } from "../job-key";
 
 export type JobFinderClient = SupabaseClient<Database>;
 
@@ -29,7 +30,12 @@ type TrackedJobRow = ApplicationRow & {
  * Signals that depend on today's date: days since the posting went up (while it's listed), whether the same
  * company listed the same title before under another posting, and days since the job was marked applied.
  */
-export type JobSignals = { openDays: number | null; reposted: boolean; daysSinceApplied: number | null };
+export type JobSignals = {
+  openDays: number | null;
+  reposted: boolean;
+  daysSinceApplied: number | null;
+  duplicateOf: ApplicationStatusRow | null;
+};
 
 export type TrackedJob = TrackedJobRow & { signals: JobSignals };
 
@@ -147,13 +153,24 @@ export class JobFinderRepository {
     return { ...result, items: await this.withSignals(result.items) };
   }
 
-  /** Adds each job's date-based signals; the database says which are reposts, as `reposted_postings` defines them. */
+  /**
+   * Adds each job's signals: its dates, whether the database says it's a repost, as `reposted_postings` defines it,
+   * and the status of another job the user tracks with the same company and title, as `jobKey` compares them.
+   */
   private async withSignals(jobs: TrackedJobRow[]): Promise<TrackedJob[]> {
-    const { data: reposts, error } = jobs.length
-      ? await this.client.rpc("reposted_postings", { job_ids: jobs.map((job) => job.posting.id), days: REPOST_DAYS })
-      : { data: [], error: null };
+    if (!jobs.length) return [];
+    const [{ data: reposts, error }, { data: tracked, error: trackedError }] = await Promise.all([
+      this.client.rpc("reposted_postings", { job_ids: jobs.map((job) => job.posting.id), days: REPOST_DAYS }),
+      this.client.from("applications").select("id, status, posting:postings!inner(company, title)"),
+    ]);
     if (error) throw error;
+    if (trackedError) throw trackedError;
     const reposted = new Set(reposts.map((row) => row.id));
+    const copies = new Map<string, { id: string; status: ApplicationStatusRow }[]>();
+    for (const row of tracked) {
+      const key = jobKey(row.posting.company, row.posting.title);
+      copies.set(key, [...(copies.get(key) ?? []), { id: row.id, status: row.status }]);
+    }
     const now = Date.now();
     const days = (date: string) => daysSince(date, now);
     return jobs.map((job) => {
@@ -164,6 +181,8 @@ export class JobFinderRepository {
           openDays: job.posting.closed_at ? null : days(job.posting.posted_at ?? job.posting.created_at),
           reposted: reposted.has(job.posting.id),
           daysSinceApplied: job.status === "applied" && applied ? days(applied.changed_at) : null,
+          duplicateOf:
+            copies.get(jobKey(job.posting.company, job.posting.title))?.find((copy) => copy.id !== job.id)?.status ?? null,
         },
       };
     });

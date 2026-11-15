@@ -56,7 +56,7 @@ export function JobRow({
   const { run, pending, error } = useAction();
   const [expanded, setExpanded] = useState(false);
   const [followUp, setFollowUp] = useState<{ subject: string; body: string } | null>(null);
-  const { openDays, reposted, daysSinceApplied } = job.signals;
+  const { openDays, reposted, daysSinceApplied, duplicateOf } = job.signals;
   const addedByUser = job.added_by === "user";
   const ghost = [
     openDays !== null && openDays >= GHOST_JOB_DAYS && `Open ${openDays} days`,
@@ -115,7 +115,7 @@ export function JobRow({
             .filter(Boolean)
             .join(" · ")}
         </p>
-        {(facts.length > 0 || stack.length > 0 || ghost.length > 0 || staleResume || closedOn || addedByUser) && (
+        {(facts.length > 0 || stack.length > 0 || ghost.length > 0 || staleResume || closedOn || addedByUser || duplicateOf) && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {addedByUser && <span className={CHIP}>Added by you</span>}
             {closedOn && (
@@ -144,6 +144,11 @@ export function JobRow({
               </span>
             ))}
             {staleResume && <span className={WARNING_CHIP}>Scored with an older resume</span>}
+            {duplicateOf && (
+              <span className={WARNING_CHIP} title="You track another job with the same company and title">
+                Possible duplicate, other copy {duplicateOf}
+              </span>
+            )}
           </div>
         )}
         {job.fit_summary && (

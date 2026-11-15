@@ -1,3 +1,4 @@
+import { withSentryConfig } from "@sentry/nextjs/config";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
@@ -21,4 +22,5 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// Source maps aren't uploaded, so Sentry shows errors in the bundled code.
+export default withSentryConfig(nextConfig, { silent: true, telemetry: false, sourcemaps: { disable: true } });
