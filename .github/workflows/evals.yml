@@ -44,4 +44,4 @@ jobs:
       - name: Report the result to Healthchecks.io
         if: always() && env.HEALTHCHECK_URL != ''
         continue-on-error: true
-        run: curl -fsS -m 10 --retry 3 "$HEALTHCHECK_URL${{ job.status == 'success' && '' || '/fail' }}" > /dev/null
+        run: curl -fsS -m 10 --retry 3 "$HEALTHCHECK_URL${{ job.status != 'success' && '/fail' || '' }}" > /dev/null
