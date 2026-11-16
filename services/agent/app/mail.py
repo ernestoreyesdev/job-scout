@@ -2,6 +2,7 @@ import html
 import logging
 
 import resend
+from resend.exceptions import ResendError
 
 from app.config import Settings
 
@@ -13,7 +14,7 @@ def send_email(settings: Settings, to: str, subject: str, body_html: str, idempo
     Sends one email through Resend and returns whether it went out. Without
     RESEND_API_KEY, or when Resend refuses it, the email is logged instead, so
     sending never fails the caller. A repeated idempotency key within 24 hours
-    sends nothing new.
+    sends nothing new, even when the body differs.
     """
     if not settings.resend_api_key:
         logger.info("email not sent: RESEND_API_KEY is not set", extra={"to": to, "subject": subject})
@@ -25,7 +26,10 @@ def send_email(settings: Settings, to: str, subject: str, body_html: str, idempo
             {"idempotency_key": idempotency_key} if idempotency_key else None,
         )
     except Exception as error:
-        logger.warning("sending email %r failed: %s", subject, error)
+        if isinstance(error, ResendError) and error.error_type == "invalid_idempotent_request":
+            logger.info("email not sent: %r already went out under this idempotency key", subject)
+        else:
+            logger.warning("sending email %r failed: %s", subject, error)
         return False
     return True
 

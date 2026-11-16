@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from resend.exceptions import ResendError
 
 from app import mail
 from app.config import Settings
@@ -63,3 +64,15 @@ def test_no_alert_without_an_admin_address(monkeypatch: pytest.MonkeyPatch):
 
     assert not mail.alert_admin(settings(admin_email=None), "Refresh failed", ["Error"])
     assert sent == []
+
+
+def test_an_email_already_sent_under_its_key_is_skipped_without_a_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    def send(params: Any, options: Any = None) -> dict[str, str]:
+        raise ResendError(409, "invalid_idempotent_request", "request body was modified", "")
+
+    monkeypatch.setattr(mail.resend.Emails, "send", send)
+
+    assert not mail.alert_admin(settings(), "Refresh failed", ["Another error"], "refresh-failed/2026-11-16")
+    assert [record.levelname for record in caplog.records] == ["INFO"]
