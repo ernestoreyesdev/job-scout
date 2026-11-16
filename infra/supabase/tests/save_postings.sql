@@ -29,9 +29,9 @@ select is(
   'every job comes back with its id'
 );
 select is(
-  (select p.ctid = b.row_location from postings p join before b using (external_id) where external_id = 'same'),
+  (select p.ctid = b.row_location and p.xmax::text = '0' from postings p join before b using (external_id) where external_id = 'same'),
   true,
-  'an unchanged job is not rewritten'
+  'an unchanged job is neither rewritten nor locked'
 );
 select is(
   (select description from postings where external_id = 'same'),
