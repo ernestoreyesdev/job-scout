@@ -182,12 +182,19 @@ class FakeRest(Rest):
         self.rpcs.append((function, args))
         if function in self.rpc_results:
             return self.rpc_results[function]
+        if function == "save_postings":
+            return [{**row, "id": f"posting-{row['external_id']}", "created_at": ""} for row in args["jobs"]]
+        if function == "close_unlisted_postings":
+            return 0
         if function == "rank_postings":
             return self.ranked
         return self.labeled if function == "nearest_labeled_jobs" else None
 
     def inserted(self, table: str) -> list[Any]:
         return [rows for name, rows in self.inserts if name == table]
+
+    def called(self, function: str) -> list[dict[str, Any]]:
+        return [args for name, args in self.rpcs if name == function]
 
 
 def run(
@@ -236,9 +243,8 @@ def test_scores_and_saves_every_match():
 
     assert (result.found, result.matched, result.scored, result.failed) == (4, 3, 3, 0)
     assert saved_ids(user) == ["posting-1", "posting-3", "posting-4"]
-    [stored] = service.inserted("postings")
-    assert sorted(row["external_id"] for row in stored) == ["1", "2", "3", "4"]
-    assert all(row["last_seen_at"] and row["closed_at"] is None for row in stored)
+    [stored] = service.called("save_postings")
+    assert sorted(row["external_id"] for row in stored["jobs"]) == ["1", "2", "3", "4"]
     saved = user.inserted("applications")[0]
     assert saved["fit_score"] == 72 and saved["gaps"] == ["Kubernetes"] and "status" not in saved
     assert saved["score_model"] == "claude-haiku-5-5" and len(saved["score_prompt_version"]) == 8
@@ -861,14 +867,14 @@ def test_a_board_cut_off_at_its_limit_closes_nothing():
 
     orchestrator.store_jobs(service, {("workday", "acme.wd5/site"): capped})
 
-    assert service.updates == []
+    assert service.called("close_unlisted_postings") == []
 
 
 def test_a_company_search_checks_its_board_for_closed_jobs():
     _, _, _, service, _, _ = run()
 
-    closes = [f for t, f, p in service.updates if t == "postings" and p.get("closed_at")]
-    assert [(f["source"], f["board"]) for f in closes] == [("eq.ashby", "eq.acme")]
+    closes = service.called("close_unlisted_postings")
+    assert [(args["job_source"], args["job_board"]) for args in closes] == [("ashby", "acme")]
 
 
 def test_a_new_keyword_set_runs_discovery_even_after_a_recent_one():
@@ -1248,15 +1254,15 @@ def test_a_board_checked_too_long_ago_is_fetched_again():
     assert ("ashby", "acme", "Acme") in fetched
 
 
-def test_saved_jobs_keep_their_description_when_a_job_list_leaves_it_out():
+def test_a_job_listed_without_a_description_is_sent_without_one():
     service = FakeRest()
     listed = posting("1", "Engineer", description="")
 
     orchestrator.store_jobs(service, {("workday", "acme"): [listed], ("ashby", "beta"): [posting("2", "Engineer")]})
 
-    described, bare = service.inserted("postings")
-    assert [row["external_id"] for row in described] == ["2"] and described[0]["description"]
-    assert [row["external_id"] for row in bare] == ["1"] and "description" not in bare[0]
+    [saved] = service.called("save_postings")
+    rows = {row["external_id"]: row for row in saved["jobs"]}
+    assert rows["2"]["description"] and "description" not in rows["1"]
 
 
 def test_a_complete_fetch_closes_the_jobs_its_board_no_longer_lists():
@@ -1264,9 +1270,7 @@ def test_a_complete_fetch_closes_the_jobs_its_board_no_longer_lists():
 
     orchestrator.store_jobs(service, {("ashby", "acme"): [posting("1", "Engineer")]})
 
-    [(table, filters, patch)] = service.updates
-    assert table == "postings" and (filters["source"], filters["board"], filters["closed_at"]) == ("eq.ashby", "eq.acme", "is.null")
-    assert filters["or"] == f"(last_seen_at.is.null,last_seen_at.lt.{patch['closed_at']})"
+    assert service.called("close_unlisted_postings") == [{"job_source": "ashby", "job_board": "acme", "listed": ["1"]}]
 
 
 def test_scoring_loads_saved_descriptions_before_asking_the_job_system():
@@ -1317,7 +1321,7 @@ def test_a_refresh_fetches_every_board_and_records_itself():
     summary = orchestrator.refresh_boards(service, fetcher)
 
     assert (summary["boards"], summary["jobs"], summary["deleted_jobs"], summary["failures"]) == (2, 2, 2, 0)
-    assert [function for function, _ in service.rpcs] == ["delete_stale_postings"]
+    assert [f for f, _ in service.rpcs if f not in ("save_postings", "close_unlisted_postings")] == ["delete_stale_postings"]
     [refresh] = service.inserted("board_refreshes")
     assert refresh["started_at"]
     [(_, cutoff, stop), (_, filters, patch)] = [update for update in service.updates if update[0] == "board_refreshes"]

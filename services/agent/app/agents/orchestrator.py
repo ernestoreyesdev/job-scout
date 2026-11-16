@@ -873,34 +873,25 @@ def fetch_boards(
 
 def store_jobs(service: Rest, fetched: dict[BoardKey, list[Posting]]) -> tuple[int, int]:
     """
-    Saves every fetched job to postings as seen and open, keeping saved
-    descriptions a job list leaves out, sets each job's id, and closes the jobs
-    a complete fetch of their board no longer lists. Requests run
-    STORE_CONCURRENCY at a time. Returns how many jobs were new and how many closed.
+    Saves every fetched job to postings as open, writing only new, changed and
+    reopened ones and keeping saved descriptions a job list leaves out, sets
+    each job's id, and closes the jobs a complete fetch of their board no
+    longer lists. Requests run STORE_CONCURRENCY at a time. Returns how many
+    jobs were new and how many closed.
     """
     seen = datetime.now(UTC).isoformat()
     unique = {(p.source, p.external_id): p for postings in fetched.values() for p in postings}
-    rows = [{**p.row(), "last_seen_at": seen, "closed_at": None} for p in unique.values()]
-    chunks = [
-        batch[i : i + STORE_CHUNK]
-        for batch in ([row for row in rows if ("description" in row) == described] for described in (True, False))
-        for i in range(0, len(batch), STORE_CHUNK)
-    ]
+    rows = [p.row() for p in unique.values()]
+    chunks = [rows[i : i + STORE_CHUNK] for i in range(0, len(rows), STORE_CHUNK)]
     complete = [key for key, postings in fetched.items() if is_complete(key[0], postings)]
 
     def save(chunk: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return service.insert("postings", chunk, on_conflict="source,external_id", select="id,source,external_id,created_at")
+        return service.rpc("save_postings", {"jobs": chunk})
 
     def close(key: BoardKey) -> int:
         source, board = key
-        filters = {
-            "select": "id",
-            "source": f"eq.{source}",
-            "board": f"eq.{board}",
-            "closed_at": "is.null",
-            "or": f"(last_seen_at.is.null,last_seen_at.lt.{seen})",
-        }
-        return len(service.update("postings", filters, {"closed_at": seen}))
+        listed = [p.external_id for p in fetched[key]]
+        return service.rpc("close_unlisted_postings", {"job_source": source, "job_board": board, "listed": listed})
 
     with ContextThreadPool(max_workers=STORE_CONCURRENCY) as pool:
         saved = [row for chunk in pool.map(save, chunks) for row in chunk]
