@@ -58,8 +58,8 @@ MIN_EXAMPLES = 3
 # A board fetched this recently is read from postings; the daily refresh keeps boards inside it.
 FRESH_BOARD_HOURS = 25
 # Jobs saved per request, requests sent at once, and days a closed job nobody tracks is kept.
-STORE_CHUNK = 500
-STORE_CONCURRENCY = 4
+STORE_CHUNK = 100
+STORE_CONCURRENCY = 1
 STALE_JOB_DAYS = 30
 # Jobs without an embedding that a refresh loads and embeds at a time, newest first, and how many are saved per request.
 EMBED_BATCH = 1000
