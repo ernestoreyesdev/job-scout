@@ -40,8 +40,8 @@ MIN_DIRECTORY = 25
 DISCOVERY_INTERVAL = timedelta(days=7)
 # Boards from a company's web lookup checked before giving up.
 MAX_LOOKUP_BOARDS = 5
-# Company kinds left out of searches unless the user chose to show the company.
-SKIPPED_KINDS = frozenset({"staffing", "aggregator"})
+# Company kinds never searched, refreshed or saved.
+SKIPPED_KINDS = frozenset({"staffing"})
 # Jobs scored per company in a search across the directory.
 MAX_PER_COMPANY = 3
 # A search scores this many times its job limit and keeps the best-scoring ones.
@@ -260,9 +260,9 @@ def directory_postings(
     namer: Callable[..., dict[tuple[str, str], CompanyName]],
 ) -> tuple[list[Posting], list[str], list[dict[str, Any]]]:
     """
-    Open jobs at every directory company the user hasn't hidden (staffing
-    agencies and aggregators count as hidden unless shown), topping the
-    directory up from the web while it's small or once a week. Returns the jobs,
+    Open jobs at every directory company the user hasn't hidden, topping the
+    directory up from the web while it's small or once a week. Staffing
+    agencies are left out, and none of their jobs are saved. Returns the jobs,
     the unreachable boards and each board fetch's timing.
     """
     directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,kind,open_jobs,checked_at"})
@@ -271,7 +271,7 @@ def directory_postings(
     boards = [
         Board(c["source"], c["board"], c["name"], c["found_by"])
         for c in directory
-        if not choices.get(c["id"], c["kind"] in SKIPPED_KINDS)
+        if c["kind"] not in SKIPPED_KINDS and not choices.get(c["id"], False)
     ]
     skipped: set[BoardKey] = set()
     kinds: dict[BoardKey, str] = {}
@@ -313,7 +313,7 @@ def directory_postings(
         for key, jobs in stored.items()
     ]
 
-    record_board_checks(service, boards, fetched, [c for c in directory if (c["source"], c["board"]) in gone])
+    record_board_checks(service, boards, fetched, [c for c in directory if (c["source"], c["board"]) in gone], skipped)
     if any(entry.found_by == "discovery" and entry.key not in known and entry.key in fetched for entry in boards):
         remove_duplicate_names(service)
     if kinds:
@@ -803,18 +803,20 @@ def nearest_examples(
 ) -> list[LabeledJob]:
     """Embeds the jobs being scored and the labeled jobs that lack an embedding, then returns those nearest the batch."""
     ids = [posting_id for posting_id, _ in todo]
-    unembedded = {row["id"] for row in service.select("postings", {"select": "id", "id": f"in.({','.join(ids)})", "embedding": "is.null"})}
-    pending = [(posting_id, job_text(p.title, p.company, p.location, p.description)) for posting_id, p in todo if posting_id in unembedded]
     labeled = user.select(
         "applications",
-        {
-            "select": "posting_id,posting:postings!inner(title,company,location,description)",
-            "fit_label": "not.is.null",
-            "posting.embedding": "is.null",
-        },
+        {"select": "posting_id,posting:postings!inner(title,company,location,description)", "fit_label": "not.is.null"},
     )
-    pending += [(row["posting_id"], job_text(**row["posting"])) for row in labeled]
-    save_embeddings(service, pending, embed)
+    candidates = ids + [row["posting_id"] for row in labeled]
+    embedded = {
+        row["posting_id"]
+        for row in service.select("posting_embeddings", {"select": "posting_id", "posting_id": f"in.({','.join(candidates)})"})
+    }
+    pending = {posting_id: job_text(p.title, p.company, p.location, p.description) for posting_id, p in todo if posting_id not in embedded}
+    for row in labeled:
+        if row["posting_id"] not in embedded:
+            pending.setdefault(row["posting_id"], job_text(**row["posting"]))
+    save_embeddings(service, list(pending.items()), embed)
     rows = user.rpc("nearest_labeled_jobs", {"job_ids": ids, "per_label": MAX_EXAMPLES})
     return [labeled_job(row["fit_label"], row["posting"]) for row in rows]
 
@@ -873,15 +875,15 @@ def fetch_boards(
 
 def store_jobs(service: Rest, fetched: dict[BoardKey, list[Posting]]) -> tuple[int, int]:
     """
-    Saves every fetched job to postings as open, writing only new, changed and
-    reopened ones and keeping saved descriptions a job list leaves out, sets
-    each job's id, and closes the jobs a complete fetch of their board no
+    Saves every fetched job to postings as open, with its description's hash
+    instead of the description, writing only new, changed and reopened ones,
+    sets each job's id, and closes the jobs a complete fetch of their board no
     longer lists. Requests run STORE_CONCURRENCY at a time. Returns how many
     jobs were new and how many closed.
     """
     seen = datetime.now(UTC).isoformat()
     unique = {(p.source, p.external_id): p for postings in fetched.values() for p in postings}
-    rows = [p.row() for p in unique.values()]
+    rows = [p.listing_row() for p in unique.values()]
     chunks = [rows[i : i + STORE_CHUNK] for i in range(0, len(rows), STORE_CHUNK)]
     complete = [key for key, postings in fetched.items() if is_complete(key[0], postings)]
 
@@ -925,10 +927,11 @@ def refresh_boards(
 ) -> dict[str, Any]:
     """
     Marks earlier refreshes that were cut off as stopped, fetches every
-    directory board from its system, saves the jobs, closes the ones no longer
-    listed, keeps one directory entry per company name, embeds every open job that has none, deletes jobs closed
-    STALE_JOB_DAYS ago that nobody tracks, and records the refresh in
-    board_refreshes. Returns that record.
+    directory board from its system except staffing agencies, saves the jobs,
+    closes the ones no longer listed, keeps one directory entry per company
+    name, embeds every open job that has none from the description just
+    fetched, deletes jobs closed STALE_JOB_DAYS ago that nobody tracks, and
+    records the refresh in board_refreshes. Returns that record.
     """
     now = datetime.now(UTC)
     service.update(
@@ -937,14 +940,16 @@ def refresh_boards(
         {"stopped_at": now.isoformat()},
     )
     [refresh] = service.insert("board_refreshes", {"started_at": now.isoformat()}, select="id")
-    directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,open_jobs"})
+    directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,kind,open_jobs"})
+    directory = [c for c in directory if c["kind"] not in SKIPPED_KINDS]
     directory.sort(key=lambda c: c.get("open_jobs") or 0, reverse=True)
     boards = [Board(c["source"], c["board"], c["name"], c["found_by"]) for c in directory]
     fetched, gone, unreachable, fetches = fetch_boards(boards, fetcher, lambda _: None)
     new, closed = record_board_checks(service, boards, fetched, [c for c in directory if (c["source"], c["board"]) in gone])
     remove_duplicate_names(service)
+    descriptions = {(p.source, p.external_id): p.description for postings in fetched.values() for p in postings}
     embedded = 0
-    while (batch := embed_missing(service, embed, EMBED_BATCH)) == EMBED_BATCH:
+    while (batch := embed_missing(service, embed, EMBED_BATCH, descriptions)) == EMBED_BATCH:
         embedded += batch
     embedded += batch
     deleted = service.rpc("delete_stale_postings", {"days": STALE_JOB_DAYS})
@@ -976,22 +981,30 @@ def by_resume_fit(
     return sorted(fresh, key=lambda job: order.get(job[0], len(order)))
 
 
-def embed_missing(service: Rest, embed: Callable[[list[str]], list[list[float]]], limit: int) -> int:
-    """Embeds up to `limit` open jobs that have no embedding, newest first; returns how many."""
-    rows = service.select(
-        "postings",
-        {
-            "select": "id,title,company,location,description",
-            "embedding": "is.null",
-            "closed_at": "is.null",
-            "order": "created_at.desc",
-            "limit": str(limit),
-        },
-    )
+def embed_missing(
+    service: Rest, embed: Callable[[list[str]], list[list[float]]], limit: int, descriptions: dict[tuple[str, str], str]
+) -> int:
+    """
+    Embeds up to `limit` open jobs that have no embedding, newest first, from
+    their description in `descriptions` by (source, external id), or the saved
+    one when it isn't there. Returns how many.
+    """
+    rows = service.rpc("unembedded_postings", {"max_rows": limit})
     for i in range(0, len(rows), EMBED_CHUNK):
         save_embeddings(
             service,
-            [(row["id"], job_text(row["title"], row["company"], row["location"], row["description"])) for row in rows[i : i + EMBED_CHUNK]],
+            [
+                (
+                    row["id"],
+                    job_text(
+                        row["title"],
+                        row["company"],
+                        row["location"],
+                        descriptions.get((row["source"], row["external_id"])) or row["description"],
+                    ),
+                )
+                for row in rows[i : i + EMBED_CHUNK]
+            ],
             embed,
         )
     return len(rows)
@@ -1016,14 +1029,18 @@ def board_label(key: BoardKey) -> str:
 
 
 def record_board_checks(
-    service: Rest, boards: list[Board], fetched: dict[BoardKey, list[Posting]], gone: list[dict[str, Any]]
+    service: Rest,
+    boards: list[Board],
+    fetched: dict[BoardKey, list[Posting]],
+    gone: list[dict[str, Any]],
+    unsaved: set[BoardKey] | None = None,
 ) -> tuple[int, int]:
     """
-    Saves the fetched jobs, records the boards that answered in the directory
-    and counts a miss for each directory company in `gone`. Returns how many
-    jobs were new and how many closed.
+    Saves the fetched jobs, except those of `unsaved` boards, records the boards
+    that answered in the directory and counts a miss for each directory company
+    in `gone`. Returns how many jobs were new and how many closed.
     """
-    new, closed = store_jobs(service, fetched)
+    new, closed = store_jobs(service, {key: jobs for key, jobs in fetched.items() if key not in (unsaved or set())})
     save_companies(service, [entry for entry in boards if entry.key in fetched], fetched)
     record_misses(service, gone)
     return new, closed

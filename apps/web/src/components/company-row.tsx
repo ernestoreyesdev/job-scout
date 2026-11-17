@@ -5,13 +5,17 @@ import { Eye, EyeOff } from "lucide-react";
 import { setCompanyHidden } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
-import type { DirectoryCompany } from "@/lib/db";
+import { SKIPPED_COMPANY_KINDS, type DirectoryCompany } from "@/lib/db";
 import { useAction } from "@/lib/use-action";
 import { cn } from "@/lib/utils";
 
-/** One directory company with a toggle that hides it from, or returns it to, this user's searches. */
+/**
+ * One directory company with a toggle that hides it from, or returns it to, this user's searches. Staffing agencies
+ * are never searched, so they have no toggle.
+ */
 export function CompanyRow({ company, checked }: { company: DirectoryCompany; checked: string }) {
   const { run, pending, error } = useAction();
+  const skipped = company.kind !== null && SKIPPED_COMPANY_KINDS.includes(company.kind);
 
   function toggle() {
     run(() => setCompanyHidden(company.id, !company.hidden), "Could not update this company.");
@@ -38,7 +42,9 @@ export function CompanyRow({ company, checked }: { company: DirectoryCompany; ch
           </span>
         )}
         {company.hidden && (
-          <span className="ml-2 inline-flex rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">Hidden</span>
+          <span className="ml-2 inline-flex rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+            {skipped ? "Not searched" : "Hidden"}
+          </span>
         )}
         {error && <p className="mt-1 text-sm text-destructive">{error}</p>}
       </TableCell>
@@ -46,16 +52,18 @@ export function CompanyRow({ company, checked }: { company: DirectoryCompany; ch
       <TableCell>{checked}</TableCell>
       <TableCell>
         <div className="flex justify-end">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={toggle}
-            disabled={pending}
-            aria-label={company.hidden ? `Show ${company.name} in searches` : `Hide ${company.name} from searches`}
-          >
-            {company.hidden ? <Eye /> : <EyeOff />}
-            {company.hidden ? "Show" : "Hide"}
-          </Button>
+          {!skipped && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggle}
+              disabled={pending}
+              aria-label={company.hidden ? `Show ${company.name} in searches` : `Hide ${company.name} from searches`}
+            >
+              {company.hidden ? <Eye /> : <EyeOff />}
+              {company.hidden ? "Show" : "Hide"}
+            </Button>
+          )}
         </div>
       </TableCell>
     </TableRow>

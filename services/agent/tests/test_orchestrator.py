@@ -1,3 +1,4 @@
+import hashlib
 import threading
 from collections.abc import Collection, Mapping
 from datetime import UTC, datetime, timedelta
@@ -112,7 +113,8 @@ class FakeRest(Rest):
         self.tracked_postings: list[dict[str, Any]] = []
         self.tracked_jobs: dict[str, dict[str, str]] = {}
         self.labeled: list[dict[str, Any]] = []
-        self.unembedded_labeled: list[dict[str, Any]] = []
+        self.labeled_postings: list[dict[str, Any]] = []
+        self.embedded: list[str] = []
         self.unembedded: list[dict[str, Any]] = []
         self.selects: list[tuple[str, dict[str, str]]] = []
         self.rpc_results: dict[str, Any] = {}
@@ -135,15 +137,15 @@ class FakeRest(Rest):
             return [{"company_id": company_id, "hidden": True} for company_id in self.hidden]
         if table == "directory_discoveries":
             return self.discoveries
-        if table == "postings" and "embedding" in params:
-            return self.unembedded
+        if table == "posting_embeddings":
+            return [{"posting_id": posting_id} for posting_id in self.embedded]
         if table == "postings" and params.get("select") == "id,description":
             return self.descriptions
         if table == "postings":
             after = params.get("id", "gt.")[3:]
             return [row for row in self.stored if row["id"] > after][: int(params.get("limit", "1000"))]
-        if "posting.embedding" in params:
-            return self.unembedded_labeled
+        if params.get("select") == "posting_id,posting:postings!inner(title,company,location,description)":
+            return self.labeled_postings
         if params.get("fit_label", "").startswith("eq."):
             return [row for row in self.labeled if params["fit_label"] == f"eq.{row['fit_label']}"]
         if "fit_label" in params:
@@ -186,6 +188,8 @@ class FakeRest(Rest):
             return [{**row, "id": f"posting-{row['external_id']}", "created_at": ""} for row in args["jobs"]]
         if function == "close_unlisted_postings":
             return 0
+        if function == "unembedded_postings":
+            return self.unembedded
         if function == "rank_postings":
             return self.ranked
         return self.labeled if function == "nearest_labeled_jobs" else None
@@ -710,10 +714,10 @@ def test_exclusions_and_the_date_window_narrow_the_matches():
     assert result.matched == 2 and saved_ids(user) == ["posting-recent", "posting-undated"]
 
 
-def test_staffing_companies_are_skipped_unless_the_user_shows_them():
+def test_staffing_companies_are_never_searched_and_aggregators_are():
     staffing = {**company("talentco"), "kind": "staffing"}
-    shown = {**company("recruitly"), "kind": "aggregator"}
-    companies = [company(f"co{i}") for i in range(MIN_DIRECTORY)] + [staffing, shown]
+    aggregator = {**company("recruitly"), "kind": "aggregator"}
+    companies = [company(f"co{i}") for i in range(MIN_DIRECTORY)] + [staffing, aggregator]
     boards = {"talentco": [REMOTE_JOB], "recruitly": [posting("9", "Software Engineer, Recruitly", board="recruitly", workplace_type="remote")]}
     fetched: list[str] = []
 
@@ -724,7 +728,7 @@ def test_staffing_companies_are_skipped_unless_the_user_shows_them():
         return boards[board]
 
     user = FakeRest()
-    user.select = lambda table, params: [{"company_id": "id-recruitly", "hidden": False}] if table == "hidden_companies" else []
+    user.select = lambda table, params: [{"company_id": "id-talentco", "hidden": False}] if table == "hidden_companies" else []
     run(
         rule=SearchRule(keywords=["software engineer"]),
         service=FakeRest(companies=companies, discoveries=[{"id": "recent", "keywords": ["software engineer"]}]),
@@ -735,7 +739,7 @@ def test_staffing_companies_are_skipped_unless_the_user_shows_them():
     assert "talentco" not in fetched and "recruitly" in fetched
 
 
-def test_new_staffing_boards_are_saved_with_their_kind_but_not_searched():
+def test_new_staffing_boards_are_saved_with_their_kind_but_their_jobs_are_not():
     boards = {
         "acme": [REMOTE_JOB],
         "talentco": [posting("t1", "Software Engineer, Talent", board="talentco", workplace_type="remote")],
@@ -752,6 +756,7 @@ def test_new_staffing_boards_are_saved_with_their_kind_but_not_searched():
     assert ("lever", "talentco", "TalentCo") in fetched
     assert ("companies", {"source": "eq.lever", "board": "eq.talentco"}, {"kind": "staffing"}) in service.updates
     assert saved_ids(user) == ["posting-1"]
+    assert "t1" not in {row["external_id"] for call in service.called("save_postings") for row in call["jobs"]}
 
 
 def test_a_large_match_set_is_ranked_by_resume_similarity_before_scoring():
@@ -1042,13 +1047,16 @@ def test_the_same_job_from_two_sources_is_scored_once_from_its_board():
     assert one_per_job([from_thread, other, from_board]) == [from_board, other]
 
 
-def test_scoring_saves_the_facts_read_from_each_posting():
-    _, _, _, service, _, _ = run(jobs=[posting("1", "Software Engineer, Backend")])
+def test_scoring_saves_the_facts_read_from_each_posting_and_its_description():
+    job = posting("1", "Software Engineer, Backend")
+    _, _, _, service, _, _ = run(jobs=[job])
 
     [(_table, filters, patch)] = [update for update in service.updates if update[0] == "postings" and "id" in update[1]]
     assert filters == {"id": "eq.posting-1"}
     assert (patch["salary_min"], patch["salary_max"], patch["years_experience"]) == (150000, 190000, 5)
     assert patch["tech_stack"] == ["Python"] and patch["workplace_type"] == "remote" and patch["details_extracted_at"]
+    assert patch["description"] == job.description
+    assert patch["description_hash"] == hashlib.md5(job.description.encode()).hexdigest()
 
 
 def test_related_titles_match_jobs_the_keywords_alone_miss():
@@ -1117,10 +1125,10 @@ def test_labeled_jobs_are_left_out_until_each_label_has_enough():
 def test_labeled_jobs_are_those_nearest_the_jobs_being_scored_after_embedding_missing_ones():
     user, service = FakeRest(), FakeRest()
     user.labeled = [*[labeled_row("good", n) for n in range(3)], *[labeled_row("bad", n) for n in range(3, 6)]]
-    user.unembedded_labeled = [
+    user.labeled_postings = [
         {"posting_id": "posting-9", "posting": {"title": "Old Role", "company": "Acme", "location": None, "description": "Old."}}
     ]
-    service.unembedded = [{"id": "posting-1"}]
+    service.embedded = ["posting-3"]
 
     examples = orchestrator.labeled_examples(user, service, [("posting-1", JOBS[0]), ("posting-3", JOBS[2])], fake_embed, orchestrator.label_counts(user))
 
@@ -1135,7 +1143,6 @@ def test_a_failed_embedding_falls_back_to_the_most_recent_labeled_jobs():
     user = FakeRest()
     user.labeled = [*[labeled_row("good", n) for n in range(3)], *[labeled_row("bad", n) for n in range(3, 6)]]
     service = FakeRest()
-    service.unembedded = [{"id": "posting-1"}]
 
     def embed(texts: list[str]) -> list[list[float]]:
         raise RuntimeError("download failed")
@@ -1254,15 +1261,18 @@ def test_a_board_checked_too_long_ago_is_fetched_again():
     assert ("ashby", "acme", "Acme") in fetched
 
 
-def test_a_job_listed_without_a_description_is_sent_without_one():
+def test_saved_jobs_carry_their_descriptions_hash_instead_of_the_description():
     service = FakeRest()
     listed = posting("1", "Engineer", description="")
+    described = posting("2", "Engineer")
 
-    orchestrator.store_jobs(service, {("workday", "acme"): [listed], ("ashby", "beta"): [posting("2", "Engineer")]})
+    orchestrator.store_jobs(service, {("workday", "acme"): [listed], ("ashby", "beta"): [described]})
 
     [saved] = service.called("save_postings")
     rows = {row["external_id"]: row for row in saved["jobs"]}
-    assert rows["2"]["description"] and "description" not in rows["1"]
+    assert "description" not in rows["1"] and "description" not in rows["2"]
+    assert rows["1"]["description_hash"] is None
+    assert rows["2"]["description_hash"] == hashlib.md5(described.description.encode()).hexdigest()
 
 
 def test_a_complete_fetch_closes_the_jobs_its_board_no_longer_lists():
@@ -1299,14 +1309,21 @@ def test_embedding_missing_jobs_takes_the_newest_up_to_the_limit_and_saves_in_ch
     monkeypatch.setattr(orchestrator, "EMBED_CHUNK", 2)
     service = FakeRest()
     service.unembedded = [
-        {"id": f"posting-{n}", "title": "Engineer", "company": "Acme", "location": None, "description": "Builds."} for n in range(3)
+        {"id": f"posting-{n}", "source": "ashby", "external_id": str(n), "title": "Engineer", "company": "Acme", "location": None, "description": ""}
+        for n in range(3)
     ]
-    count = orchestrator.embed_missing(service, fake_embed, 50)
+    texts: list[str] = []
+
+    def embed(batch: list[str]) -> list[list[float]]:
+        texts.extend(batch)
+        return fake_embed(batch)
+
+    count = orchestrator.embed_missing(service, embed, 50, {("ashby", "0"): "Builds things."})
 
     assert count == 3
-    [(_, params)] = service.selects
-    assert (params["embedding"], params["closed_at"], params["order"], params["limit"]) == ("is.null", "is.null", "created_at.desc", "50")
+    assert service.rpcs[0] == ("unembedded_postings", {"max_rows": 50})
     assert [len(args["embeddings"]) for function, args in service.rpcs if function == "set_posting_embeddings"] == [2, 1]
+    assert texts[0].endswith("Builds things.") and texts[1].endswith("\n")
 
 
 def test_a_refresh_fetches_every_board_and_records_itself():
@@ -1320,15 +1337,18 @@ def test_a_refresh_fetches_every_board_and_records_itself():
 
     summary = orchestrator.refresh_boards(service, fetcher)
 
-    assert (summary["boards"], summary["jobs"], summary["deleted_jobs"], summary["failures"]) == (2, 2, 2, 0)
-    assert [f for f, _ in service.rpcs if f not in ("save_postings", "close_unlisted_postings")] == ["delete_stale_postings"]
+    assert (summary["boards"], summary["jobs"], summary["deleted_jobs"], summary["failures"]) == (1, 1, 2, 0)
+    assert [f for f, _ in service.rpcs if f not in ("save_postings", "close_unlisted_postings")] == [
+        "unembedded_postings",
+        "delete_stale_postings",
+    ]
     [refresh] = service.inserted("board_refreshes")
     assert refresh["started_at"]
     [(_, cutoff, stop), (_, filters, patch)] = [update for update in service.updates if update[0] == "board_refreshes"]
     assert (cutoff["finished_at"], cutoff["stopped_at"], cutoff["started_at"][:3]) == ("is.null", "is.null", "lt.")
     assert stop["stopped_at"]
     assert filters["id"] == "eq.refresh-1" and patch["finished_at"]
-    assert {fetch["board"] for fetch in patch["board_fetches"]} == {"ashby/acme", "ashby/agency", "ashby/gone"}
+    assert {fetch["board"] for fetch in patch["board_fetches"]} == {"ashby/acme", "ashby/gone"}
     assert ("companies", {"id": "eq.id-gone"}, {"missed_checks": 1}) in service.updates
 
 
@@ -1344,7 +1364,7 @@ def test_the_biggest_boards_are_fetched_first(monkeypatch: pytest.MonkeyPatch):
 
 def test_a_refresh_embeds_batch_after_batch_until_none_are_left(monkeypatch: pytest.MonkeyPatch):
     batches = iter([orchestrator.EMBED_BATCH, orchestrator.EMBED_BATCH, 3])
-    monkeypatch.setattr(orchestrator, "embed_missing", lambda service, embed, limit: next(batches))
+    monkeypatch.setattr(orchestrator, "embed_missing", lambda service, embed, limit, descriptions: next(batches))
     service = FakeRest(companies=[company("acme")])
 
     summary = orchestrator.refresh_boards(service, lambda source, board, name: [posting(board, "Engineer")])

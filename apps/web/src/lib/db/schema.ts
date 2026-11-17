@@ -50,8 +50,8 @@ export type CompanyOriginRow = "lookup" | "discovery" | "import";
 
 export type CompanyKindRow = "employer" | "staffing" | "aggregator";
 
-/** Kinds a search skips unless the user chose to show the company. */
-export const SKIPPED_COMPANY_KINDS: readonly CompanyKindRow[] = ["staffing", "aggregator"];
+/** Kinds never searched, whatever the user chose. */
+export const SKIPPED_COMPANY_KINDS: readonly CompanyKindRow[] = ["staffing"];
 
 export const POSTED_WITHIN_DAYS = [1, 3, 7, 14, 30] as const;
 
@@ -93,6 +93,7 @@ export type PostingRow = {
   location: string | null;
   url: string;
   description: string;
+  description_hash: string | null;
   posted_at: string | null;
   workplace_type: WorkplaceTypeRow | null;
   closed_at: string | null;

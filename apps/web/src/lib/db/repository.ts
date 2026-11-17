@@ -23,7 +23,7 @@ import { jobKey } from "../job-key";
 export type JobFinderClient = SupabaseClient<Database>;
 
 type TrackedJobRow = ApplicationRow & {
-  posting: Omit<PostingRow, "description">;
+  posting: Omit<PostingRow, "description" | "description_hash">;
   events: Pick<ApplicationEventRow, "status" | "changed_at">[];
 };
 
@@ -273,12 +273,12 @@ export class JobFinderRepository {
       ...companies,
       items: companies.items.map((company) => ({
         ...company,
-        hidden: choices.get(company.id) ?? (company.kind !== null && SKIPPED_COMPANY_KINDS.includes(company.kind)),
+        hidden: (company.kind !== null && SKIPPED_COMPANY_KINDS.includes(company.kind)) || (choices.get(company.id) ?? false),
       })),
     };
   }
 
-  /** Records the user's choice, which overrides the default of hiding staffing agencies and aggregators. */
+  /** Records the user's choice to hide a company from searches or show it again. */
   async setCompanyHidden(companyId: string, hidden: boolean): Promise<void> {
     const { error } = await this.client
       .from("hidden_companies")

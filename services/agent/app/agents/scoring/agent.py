@@ -10,7 +10,7 @@ from app.agents.claude import parse
 from app.agents.schemas import FitScore, JobDetails, RunStopped
 from app.agents.scoring.prompts import FIT_SYSTEM, LabeledJob, Lesson, fit_blocks
 from app.db import Rest
-from app.sources.base import Posting
+from app.sources.base import Posting, description_hash
 from app.telemetry import ContextThreadPool, prompt_version
 
 logger = logging.getLogger("agent")
@@ -126,9 +126,15 @@ def score_and_save(
 
 
 def posting_details(details: JobDetails, posting: Posting) -> dict[str, Any]:
-    """Columns saved on the posting; the source's own workplace type wins over the one read from the text."""
+    """
+    Columns saved on the posting: the facts read from it and the description
+    it was scored on. The source's own workplace type wins over the one read
+    from the text.
+    """
     columns = details.model_dump(exclude={"workplace_type"})
     columns["details_extracted_at"] = datetime.now(UTC).isoformat()
+    columns["description"] = posting.description
+    columns["description_hash"] = description_hash(posting.description)
     if posting.workplace_type is None and details.workplace_type is not None:
         columns["workplace_type"] = details.workplace_type
     return columns

@@ -262,8 +262,8 @@ async function AdminData() {
       <SectionCard collapsible title="Company directory" description="Every company searches can check, shared by all users.">
         <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile label="Companies" value={stats.companies.length.toLocaleString()} note={`${openJobs.toLocaleString()} open jobs`} />
-          <StatTile label="Employers" value={kinds.employer} />
-          <StatTile label="Staffing and aggregators" value={kinds.staffing + kinds.aggregator} note="Skipped unless a user shows them" />
+          <StatTile label="Employers and aggregators" value={kinds.employer + kinds.aggregator} />
+          <StatTile label="Staffing agencies" value={kinds.staffing} note="Never searched or saved" />
           <StatTile label="Not labeled yet" value={kinds.unlabeled} />
         </dl>
       </SectionCard>

@@ -1,3 +1,4 @@
+import hashlib
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -44,8 +45,17 @@ class Posting(BaseModel):
     id: str | None = None
 
     def row(self) -> dict[str, Any]:
-        """The columns to save; an empty description is left out so a saved one stays."""
-        return self.model_dump(mode="json", exclude={"id"} if self.description else {"id", "description"})
+        """The columns to save, with the description's hash; an empty description is left out so a saved one stays."""
+        if not self.description:
+            return self.model_dump(mode="json", exclude={"id", "description"})
+        return {**self.model_dump(mode="json", exclude={"id"}), "description_hash": description_hash(self.description)}
+
+    def listing_row(self) -> dict[str, Any]:
+        """The columns a refresh saves: the listing and its description's hash, without the description itself."""
+        return {
+            **self.model_dump(mode="json", exclude={"id", "description"}),
+            "description_hash": description_hash(self.description) if self.description else None,
+        }
 
 
 @dataclass
@@ -149,3 +159,8 @@ class JobSource(ABC):
     def careers_url(self, board: str) -> str:
         """The company's public job listing page on this system."""
         return f"https://{self.board_hosts[0]}/{board}"
+
+
+def description_hash(description: str) -> str:
+    """The MD5 of a description, matching Postgres's md5() of the same text."""
+    return hashlib.md5(description.encode()).hexdigest()
