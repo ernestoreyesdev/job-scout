@@ -460,3 +460,25 @@ def test_an_outside_job_tracked_from_another_source_moves_instead_of_being_added
     assert result == {"application_id": "app-1"}
     assert not [insert for insert in db.inserts if insert[0] == "applications"]
     assert ("applications", {"id": "eq.app-1"}, {"status": "applied", "in_tracker": False}) in db.updates
+
+
+def test_a_workday_link_in_another_form_finds_its_job_on_the_board(monkeypatch: pytest.MonkeyPatch):
+    db = OutsideRest()
+    slug = "Sr-Staff-Applications-Operations-Engineer---Engineering-Tools-Automation---AI-Ops_R5042209-2"
+    listed = Posting(
+        source="workday",
+        board="geaerospace.wd5/ge_externalsite",
+        external_id=f"/job/Evendale/{slug}",
+        title="Sr Staff Applications Operations Engineer",
+        company="GE Aerospace",
+        location="Evendale",
+        url=f"https://geaerospace.wd5.myworkdayjobs.com/ge_externalsite/job/Evendale/{slug}",
+        description="",
+        posted_at=None,
+    )
+    monkeypatch.setattr(main, "fetch_live", lambda source, board, company: [listed])
+
+    add_outside(monkeypatch, db, url=f"https://geaerospace.wd5.myworkdayjobs.com/en-US/GE_ExternalSite/details/{slug}")
+
+    [saved] = db.tables["postings"]
+    assert (saved["source"], saved["external_id"]) == ("workday", listed.external_id)

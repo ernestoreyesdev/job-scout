@@ -456,7 +456,14 @@ def outside_posting(service: Rest, body: OutsideJob) -> str:
         names = service.select("companies", {"source": f"eq.{source}", "board": f"eq.{slug}", "select": "name"})
         listed = fetch_live(source, slug, names[0]["name"] if names else default_name(source, slug))
         segments = set(link.split("/"))
-        match = next((p for p in listed if p.url.split("?")[0].rstrip("/") == link or p.external_id in segments), None)
+        match = next(
+            (
+                p
+                for p in listed
+                if p.url.split("?")[0].rstrip("/") == link or p.external_id in segments or p.external_id.rsplit("/", 1)[-1] in segments
+            ),
+            None,
+        )
         if match:
             [row] = service.insert("postings", match.row(), on_conflict="source,external_id", select="id")
             return row["id"]
