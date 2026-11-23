@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Plus } from "lucide-react";
+import { ChevronDown, CircleAlert, Plus } from "lucide-react";
 import { useState, type FormEvent } from "react";
 
 import { addOutsideJob } from "@/app/actions";
@@ -12,21 +12,30 @@ import { OUTSIDE_STATUSES } from "@/lib/db";
 import { useAction } from "@/lib/use-action";
 
 const FIELD = "h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-xs";
+const LABEL = "font-normal text-muted-foreground";
 
 /**
- * Adds a job applied to outside the app by its link. After a link fails, it also asks for the title, company and
- * description, for jobs on sites the app can't read. What was typed stays until the job is added.
+ * Adds a job applied to outside the app in two steps: its link first, then, only when the app can't read the link,
+ * the job's title, company and description. What was typed stays until the job is added.
  */
 export function AddJob() {
   const { run, pending, error } = useAction();
   const [message, setMessage] = useState<string | null>(null);
+  const [needsDetails, setNeedsDetails] = useState(false);
+  const [unreadLink, setUnreadLink] = useState(false);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     run(() => addOutsideJob(new FormData(form)), "Could not add the job.", (result) => {
       setMessage(result.ok ? (result.message ?? null) : null);
-      if (result.ok) form.reset();
+      setUnreadLink(!result.ok && !!result.needsDetails);
+      if (result.ok) {
+        form.reset();
+        setNeedsDetails(false);
+      } else if (result.needsDetails) {
+        setNeedsDetails(true);
+      }
     });
   }
 
@@ -37,16 +46,65 @@ export function AddJob() {
         Add a job you applied to
         <ChevronDown className="ml-auto size-4 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
-      <form onSubmit={submit} className="mt-3 space-y-3">
+      <form onSubmit={submit} className="mt-3 space-y-4">
         <div className="space-y-1">
-          <Label htmlFor="url" className="font-normal text-muted-foreground">
-            The job&apos;s link, from the company&apos;s careers page or job board.
+          <Label htmlFor="url" className={LABEL}>
+            Job link <span className="text-destructive">*</span>
           </Label>
-          <Input id="url" name="url" type="url" required placeholder="https://jobs.ashbyhq.com/ramp/…" />
+          <div className="flex items-center gap-3">
+            <Input
+              id="url"
+              name="url"
+              type="url"
+              required
+              readOnly={needsDetails}
+              placeholder="https://jobs.ashbyhq.com/ramp/…"
+              className={needsDetails ? "text-muted-foreground" : undefined}
+            />
+            {needsDetails && (
+              <Button type="button" variant="link" size="sm" className="px-0" onClick={() => setNeedsDetails(false)}>
+                Change
+              </Button>
+            )}
+          </div>
         </div>
+        {needsDetails && (
+          <div className="space-y-3">
+            <p className="flex items-start gap-2 rounded-md bg-amber-100 px-3 py-2 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+              <CircleAlert className="mt-0.5 size-4 shrink-0" />
+              We couldn&apos;t read this link. Enter the job&apos;s details and we&apos;ll save them with the link.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label htmlFor="title" className={LABEL}>
+                  Job title <span className="text-destructive">*</span>
+                </Label>
+                <Input id="title" name="title" required placeholder="Senior Backend Engineer" />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="company" className={LABEL}>
+                  Company <span className="text-destructive">*</span>
+                </Label>
+                <Input id="company" name="company" required placeholder="Acme" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="description" className={LABEL}>
+                Job description <span className="text-destructive">*</span>
+              </Label>
+              <Textarea
+                id="description"
+                name="description"
+                required
+                rows={5}
+                placeholder="Paste the full description. Your fit score comes from it."
+              />
+            </div>
+          </div>
+        )}
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1">
-            <Label htmlFor="status" className="font-normal text-muted-foreground">
+            <Label htmlFor="status" className={LABEL}>
               Status
             </Label>
             <select id="status" name="status" defaultValue="applied" className={FIELD}>
@@ -58,31 +116,18 @@ export function AddJob() {
             </select>
           </div>
           <div className="space-y-1">
-            <Label htmlFor="applied_on" className="font-normal text-muted-foreground">
+            <Label htmlFor="applied_on" className={LABEL}>
               Date applied, or leave empty for today
             </Label>
             <Input id="applied_on" name="applied_on" type="date" />
           </div>
         </div>
-        {error !== null && (
-          <div className="space-y-3 rounded-lg border border-dashed p-3">
-            <p className="text-muted-foreground">
-              Enter the job below; the link above stays saved with it. The app scores the job against your resume from
-              its description.
-            </p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Input name="title" required placeholder="Job title" aria-label="Job title" />
-              <Input name="company" required placeholder="Company" aria-label="Company" />
-            </div>
-            <Textarea name="description" required rows={4} placeholder="Job description" aria-label="Job description" />
-          </div>
-        )}
         <div className="flex flex-wrap items-center gap-3">
           <Button type="submit" size="sm" disabled={pending}>
             <Plus />
             {pending ? "Adding…" : "Add to Jobs"}
           </Button>
-          {error && <span className="text-destructive">{error}</span>}
+          {error && !unreadLink && <span className="text-destructive">{error}</span>}
           {message && <span className="text-muted-foreground">{message}</span>}
         </div>
       </form>

@@ -21,7 +21,7 @@ import {
   type ThemeRow,
   type WorkplaceTypeRow,
 } from "@/lib/db";
-import { callAgent } from "@/lib/agent";
+import { AgentError, callAgent } from "@/lib/agent";
 import { getSignedInSource } from "@/lib/repository";
 
 export interface ActionResult {
@@ -238,14 +238,16 @@ export async function saveTheme(theme: string): Promise<ActionResult> {
   });
 }
 
-export type AddJobResult = ActionResult & { message?: string };
+export type AddJobResult = ActionResult & { message?: string; needsDetails?: boolean };
 
 /**
  * Adds a job the user applied to outside the app to Jobs, then starts scoring it against the primary resume. The
- * job stays added when scoring can't start, such as while a search runs.
+ * job stays added when scoring can't start, such as while a search runs. `needsDetails` says the agent couldn't read
+ * the link and needs the job's title, company and description.
  */
 export async function addOutsideJob(formData: FormData): Promise<AddJobResult> {
   let message = "Added to Jobs. Scoring started.";
+  let needsDetails = false;
   const result = await run("/jobs", async () => {
     const url = text(formData.get("url"));
     if (!/^https?:\/\/\S+$/.test(url)) throw new Error("Enter the job's link, starting with https://.");
@@ -259,7 +261,12 @@ export async function addOutsideJob(formData: FormData): Promise<AddJobResult> {
       company: text(formData.get("company")) || null,
       description: text(formData.get("description")) || null,
     };
-    await callAgent("/applications/outside", { method: "POST", body });
+    try {
+      await callAgent("/applications/outside", { method: "POST", body });
+    } catch (error) {
+      needsDetails = error instanceof AgentError && error.status === 422;
+      throw error;
+    }
     try {
       await callAgent("/runs/rescore", { method: "POST", body: { scope: "jobs" } });
     } catch (error) {
@@ -267,7 +274,7 @@ export async function addOutsideJob(formData: FormData): Promise<AddJobResult> {
       message = `Added to Jobs, but scoring didn't start: ${error instanceof Error ? error.message : "try Rescore later."}`;
     }
   });
-  return result.ok ? { ...result, message } : result;
+  return result.ok ? { ...result, message } : { ...result, needsDetails };
 }
 
 /** Deletes the signed-in account through the agent; the caller then signs the browser out. */

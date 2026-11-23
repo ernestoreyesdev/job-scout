@@ -32,8 +32,18 @@ export async function callAgent<T>(path: string, init: { method: string; body?: 
       .json()
       .then((body: { detail?: unknown }) => body.detail)
       .catch(() => undefined);
-    throw new Error(typeof detail === "string" ? detail : `Agent request failed (${response.status}).`);
+    throw new AgentError(typeof detail === "string" ? detail : `Agent request failed (${response.status}).`, response.status);
   }
 
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
+}
+
+/** An error response from the agent, with its HTTP status. */
+export class AgentError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
 }
