@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -501,3 +502,19 @@ def test_a_rescore_that_scores_one_job_names_it(monkeypatch: pytest.MonkeyPatch)
 
     final = db.updates[-1][2]
     assert (final["status"], final["progress"]) == ("done", "Scored Software Engineer, Backend at Ramp against your current resume.")
+
+
+def test_a_run_without_an_anthropic_key_tells_the_user_and_alerts_the_admin_once_a_day(monkeypatch: pytest.MonkeyPatch):
+    db = RunRest()
+    alerts: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(main, "user_db", lambda settings, token: db)
+    monkeypatch.setattr(main, "service_db", lambda settings: db)
+    monkeypatch.setattr(main, "anthropic_key", lambda service, user_id, settings: None)
+    monkeypatch.setattr(main, "alert_admin", lambda settings, subject, lines, key=None: alerts.append((subject, key)) or True)
+
+    main.run_rescore("run-1", main.RescoreRequest(scope="jobs"), fake_user(id="u", access_token="t"), fake_settings())
+
+    final = db.updates[-1][2]
+    assert (final["status"], final["error"]) == ("failed", "Scoring isn't available right now. We've let the admin know. Try again later.")
+    [(subject, key)] = alerts
+    assert subject == "No Anthropic key" and key == f"no-anthropic-key/{datetime.now(UTC).date().isoformat()}"

@@ -33,6 +33,7 @@ from app.auth import CurrentUser, admin_user, current_user
 from app.config import Settings, get_settings
 from app.crypto import decrypt, encrypt, key_hint
 from app.db import Rest, service_db, user_db
+from app.mail import alert_admin
 from app.sources import board_from_url, default_name, fetch_live
 from app.sources.base import CompanyNotFound, Posting
 from app.telemetry import CallLog, RecordingClient, configure_logging, configure_sentry, current_run
@@ -49,7 +50,7 @@ RUN_FAILED = {
     "rescore": "Something went wrong while rescoring. Try again.",
     "import": "Something went wrong while adding these companies. Try again.",
 }
-NO_KEY = "Searches aren't set up yet: the app has no Anthropic key. Ask the admin to add one."
+NO_KEY = "Scoring isn't available right now. We've let the admin know. Try again later."
 
 
 app = FastAPI(title="job-finder agent")
@@ -279,7 +280,7 @@ def claude_and_resume(user: CurrentUser, settings: Settings) -> tuple[Any, str, 
     """
     api_key = anthropic_key(service_db(settings), user.id, settings)
     if not api_key:
-        raise HTTPException(400, "This isn't set up yet: the app has no Anthropic key. Ask the admin to add one.")
+        raise HTTPException(400, missing_key(settings))
     resumes = user_db(settings, user.access_token).select("resumes", {"is_primary": "eq.true", "select": "text"})
     if not resumes or not resumes[0]["text"]:
         raise HTTPException(400, "Upload a resume first.")
@@ -558,7 +559,7 @@ def execute_run(
     try:
         api_key = anthropic_key(service, user.id, settings)
         if not api_key:
-            raise RunError(NO_KEY)
+            raise RunError(missing_key(settings))
         outcome = work(RecordingClient(make_client(api_key), calls), db, service, report, timings)
     except RunStopped:
         pass
@@ -581,7 +582,7 @@ def post_lessons_refresh(user: User, settings: Config) -> dict[str, Any]:
     service = service_db(settings)
     api_key = anthropic_key(service, user.id, settings)
     if not api_key:
-        raise HTTPException(400, "This isn't set up yet: the app has no Anthropic key. Ask the admin to add one.")
+        raise HTTPException(400, missing_key(settings))
     db = user_db(settings, user.access_token)
     jobs = signal_jobs(db)
     if len(jobs) < MIN_JOBS:
@@ -595,3 +596,14 @@ def post_lessons_refresh(user: User, settings: Config) -> dict[str, Any]:
         usage = calls.usage()
         calls.save(service)
     return {"usage": usage.model_dump()}
+
+
+def missing_key(settings: Settings) -> str:
+    """Emails the admin, at most once a day, that no Anthropic key is set, and returns the message users see."""
+    alert_admin(
+        settings,
+        "No Anthropic key",
+        ["A user tried to use Job Scout, but no Anthropic key is set.", "Save a shared key on the Admin page."],
+        f"no-anthropic-key/{datetime.now(UTC).date().isoformat()}",
+    )
+    return NO_KEY
