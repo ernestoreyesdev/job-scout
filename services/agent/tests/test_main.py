@@ -365,20 +365,26 @@ def test_an_outside_job_not_saved_is_read_from_its_board(monkeypatch: pytest.Mon
     assert (saved["source"], saved["external_id"], saved["title"]) == ("ashby", ramp_posting().external_id, "Software Engineer, Backend")
 
 
-def test_an_outside_job_with_an_unreadable_link_needs_a_title_and_company(monkeypatch: pytest.MonkeyPatch):
+def test_an_outside_job_with_an_unreadable_link_needs_a_title_company_and_description(monkeypatch: pytest.MonkeyPatch):
     db = OutsideRest()
 
     with pytest.raises(HTTPException) as refused:
         add_outside(monkeypatch, db, url="https://careers.example.com/jobs/42")
     assert refused.value.status_code == 422
+    with pytest.raises(HTTPException) as refused:
+        add_outside(monkeypatch, db, url="https://careers.example.com/jobs/42", title="Engineer", company="Example")
+    assert refused.value.status_code == 422
 
-    add_outside(monkeypatch, db, url="https://careers.example.com/jobs/42", title="Engineer", company="Example")
+    add_outside(
+        monkeypatch, db, url="https://careers.example.com/jobs/42", title="Engineer", company="Example", description="Builds things."
+    )
     [saved] = db.tables["postings"]
-    assert (saved["source"], saved["title"], saved["company"], saved["url"]) == (
+    assert (saved["source"], saved["title"], saved["company"], saved["url"], saved["description"]) == (
         "manual",
         "Engineer",
         "Example",
         "https://careers.example.com/jobs/42",
+        "Builds things.",
     )
 
 

@@ -446,7 +446,7 @@ def add_outside_job(body: OutsideJob, user: User, settings: Config) -> dict[str,
 def outside_posting(service: Rest, body: OutsideJob) -> str:
     """
     The id of the saved job at `body.url`: one already saved, else the job read
-    from its board and saved, else a manual job from the title and company given.
+    from its board and saved, else a manual job from the title, company and description given.
     """
     link = body.url.split("#")[0].split("?")[0].rstrip("/")
     saved = service.select("postings", {"url": f"eq.{link}", "select": "id", "limit": "1"})
@@ -468,8 +468,8 @@ def outside_posting(service: Rest, body: OutsideJob) -> str:
         if match:
             [row] = service.insert("postings", match.row(), on_conflict="source,external_id", select="id")
             return row["id"]
-    if not (body.title and body.company):
-        raise HTTPException(422, "Couldn't find this job from its link. Enter its title and company to add it.")
+    if not (body.title and body.company and body.description):
+        raise HTTPException(422, "Couldn't find this job from its link. Enter its title, company and description to add it.")
     manual = Posting(
         source="manual",
         board="manual",

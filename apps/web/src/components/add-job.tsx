@@ -67,14 +67,14 @@ export function AddJob() {
         {error !== null && (
           <div className="space-y-3 rounded-lg border border-dashed p-3">
             <p className="text-muted-foreground">
-              Enter the job below; the link above stays saved with it. A description lets the app score the job against
-              your resume.
+              Enter the job below; the link above stays saved with it. The app scores the job against your resume from
+              its description.
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <Input name="title" required placeholder="Job title" aria-label="Job title" />
               <Input name="company" required placeholder="Company" aria-label="Company" />
             </div>
-            <Textarea name="description" rows={4} placeholder="Job description (optional)" aria-label="Job description" />
+            <Textarea name="description" required rows={4} placeholder="Job description" aria-label="Job description" />
           </div>
         )}
         <div className="flex flex-wrap items-center gap-3">
