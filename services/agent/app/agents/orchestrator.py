@@ -873,15 +873,14 @@ def fetch_boards(
     return fetched, gone, unreachable, fetches
 
 
-def store_jobs(service: Rest, fetched: dict[BoardKey, list[Posting]]) -> tuple[int, int]:
+def store_jobs(service: Rest, fetched: dict[BoardKey, list[Posting]], since: str | None = None) -> tuple[int, int]:
     """
     Saves every fetched job to postings as open, with its description's hash
     instead of the description, writing only new, changed and reopened ones,
     sets each job's id, and closes the jobs a complete fetch of their board no
     longer lists. Requests run STORE_CONCURRENCY at a time. Returns how many
-    jobs were new and how many closed.
+    jobs were created at or after `since`, a database time, and how many closed.
     """
-    seen = datetime.now(UTC).isoformat()
     unique = {(p.source, p.external_id): p for postings in fetched.values() for p in postings}
     rows = [p.listing_row() for p in unique.values()]
     chunks = [rows[i : i + STORE_CHUNK] for i in range(0, len(rows), STORE_CHUNK)]
@@ -899,7 +898,7 @@ def store_jobs(service: Rest, fetched: dict[BoardKey, list[Posting]]) -> tuple[i
         saved = [row for chunk in pool.map(save, chunks) for row in chunk]
         closed = sum(pool.map(close, complete))
     set_ids([p for postings in fetched.values() for p in postings], saved)
-    return sum(1 for row in saved if row["created_at"] >= seen), closed
+    return sum(1 for row in saved if since and row["created_at"] >= since), closed
 
 
 def stored_jobs(service: Rest, boards: list[Board]) -> dict[BoardKey, list[Posting]]:
@@ -939,13 +938,14 @@ def refresh_boards(
         {"finished_at": "is.null", "stopped_at": "is.null", "started_at": f"lt.{(now - REFRESH_TIME_LIMIT).isoformat()}", "select": "id"},
         {"stopped_at": now.isoformat()},
     )
-    [refresh] = service.insert("board_refreshes", {"started_at": now.isoformat()}, select="id")
+    [refresh] = service.insert("board_refreshes", {}, select="id,started_at")
     directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,kind,open_jobs"})
     directory = [c for c in directory if c["kind"] not in SKIPPED_KINDS]
     directory.sort(key=lambda c: c.get("open_jobs") or 0, reverse=True)
     boards = [Board(c["source"], c["board"], c["name"], c["found_by"]) for c in directory]
     fetched, gone, unreachable, fetches = fetch_boards(boards, fetcher, lambda _: None)
-    new, closed = record_board_checks(service, boards, fetched, [c for c in directory if (c["source"], c["board"]) in gone])
+    gone_companies = [c for c in directory if (c["source"], c["board"]) in gone]
+    new, closed = record_board_checks(service, boards, fetched, gone_companies, since=refresh["started_at"])
     remove_duplicate_names(service)
     descriptions = {(p.source, p.external_id): p.description for postings in fetched.values() for p in postings}
     embedded = 0
@@ -1034,13 +1034,15 @@ def record_board_checks(
     fetched: dict[BoardKey, list[Posting]],
     gone: list[dict[str, Any]],
     unsaved: set[BoardKey] | None = None,
+    since: str | None = None,
 ) -> tuple[int, int]:
     """
     Saves the fetched jobs, except those of `unsaved` boards, records the boards
     that answered in the directory and counts a miss for each directory company
-    in `gone`. Returns how many jobs were new and how many closed.
+    in `gone`. Returns how many jobs were created at or after `since` and how many closed.
     """
-    new, closed = store_jobs(service, {key: jobs for key, jobs in fetched.items() if key not in (unsaved or set())})
+    saved = {key: jobs for key, jobs in fetched.items() if key not in (unsaved or set())}
+    new, closed = store_jobs(service, saved, since)
     save_companies(service, [entry for entry in boards if entry.key in fetched], fetched)
     record_misses(service, gone)
     return new, closed

@@ -170,7 +170,7 @@ class FakeRest(Rest):
         if table == "postings":
             return [{**row, "id": f"posting-{row['external_id']}", "created_at": ""} for row in rows]
         if table == "board_refreshes":
-            return [{**rows, "id": "refresh-1"}]
+            return [{**rows, "id": "refresh-1", "started_at": "2026-11-23T10:00:00+00:00"}]
         return [rows]
 
     def update(self, table: str, filters: dict[str, str], patch: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1342,8 +1342,7 @@ def test_a_refresh_fetches_every_board_and_records_itself():
         "unembedded_postings",
         "delete_stale_postings",
     ]
-    [refresh] = service.inserted("board_refreshes")
-    assert refresh["started_at"]
+    assert service.inserted("board_refreshes") == [{}]
     [(_, cutoff, stop), (_, filters, patch)] = [update for update in service.updates if update[0] == "board_refreshes"]
     assert (cutoff["finished_at"], cutoff["stopped_at"], cutoff["started_at"][:3]) == ("is.null", "is.null", "lt.")
     assert stop["stopped_at"]
