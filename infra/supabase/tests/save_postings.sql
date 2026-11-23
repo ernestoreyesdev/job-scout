@@ -3,13 +3,13 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(10);
+select plan(11);
 
-insert into postings (source, board, external_id, title, company, url, description, description_hash, closed_at) values
-  ('lever', 'acme', 'same', 'Engineer', 'Acme', 'https://jobs.lever.co/acme/same', 'Saved description.', md5('Saved description.'), null),
-  ('lever', 'acme', 'renamed', 'Engineer', 'Acme', 'https://jobs.lever.co/acme/renamed', 'Saved.', md5('Saved.'), null),
-  ('lever', 'acme', 'closed', 'Engineer', 'Acme', 'https://jobs.lever.co/acme/closed', 'Saved.', md5('Saved.'), now()),
-  ('lever', 'acme', 'reworded', 'Engineer', 'Acme', 'https://jobs.lever.co/acme/reworded', 'Old text.', md5('Old text.'), null);
+insert into postings (source, board, external_id, title, company, url, description, description_hash, workplace_type, closed_at) values
+  ('lever', 'acme', 'same', 'Engineer', 'Acme', 'https://jobs.lever.co/acme/same', 'Saved description.', md5('Saved description.'), 'remote', null),
+  ('lever', 'acme', 'renamed', 'Engineer', 'Acme', 'https://jobs.lever.co/acme/renamed', 'Saved.', md5('Saved.'), null, null),
+  ('lever', 'acme', 'closed', 'Engineer', 'Acme', 'https://jobs.lever.co/acme/closed', 'Saved.', md5('Saved.'), null, now()),
+  ('lever', 'acme', 'reworded', 'Engineer', 'Acme', 'https://jobs.lever.co/acme/reworded', 'Old text.', md5('Old text.'), null, null);
 insert into posting_embeddings (posting_id, embedding)
 select id, array_fill(0.1, array[384])::vector from postings where external_id in ('same', 'reworded');
 create temp table before as select external_id, ctid as row_location, xmax::text as row_lock from postings where board = 'acme';
@@ -44,6 +44,11 @@ select is(
   (select description from postings where external_id = 'same'),
   'Saved description.',
   'a job sent without a description hash keeps its saved description'
+);
+select is(
+  (select workplace_type::text from postings where external_id = 'same'),
+  'remote',
+  'a job sent without a workplace type keeps its saved one'
 );
 select is((select title from postings where external_id = 'renamed'), 'Senior Engineer', 'a changed job is updated');
 select is((select closed_at from postings where external_id = 'closed'), null, 'a closed job listed again reopens');
