@@ -224,7 +224,7 @@ def run_rescore(run_id: str, body: RescoreRequest, user: CurrentUser, settings: 
         resumes = db.select("resumes", {"is_primary": "eq.true", "select": "id,text"})
         if not resumes or not resumes[0]["text"]:
             raise RunError("Upload a resume first.")
-        count = orchestrate_rescore(
+        scored = orchestrate_rescore(
             client=client,
             settings=settings,
             resume_id=resumes[0]["id"],
@@ -236,11 +236,12 @@ def run_rescore(run_id: str, body: RescoreRequest, user: CurrentUser, settings: 
             scope=body.scope,
             timings=timings,
         )
-        progress = (
-            f"Scored {count} {'job' if count == 1 else 'jobs'} with your current resume."
-            if count
-            else "Every job is already scored with your current resume."
-        )
+        if len(scored) == 1:
+            progress = f"Scored {scored[0].title} at {scored[0].company} against your current resume."
+        elif scored:
+            progress = f"Scored {len(scored)} jobs with your current resume."
+        else:
+            progress = "Every job is already scored with your current resume."
         return {"status": "done", "error": None, "error_code": None, "progress": progress}
 
     execute_run(run_id, "rescore", user, settings, work)

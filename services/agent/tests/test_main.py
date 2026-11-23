@@ -482,3 +482,16 @@ def test_a_workday_link_in_another_form_finds_its_job_on_the_board(monkeypatch: 
 
     [saved] = db.tables["postings"]
     assert (saved["source"], saved["external_id"]) == ("workday", listed.external_id)
+
+
+def test_a_rescore_that_scores_one_job_names_it(monkeypatch: pytest.MonkeyPatch):
+    db = RunRest()
+    monkeypatch.setattr(main, "user_db", lambda settings, token: db)
+    monkeypatch.setattr(main, "service_db", lambda settings: db)
+    monkeypatch.setattr(main, "decrypt", lambda ciphertext, key: "key")
+    monkeypatch.setattr(main, "orchestrate_rescore", lambda **kwargs: [ramp_posting()])
+
+    main.run_rescore("run-1", main.RescoreRequest(scope="jobs"), fake_user(id="u", access_token="t"), fake_settings(agent_encryption_key="k"))
+
+    final = db.updates[-1][2]
+    assert (final["status"], final["progress"]) == ("done", "Scored Software Engineer, Backend at Ramp against your current resume.")

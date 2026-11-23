@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, Plus } from "lucide-react";
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 
 import { addOutsideJob } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -15,15 +15,18 @@ const FIELD = "h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-x
 
 /**
  * Adds a job applied to outside the app by its link. After a link fails, it also asks for the title, company and
- * description, for jobs on sites the app can't read.
+ * description, for jobs on sites the app can't read. What was typed stays until the job is added.
  */
 export function AddJob() {
   const { run, pending, error } = useAction();
   const [message, setMessage] = useState<string | null>(null);
 
-  function submit(formData: FormData) {
-    run(() => addOutsideJob(formData), "Could not add the job.", (result) => {
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    run(() => addOutsideJob(new FormData(form)), "Could not add the job.", (result) => {
       setMessage(result.ok ? (result.message ?? null) : null);
+      if (result.ok) form.reset();
     });
   }
 
@@ -34,7 +37,7 @@ export function AddJob() {
         Add a job you applied to
         <ChevronDown className="ml-auto size-4 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
-      <form action={submit} className="mt-3 space-y-3">
+      <form onSubmit={submit} className="mt-3 space-y-3">
         <div className="space-y-1">
           <Label htmlFor="url" className="font-normal text-muted-foreground">
             The job&apos;s link, from the company&apos;s careers page or job board.
@@ -64,12 +67,12 @@ export function AddJob() {
         {error !== null && (
           <div className="space-y-3 rounded-lg border border-dashed p-3">
             <p className="text-muted-foreground">
-              If the app can&apos;t read the link, enter the job yourself. A description lets it score the job against
+              Enter the job below; the link above stays saved with it. A description lets the app score the job against
               your resume.
             </p>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Input name="title" placeholder="Job title" aria-label="Job title" />
-              <Input name="company" placeholder="Company" aria-label="Company" />
+              <Input name="title" required placeholder="Job title" aria-label="Job title" />
+              <Input name="company" required placeholder="Company" aria-label="Company" />
             </div>
             <Textarea name="description" rows={4} placeholder="Job description (optional)" aria-label="Job description" />
           </div>

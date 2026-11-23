@@ -822,7 +822,7 @@ def test_rescore_updates_only_jobs_unscored_or_scored_against_another_resume():
             return [{"posting_id": "posting-1", "posting": {**JOBS[0].model_dump(mode="json"), "id": "posting-1"}}]
 
     user, messages, progress = StaleRest(), FakeMessages(set()), []
-    count = orchestrator.rescore(
+    scored = orchestrator.rescore(
         client=SimpleNamespace(beta=SimpleNamespace(messages=messages)),
         settings=SETTINGS,
         resume_id="resume-2",
@@ -834,7 +834,7 @@ def test_rescore_updates_only_jobs_unscored_or_scored_against_another_resume():
         scope="tracker",
     )
 
-    assert count == 1
+    assert [posting.title for posting in scored] == [JOBS[0].title]
     [params] = selects
     assert params["and"] == "(or(resume_id.is.null,resume_id.neq.resume-2),in_tracker.eq.true)"
     [saved] = user.inserted("applications")
@@ -850,7 +850,7 @@ def test_rescore_with_nothing_stale_scores_nothing():
             return []
 
     messages, progress = FakeMessages(set()), []
-    count = orchestrator.rescore(
+    scored = orchestrator.rescore(
         client=SimpleNamespace(beta=SimpleNamespace(messages=messages)),
         settings=SETTINGS,
         resume_id="resume-2",
@@ -862,7 +862,7 @@ def test_rescore_with_nothing_stale_scores_nothing():
         scope="jobs",
     )
 
-    assert count == 0 and messages.calls == []
+    assert scored == [] and messages.calls == []
     assert progress == ["Every job is already scored with your current resume."]
 
 

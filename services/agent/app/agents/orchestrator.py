@@ -520,11 +520,11 @@ def rescore(
     describer: Callable[[Posting], str] = describe,
     embed: Callable[[list[str]], list[list[float]]] = embed_jobs,
     timings: dict[str, int] | None = None,
-) -> int:
+) -> list[Posting]:
     """
     Scores the jobs on the user's Tracker or on Jobs, as `scope` says, that
     were scored against another resume or not scored at all. Their status,
-    notes and place on the Tracker stay as they are. Returns how many were re-scored.
+    notes and place on the Tracker stay as they are. Returns the jobs it scored.
     """
     rows = user.select(
         "applications",
@@ -536,7 +536,7 @@ def rescore(
     todo = [(row["posting_id"], Posting.model_validate(row["posting"])) for row in rows]
     if not todo:
         report("Every job is already scored with your current resume.")
-        return 0
+        return []
     report("Scoring jobs against your resume…")
     todo = with_descriptions(todo, service, describer)
     with timed(timings, "examples"):
@@ -557,7 +557,7 @@ def rescore(
             examples=examples,
             lessons=lessons,
         )
-    return scoring.scored
+    return [posting for posting_id, posting in todo if posting_id in scoring.scores]
 
 
 def keyword_set(keywords: list[str]) -> frozenset[str]:
