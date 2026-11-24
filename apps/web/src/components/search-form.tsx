@@ -1,7 +1,7 @@
 "use client";
 
 import { Building2, ChevronDown, Search, SlidersHorizontal } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 
 import { startSearch } from "@/app/actions";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MAX_JOBS_PER_SEARCH, MIN_SCORES, POSTED_WITHIN_DAYS, WORKPLACE_LABELS, WORKPLACE_TYPES } from "@/lib/db";
 import { useAction } from "@/lib/use-action";
+
+const CARD = "min-w-0 space-y-2 rounded-lg border bg-muted/40 p-3";
 
 const SELECT =
   "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-base disabled:opacity-50 md:text-sm dark:bg-input/30";
@@ -92,71 +94,61 @@ export function SearchForm({ hasResume }: { hasResume: boolean }) {
           More filters
           <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
         </summary>
-        <div className="mt-3 grid gap-5 sm:grid-cols-3">
-          <FilterGroup title="Where">
-            <fieldset className="col-span-2 space-y-1.5 sm:col-span-1">
-              <legend className="mb-1.5 text-sm leading-none font-medium">Location type</legend>
-              <div className="flex h-9 flex-wrap items-center gap-x-4 gap-y-1">
-                {WORKPLACE_TYPES.map((type) => (
-                  <label key={type} className="flex items-center gap-1.5">
-                    <input type="checkbox" name="workplace" value={type} className="size-4 accent-primary" />
-                    {WORKPLACE_LABELS[type]}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-            <div className="col-span-2 space-y-1.5 sm:col-span-1">
-              <Label htmlFor="location">Location</Label>
-              <Input id="location" name="location" />
+        <div className="mt-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+          <fieldset className={`${CARD} col-span-2 sm:col-span-1`}>
+            <legend className="sr-only">Location type</legend>
+            <span aria-hidden className="block text-sm leading-none font-medium">
+              Location type
+            </span>
+            <div className="flex h-8 overflow-hidden rounded-lg border border-input">
+              {WORKPLACE_TYPES.map((type) => (
+                <label
+                  key={type}
+                  className="flex flex-1 cursor-pointer items-center justify-center border-r border-input text-sm last:border-r-0 has-checked:bg-primary has-checked:text-primary-foreground has-focus-visible:ring-3 has-focus-visible:ring-ring/50"
+                >
+                  <input type="checkbox" name="workplace" value={type} className="sr-only" />
+                  {WORKPLACE_LABELS[type]}
+                </label>
+              ))}
             </div>
-          </FilterGroup>
-          <FilterGroup title="Which jobs">
-            <div className="space-y-1.5">
-              <Label htmlFor="postedWithin">Posted</Label>
-              <select id="postedWithin" name="postedWithin" defaultValue="" className={SELECT}>
-                <option value="">Any time</option>
-                {POSTED_WITHIN_DAYS.map((days) => (
-                  <option key={days} value={days}>
-                    {days === 1 ? "Last day" : `Last ${days} days`}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="exclude">Leave out</Label>
-              <Input id="exclude" name="exclude" />
-            </div>
-          </FilterGroup>
-          <FilterGroup title="Results">
-            <div className="space-y-1.5">
-              <Label htmlFor="limit">Max jobs</Label>
-              <Input id="limit" name="limit" type="number" min={1} max={MAX_JOBS_PER_SEARCH} defaultValue={10} />
-            </div>
-            <div className="space-y-1.5" title={hasResume ? "Used when Score with my resume is on" : "Upload a resume to score jobs"}>
-              <Label htmlFor="minScore">Min score</Label>
-              <select id="minScore" name="minScore" defaultValue="" disabled={!hasResume} className={SELECT}>
-                <option value="">Any score</option>
-                {MIN_SCORES.map((score) => (
-                  <option key={score} value={score}>
-                    {score}+ ({score >= 70 ? "strong fit" : "possible fit or better"})
-                  </option>
-                ))}
-              </select>
-            </div>
-          </FilterGroup>
+          </fieldset>
+          <div className={CARD}>
+            <Label htmlFor="location">Location</Label>
+            <Input id="location" name="location" />
+          </div>
+          <div className={CARD}>
+            <Label htmlFor="postedWithin">Posted</Label>
+            <select id="postedWithin" name="postedWithin" defaultValue="" className={SELECT}>
+              <option value="">Any time</option>
+              {POSTED_WITHIN_DAYS.map((days) => (
+                <option key={days} value={days}>
+                  {days === 1 ? "Last day" : `Last ${days} days`}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className={`${CARD} col-span-2 sm:col-span-1`}>
+            <Label htmlFor="exclude">Leave out</Label>
+            <Input id="exclude" name="exclude" />
+          </div>
+          <div className={CARD}>
+            <Label htmlFor="limit">Max jobs</Label>
+            <Input id="limit" name="limit" type="number" min={1} max={MAX_JOBS_PER_SEARCH} defaultValue={10} />
+          </div>
+          <div className={CARD} title={hasResume ? "Used when Score with my resume is on" : "Upload a resume to score jobs"}>
+            <Label htmlFor="minScore">Min score</Label>
+            <select id="minScore" name="minScore" defaultValue="" disabled={!hasResume} className={SELECT}>
+              <option value="">Any score</option>
+              {MIN_SCORES.map((score) => (
+                <option key={score} value={score}>
+                  {score}+ ({score >= 70 ? "strong fit" : "possible fit or better"})
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </details>
       {error && <p className="order-last basis-full text-sm text-destructive">{error}</p>}
     </form>
-  );
-}
-
-/** A titled group of filters: two to a row on phones, stacked in its own column from the sm breakpoint up. */
-function FilterGroup({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-2">
-      <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{title}</h3>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-1">{children}</div>
-    </section>
   );
 }
