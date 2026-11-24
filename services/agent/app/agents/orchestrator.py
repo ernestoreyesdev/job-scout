@@ -388,8 +388,8 @@ def with_descriptions(
 ) -> list[tuple[str, Posting]]:
     """
     Fills in descriptions from postings, then fetches the ones a system's job
-    list left out and saves them. Jobs whose description can't be fetched are
-    dropped.
+    list left out and saves the ones that come back with text. Jobs whose
+    description can't be fetched are dropped.
     """
     missing = [posting_id for posting_id, posting in todo if not posting.description]
     saved = (
@@ -411,7 +411,8 @@ def with_descriptions(
             logger.warning("describing %s/%s failed: %s", posting.source, posting.external_id, error)
             continue
         ready.append((posting_id, full))
-        described.append(full)
+        if full.description:
+            described.append(full)
     if described:
         service.insert("postings", [p.row() for p in described], on_conflict="source,external_id")
     return ready

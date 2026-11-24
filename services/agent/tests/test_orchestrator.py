@@ -1415,3 +1415,20 @@ def test_saved_jobs_are_read_a_page_at_a_time_after_the_last_id():
 
     assert len(jobs[(saved["source"], "acme")]) == 1001
     assert [params.get("id") for table, params in service.selects if table == "postings"] == [None, "gt.p-0999"]
+
+
+def test_scoring_saves_only_the_fetched_descriptions_that_have_text():
+    service = FakeRest()
+
+    def describer(p: Posting) -> str:
+        return "Fetched description." if p.external_id == "1" else ""
+
+    ready = orchestrator.with_descriptions(
+        [("posting-1", posting("1", "Engineer", description="")), ("posting-2", posting("2", "Engineer", description=""))],
+        service,
+        describer,
+    )
+
+    assert [posting_id for posting_id, _ in ready] == ["posting-1", "posting-2"]
+    [rows] = service.inserted("postings")
+    assert [(row["external_id"], row["description"]) for row in rows] == [("1", "Fetched description.")]
