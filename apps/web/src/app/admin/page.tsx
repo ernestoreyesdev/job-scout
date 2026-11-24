@@ -96,7 +96,6 @@ type AdminStats = {
     deleted_jobs: number;
     failures: number;
   }[];
-  storage: { bytes: number; unembedded: number };
   companies: { name: string; source: string; board: string; kind: CompanyKindRow | null; open_jobs: number; missed_checks: number }[];
   labels: { fit_score: number | null; fit_label: FitLabelRow | null }[];
 };
@@ -184,7 +183,7 @@ async function AdminData() {
 
       <BoardSection boards={stats.boards} days={stats.days} />
 
-      <RefreshSection refreshes={stats.refreshes} boards={stats.companies.length} storage={stats.storage} days={stats.days} />
+      <RefreshSection refreshes={stats.refreshes} boards={stats.companies.length} days={stats.days} />
 
       <SectionCard collapsible
         title="Claude calls by step"
@@ -523,15 +522,12 @@ function size(bytes: number): string {
 function RefreshSection({
   refreshes,
   boards,
-  storage,
   days,
 }: {
   refreshes: AdminStats["refreshes"];
   boards: number;
-  storage: AdminStats["storage"];
   days: number;
 }) {
-  const { bytes: totalBytes, unembedded } = storage;
   const ran = refreshes.filter((row) => !row.stopped_at);
   const timed = ran
     .filter((row) => row.finished_at)
@@ -603,15 +599,9 @@ function RefreshSection({
           </details>
         </>
       )}
-      <p className="mt-6 text-sm font-medium">
-        {boards} boards, {size(totalBytes)} saved in all
-      </p>
-      {unembedded > 0 && (
-        <p className="text-xs text-muted-foreground">
-          {unembedded.toLocaleString()} open {unembedded === 1 ? "job has" : "jobs have"} no embedding yet, so searches rank{" "}
-          {unembedded === 1 ? "it" : "them"} after the rest. The next refresh embeds {unembedded === 1 ? "it" : "them"}.
-        </p>
-      )}
+      <Suspense fallback={<p className="mt-6 text-sm text-muted-foreground">{boards} boards, measuring saved jobs…</p>}>
+        <StorageNote boards={boards} />
+      </Suspense>
       <p className="mt-3 text-xs text-muted-foreground">
         Fetching boards costs nothing per call. What they use is database space, against Supabase&apos;s 500 MB free plan.
       </p>
@@ -809,5 +799,24 @@ function ModelQualitySection({ stats }: { stats: AdminStats }) {
         </Table>
       )}
     </SectionCard>
+  );
+}
+
+/** The space saved jobs take and the open jobs still waiting for an embedding, loaded apart from the rest of the page. */
+async function StorageNote({ boards }: { boards: number }) {
+  const { repository } = await getAdminSource();
+  const { bytes, unembedded } = await repository.getAdminStorage();
+  return (
+    <>
+      <p className="mt-6 text-sm font-medium">
+        {boards} boards, {size(bytes)} saved in all
+      </p>
+      {unembedded > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {unembedded.toLocaleString()} open {unembedded === 1 ? "job has" : "jobs have"} no embedding yet, so searches rank{" "}
+          {unembedded === 1 ? "it" : "them"} after the rest. The next refresh embeds {unembedded === 1 ? "it" : "them"}.
+        </p>
+      )}
+    </>
   );
 }

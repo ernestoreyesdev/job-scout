@@ -414,6 +414,13 @@ export class JobFinderRepository {
     const { error } = await this.client.from("lessons").update({ deleted_at: new Date().toISOString() }).eq("id", id);
     if (error) throw error;
   }
+
+  /** The space saved jobs take and how many open jobs have no embedding; it refuses anyone but an admin. */
+  async getAdminStorage(): Promise<{ bytes: number; unembedded: number }> {
+    const { data, error } = await this.client.rpc("admin_storage");
+    if (error) throw error;
+    return data;
+  }
 }
 
 interface ViewFilter {

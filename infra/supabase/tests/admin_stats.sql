@@ -211,7 +211,7 @@ select is(jsonb_array_length(admin_stats() -> 'labels'), 3, 'labels from deleted
 select set_config('request.jwt.claims', '{"app_metadata":{}}', true);
 select throws_ok('select public.admin_stats()', '42501', 'Only admins can do this.', 'anyone else is refused');
 select set_config('request.jwt.claims', '{"app_metadata":{"role":"admin"}}', true);
-select ok(admin_stats() ? 'storage', 'an admin gets the storage totals too');
+select ok(not (admin_stats() ? 'storage'), 'storage totals come from admin_storage');
 
 select * from finish();
 rollback;

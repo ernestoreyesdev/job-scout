@@ -347,6 +347,7 @@ export type Database = {
     Functions: {
       reposted_postings: { Args: { job_ids: string[]; days: number }; Returns: { id: string }[] };
       admin_stats: { Args: Record<string, never>; Returns: Record<string, unknown> };
+      admin_storage: { Args: Record<string, never>; Returns: { bytes: number; unembedded: number } };
     };
     Enums: {
       job_source: JobSourceRow;
