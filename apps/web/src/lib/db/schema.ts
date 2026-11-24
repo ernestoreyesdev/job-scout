@@ -46,7 +46,7 @@ export type WorkplaceTypeRow = (typeof WORKPLACE_TYPES)[number];
 
 export const WORKPLACE_LABELS = { onsite: "On-site", hybrid: "Hybrid", remote: "Remote" } as const;
 
-export type CompanyOriginRow = "lookup" | "discovery" | "import";
+export type CompanyOriginRow = "lookup" | "discovery" | "import" | "link";
 
 export type CompanyKindRow = "employer" | "staffing" | "aggregator";
 

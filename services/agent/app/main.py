@@ -9,14 +9,19 @@ import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
+from app.agents.discovery.agent import name_companies
 from app.agents.gap_analysis.agent import GapAnalysisError, analyze_gaps
 from app.agents.lessons.agent import MIN_JOBS, LessonsError, relearn, signal_jobs
 from app.agents.orchestrator import (
     EDITED_FIELDS,
+    Board,
     ImportResult,
     SearchResult,
     import_companies,
     job_key,
+    label_if_new,
+    record_board_checks,
+    remove_duplicate_names,
     rescore as orchestrate_rescore,
     run_search as orchestrate_search,
     with_edits,
@@ -37,7 +42,7 @@ from app.crypto import decrypt, encrypt, key_hint
 from app.db import Rest, service_db, user_db
 from app.mail import alert_admin
 from app.sources import board_from_url, default_name, fetch_live
-from app.sources.base import CompanyNotFound, Posting
+from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, Posting
 from app.telemetry import CallLog, RecordingClient, configure_logging, configure_sentry, current_run
 
 logger = logging.getLogger("agent")
@@ -426,7 +431,9 @@ def add_outside_job(body: OutsideJob, user: User, settings: Config) -> dict[str,
     being added twice.
     """
     db, service = user_db(settings, user.access_token), service_db(settings)
-    posting_id = outside_posting(service, body)
+    posting_id, added = outside_posting(service, body)
+    if added:
+        label_linked_board(added, user, settings, service)
     rows = db.select("applications", {"posting_id": f"eq.{posting_id}", "select": "id,status"}) or same_job(db, service, posting_id)
     if not rows:
         rows = db.insert(
@@ -449,31 +456,45 @@ def add_outside_job(body: OutsideJob, user: User, settings: Config) -> dict[str,
     return {"application_id": application_id}
 
 
-def outside_posting(service: Rest, body: OutsideJob) -> str:
+def outside_posting(service: Rest, body: OutsideJob) -> tuple[str, CompanyBoard | None]:
     """
     The id of the saved job at `body.url`: one already saved, else the job read
     from its board and saved, else a manual job from the title, company and description given.
+    A known board the link is on joins the directory with all its open jobs when it isn't there yet;
+    that board comes back second.
     """
     link = body.url.split("#")[0].split("?")[0].rstrip("/")
     saved = service.select("postings", {"url": f"eq.{link}", "select": "id", "limit": "1"})
-    if saved:
-        return saved[0]["id"]
-    if board := board_from_url(link):
+    board = board_from_url(link)
+    added: CompanyBoard | None = None
+    listed: list[Posting] = []
+    if board:
         source, slug = board
         names = service.select("companies", {"source": f"eq.{source}", "board": f"eq.{slug}", "select": "name"})
-        listed = fetch_live(source, slug, names[0]["name"] if names else default_name(source, slug))
-        segments = set(link.split("/"))
-        match = next(
-            (
-                p
-                for p in listed
-                if p.url.split("?")[0].rstrip("/") == link or p.external_id in segments or p.external_id.rsplit("/", 1)[-1] in segments
-            ),
-            None,
-        )
-        if match:
-            [row] = service.insert("postings", match.row(), on_conflict="source,external_id", select="id")
-            return row["id"]
+        if not saved or not names:
+            try:
+                listed = fetch_live(source, slug, names[0]["name"] if names else default_name(source, slug))
+            except BoardNotFound:
+                board = None
+        if board and not names:
+            name = listed[0].company if listed else default_name(source, slug)
+            record_board_checks(service, [Board(source, slug, name, "link")], {(source, slug): listed}, [])
+            remove_duplicate_names(service)
+            added = CompanyBoard(source=source, board=slug, name=name, postings=listed)
+    if saved:
+        return saved[0]["id"], added
+    segments = set(link.split("/"))
+    match = next(
+        (
+            p
+            for p in listed
+            if p.url.split("?")[0].rstrip("/") == link or p.external_id in segments or p.external_id.rsplit("/", 1)[-1] in segments
+        ),
+        None,
+    )
+    if match:
+        [row] = service.insert("postings", match.row(), on_conflict="source,external_id", select="id")
+        return row["id"], added
     if not (body.title and body.company and body.description):
         raise HTTPException(422, "Couldn't find this job from its link. Enter its title, company and description to add it.")
     manual = Posting(
@@ -488,7 +509,7 @@ def outside_posting(service: Rest, body: OutsideJob) -> str:
         posted_at=None,
     )
     [row] = service.insert("postings", manual.row(), select="id")
-    return row["id"]
+    return row["id"], added
 
 
 @app.delete("/me", status_code=204)
@@ -612,3 +633,17 @@ def missing_key(settings: Settings) -> str:
         f"no-anthropic-key/{datetime.now(UTC).date().isoformat()}",
     )
     return NO_KEY
+
+
+def label_linked_board(found: CompanyBoard, user: CurrentUser, settings: Settings, service: Rest) -> None:
+    """Labels the company of a board a job link added, so staffing agencies stay out of searches; skipped without a key."""
+    api_key = anthropic_key(service, user.id, settings)
+    if not api_key:
+        return
+    calls = CallLog()
+    try:
+        label_if_new(found, RecordingClient(make_client(api_key), calls), settings, service, name_companies)
+    except Exception as error:
+        logger.warning("labeling a linked board failed: %s", error)
+    finally:
+        calls.save(service)

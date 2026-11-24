@@ -346,7 +346,10 @@ def ramp_posting() -> Posting:
 
 
 def test_an_outside_job_already_saved_is_added_as_applied_on_the_day_given(monkeypatch: pytest.MonkeyPatch):
-    db = OutsideRest(postings=[{"id": "posting-1", "url": RAMP_JOB, "title": "Software Engineer, Backend", "company": "Ramp"}])
+    db = OutsideRest(
+        postings=[{"id": "posting-1", "url": RAMP_JOB, "title": "Software Engineer, Backend", "company": "Ramp"}],
+        companies=[{"source": "ashby", "board": "ramp", "name": "Ramp"}],
+    )
 
     result = add_outside(monkeypatch, db, url=f"{RAMP_JOB}?departmentId=x", applied_on="2026-11-10")
 
@@ -393,6 +396,7 @@ def test_an_outside_job_already_on_the_tracker_moves_to_its_status(monkeypatch: 
     db = OutsideRest(
         postings=[{"id": "posting-1", "url": RAMP_JOB}],
         applications=[{"id": "application-1", "posting_id": "posting-1", "status": "new"}],
+        companies=[{"source": "ashby", "board": "ramp", "name": "Ramp"}],
     )
 
     add_outside(monkeypatch, db, url=RAMP_JOB, status="interviewing")
@@ -459,7 +463,9 @@ def test_an_outside_job_tracked_from_another_source_moves_instead_of_being_added
     hn = {"id": "hn-1", "source": "hackernews", "title": "Sr Software Engineer, Backend", "company": "Ramp"}
     board = {"id": "board-1", "source": "ashby", "url": RAMP_JOB, "title": "Senior Software Engineer Backend", "company": "Ramp"}
     db = OutsideRest(
-        postings=[hn, board], applications=[{"id": "app-1", "posting_id": "hn-1", "status": "saved", "in_tracker": True}]
+        postings=[hn, board],
+        applications=[{"id": "app-1", "posting_id": "hn-1", "status": "saved", "in_tracker": True}],
+        companies=[{"source": "ashby", "board": "ramp", "name": "Ramp"}],
     )
 
     result = add_outside(monkeypatch, db, url=RAMP_JOB, status="applied")
@@ -470,7 +476,7 @@ def test_an_outside_job_tracked_from_another_source_moves_instead_of_being_added
 
 
 def test_a_workday_link_in_another_form_finds_its_job_on_the_board(monkeypatch: pytest.MonkeyPatch):
-    db = OutsideRest()
+    db = OutsideRest(companies=[{"source": "workday", "board": "geaerospace.wd5/ge_externalsite", "name": "GE Aerospace"}])
     slug = "Sr-Staff-Applications-Operations-Engineer---Engineering-Tools-Automation---AI-Ops_R5042209-2"
     listed = Posting(
         source="workday",
