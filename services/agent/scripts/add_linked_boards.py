@@ -40,6 +40,8 @@ def main() -> None:
     for (source, slug), jobs in fetched.items():
         print(f"Added {source}/{slug} with {len(jobs):,} open jobs")
 
+    if not fetched:
+        return
     if not settings.anthropic_api_key:
         print("No ANTHROPIC_API_KEY, so the new companies stay unlabeled.")
         return

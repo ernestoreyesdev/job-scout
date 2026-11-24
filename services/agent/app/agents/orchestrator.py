@@ -38,6 +38,9 @@ logger = logging.getLogger("agent")
 # Web discovery runs while the directory has fewer companies than this, for keyword sets it hasn't run for, and otherwise once per interval.
 MIN_DIRECTORY = 25
 DISCOVERY_INTERVAL = timedelta(days=7)
+# Daily discovery picks from keyword sets searched within this many days, and runs this many of them.
+DISCOVERY_SEARCH_DAYS = 30
+DAILY_DISCOVERIES = 2
 # Boards from a company's web lookup checked before giving up.
 MAX_LOOKUP_BOARDS = 5
 # Company kinds never searched, refreshed or saved.
@@ -584,9 +587,10 @@ def import_companies(
     finder: Callable[[str], CompanyBoard] = find_company,
     fetcher: Callable[[str, str, str], list[Posting]] = fetch_board,
     namer: Callable[..., dict[tuple[str, str], CompanyName]] = name_companies,
+    origin: str = "import",
 ) -> ImportResult:
     """
-    Adds companies to the directory from careers page URLs or company names.
+    Adds companies to the directory from careers page URLs or company names, recorded as found by `origin`.
     Names are tried on every system's spellings; URLs are read on the system
     they belong to, after one call names and labels every new company, so
     their jobs carry the company's real name.
@@ -631,7 +635,7 @@ def import_companies(
     named = namer(client, settings.discovery_model, candidates) if candidates else {}
 
     fetched = {(r.source, r.board): r.postings for _, r in new_names.values()}
-    boards = [Board(r.source, r.board, r.name, "import") for _, r in new_names.values()]
+    boards = [Board(r.source, r.board, r.name, origin) for _, r in new_names.values()]
 
     def fetch(key: tuple[SourceName, str]) -> None:
         source, board = key
@@ -645,7 +649,7 @@ def import_companies(
             return
         with lock:
             fetched[key] = postings
-            boards.append(Board(source, board, name, "import"))
+            boards.append(Board(source, board, name, origin))
 
     if new_urls:
         report(f"Checking {len(new_urls)} careers pages…")
@@ -924,9 +928,12 @@ def refresh_boards(
     service: Rest,
     fetcher: Callable[[str, str, str], list[Posting]] = fetch_live,
     embed: Callable[[list[str]], list[list[float]]] = embed_jobs,
+    client: Any = None,
+    settings: Settings | None = None,
 ) -> dict[str, Any]:
     """
-    Marks earlier refreshes that were cut off as stopped, fetches every
+    Marks earlier refreshes that were cut off as stopped and, with a Claude
+    client, grows the directory with grow_directory. Then fetches every
     directory board from its system except staffing agencies, saves the jobs,
     closes the ones no longer listed, keeps one directory entry per company
     name, embeds every open job that has none from the description just
@@ -939,7 +946,12 @@ def refresh_boards(
         {"finished_at": "is.null", "stopped_at": "is.null", "started_at": f"lt.{(now - REFRESH_TIME_LIMIT).isoformat()}", "select": "id"},
         {"stopped_at": now.isoformat()},
     )
+    previous = service.select(
+        "board_refreshes", {"select": "started_at", "finished_at": "not.is.null", "order": "started_at.desc", "limit": "1"}
+    )
     [refresh] = service.insert("board_refreshes", {}, select="id,started_at")
+    if client is not None and settings is not None:
+        grow_directory(service, client, settings, previous[0]["started_at"] if previous else None)
     directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,kind,open_jobs"})
     directory = [c for c in directory if c["kind"] not in SKIPPED_KINDS]
     directory.sort(key=lambda c: c.get("open_jobs") or 0, reverse=True)
@@ -1093,3 +1105,93 @@ def with_edits(row: dict[str, Any]) -> Posting:
     """The application row's posting with the user's own title, company and description in place of the job's."""
     edits = {field: row.get(f"edited_{field}") for field in ("title", "company", "description")}
     return Posting.model_validate(row["posting"]).model_copy(update={k: v for k, v in edits.items() if v})
+
+
+def grow_directory(service: Rest, client: Any, settings: Settings, since: str | None) -> None:
+    """
+    Adds the companies of Hacker News jobs saved since `since` and runs the
+    daily discovery. A step that fails is logged and skipped.
+    """
+    try:
+        result = add_hiring_thread_companies(service, client, settings, since)
+        if result:
+            added, missing = len(result.added), len(result.not_found)
+            logger.info("added hacker news companies", extra={"added": added, "not_found": missing})
+    except Exception as error:
+        logger.warning("adding hacker news companies failed: %s", error)
+    try:
+        logger.info("daily discovery", extra={"added": discover_for_recent_searches(service, client, settings)})
+    except Exception as error:
+        logger.warning("daily discovery failed: %s", error)
+
+
+def add_hiring_thread_companies(
+    service: Rest, client: Any, settings: Settings, since: str | None
+) -> ImportResult | None:
+    """Looks up by name the companies of Hacker News jobs saved since `since`, or all of them without it."""
+    params = {"select": "id,company", "source": "eq.hackernews", **({"created_at": f"gte.{since}"} if since else {})}
+    rows = service.select_all("postings", params)
+    return add_companies_by_name(service, client, settings, [row["company"] for row in rows], "hacker_news")
+
+
+def add_companies_by_name(
+    service: Rest, client: Any, settings: Settings, names: list[str], origin: str
+) -> ImportResult | None:
+    """
+    Adds the companies in `names` that no directory company is named, looked up
+    on every system's spellings and recorded as found by `origin`. None when there were none to look up.
+    """
+    listed = {" ".join(c["name"].lower().split()) for c in service.select("companies", {"select": "name"})}
+    wanted = {" ".join(name.split()) for name in names if name and name.strip()}
+    entries = sorted(name for name in wanted if name.lower() not in listed)
+    if not entries:
+        return None
+    return import_companies(
+        entries=entries, client=client, settings=settings, service=service, report=lambda _: None, origin=origin
+    )
+
+
+def discover_for_recent_searches(
+    service: Rest,
+    client: Any,
+    settings: Settings,
+    discover: Callable[..., list[FoundBoard]] = discover_boards,
+    namer: Callable[..., dict[tuple[str, str], CompanyName]] = name_companies,
+) -> int:
+    """
+    Runs web discovery for up to DAILY_DISCOVERIES keyword sets searched in the
+    last DISCOVERY_SEARCH_DAYS days, those discovered longest ago or never
+    first, and adds the boards it finds. Returns how many it added.
+    """
+    cutoff = (datetime.now(UTC) - timedelta(days=DISCOVERY_SEARCH_DAYS)).isoformat()
+    runs = service.select("agent_runs", {"select": "input", "kind": "eq.search", "created_at": f"gte.{cutoff}"})
+    searched: dict[frozenset[str], list[str]] = {}
+    for run in runs:
+        if keywords := (run.get("input") or {}).get("keywords"):
+            searched.setdefault(keyword_set(keywords), keywords)
+    last: dict[frozenset[str], str] = {}
+    for row in service.select("directory_discoveries", {"select": "keywords,ran_at"}):
+        key = keyword_set(row["keywords"])
+        last[key] = max(last.get(key, ""), row["ran_at"])
+    known = {(c["source"], c["board"]) for c in service.select("companies", {"select": "source,board"})}
+    added = 0
+    for key in sorted(searched, key=lambda key: last.get(key, ""))[:DAILY_DISCOVERIES]:
+        keywords = searched[key]
+        found = discover(client, settings.discovery_model, keywords, [], None)
+        new = [b for b in found if (b.source, b.board) not in known]
+        named = namer(client, settings.discovery_model, new) if new else {}
+        names = {key: entry.name for key, entry in named.items()}
+        boards = [
+            Board(b.source, b.board, names.get((b.source, b.board)) or default_name(b.source, b.board), "discovery")
+            for b in new
+        ]
+        save_companies(service, boards, {})
+        record_kinds(service, {board_key: entry.kind for board_key, entry in named.items()})
+        service.insert(
+            "directory_discoveries", {"keywords": keywords, "boards_found": len(found), "boards_added": len(new)}
+        )
+        known |= {(b.source, b.board) for b in new}
+        added += len(new)
+    if added:
+        remove_duplicate_names(service)
+    return added

@@ -325,7 +325,9 @@ class OutsideRest(FakeRest):
 def add_outside(monkeypatch: pytest.MonkeyPatch, db: OutsideRest, **job: Any) -> dict[str, str]:
     monkeypatch.setattr(main, "user_db", lambda settings, token: db)
     monkeypatch.setattr(main, "service_db", lambda settings: db)
-    return main.add_outside_job(main.OutsideJob(**job), fake_user(id="user-1", access_token="t"), fake_settings())
+    return main.add_outside_job(
+        main.OutsideJob(**job), fake_user(id="user-1", access_token="t"), fake_settings(), BackgroundTasks()
+    )
 
 
 RAMP_JOB = "https://jobs.ashbyhq.com/ramp/939892e5-5273-4bfc-8c41-a6c51cabb228"

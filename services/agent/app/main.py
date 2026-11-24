@@ -17,6 +17,7 @@ from app.agents.orchestrator import (
     Board,
     ImportResult,
     SearchResult,
+    add_companies_by_name,
     import_companies,
     job_key,
     label_if_new,
@@ -423,17 +424,20 @@ def save_run_error(service: Rest, run_id: str, detail: str | None) -> None:
 
 
 @app.post("/applications/outside", status_code=201)
-def add_outside_job(body: OutsideJob, user: User, settings: Config) -> dict[str, str]:
+def add_outside_job(body: OutsideJob, user: User, settings: Config, background: BackgroundTasks) -> dict[str, str]:
     """
     Adds a job the user applied to outside the app to their Jobs, dated the day
     they applied. Moves it to `body.status` when it's past applied, and a job
     the user already tracks, from this source or another, moves instead of
-    being added twice.
+    being added twice. When its link is on no known board, its company is
+    looked up by name afterwards.
     """
     db, service = user_db(settings, user.access_token), service_db(settings)
     posting_id, added = outside_posting(service, body)
     if added:
         label_linked_board(added, user, settings, service)
+    if body.company and board_from_url(body.url) is None:
+        background.add_task(add_linked_company, body.company, user, settings)
     rows = db.select("applications", {"posting_id": f"eq.{posting_id}", "select": "id,status"}) or same_job(db, service, posting_id)
     if not rows:
         rows = db.insert(
@@ -645,5 +649,20 @@ def label_linked_board(found: CompanyBoard, user: CurrentUser, settings: Setting
         label_if_new(found, RecordingClient(make_client(api_key), calls), settings, service, name_companies)
     except Exception as error:
         logger.warning("labeling a linked board failed: %s", error)
+    finally:
+        calls.save(service)
+
+
+def add_linked_company(company: str, user: CurrentUser, settings: Settings) -> None:
+    """Adds the board of a manually added job's company, looked up by name; skipped without a key."""
+    service = service_db(settings)
+    api_key = anthropic_key(service, user.id, settings)
+    if not api_key:
+        return
+    calls = CallLog()
+    try:
+        add_companies_by_name(service, RecordingClient(make_client(api_key), calls), settings, [company], "link")
+    except Exception as error:
+        logger.warning("looking up a manually added company failed: %s", error)
     finally:
         calls.save(service)

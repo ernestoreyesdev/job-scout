@@ -18,12 +18,12 @@ def capture_alerts(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, list[str]
 def test_a_failed_refresh_emails_the_admin_once_a_day(monkeypatch: pytest.MonkeyPatch):
     alerts = capture_alerts(monkeypatch)
 
-    def fail(service: Any) -> dict[str, Any]:
+    def fail(service: Any, **_: Any) -> dict[str, Any]:
         raise RuntimeError("database down")
 
     monkeypatch.setattr(refresh, "refresh_boards", fail)
 
-    refresh.run_refresh(fake_settings())
+    refresh.run_refresh(fake_settings(anthropic_api_key=None))
 
     [(subject, lines, key)] = alerts
     assert subject == "Board refresh failed" and "database down" in lines[0]
@@ -33,14 +33,14 @@ def test_a_failed_refresh_emails_the_admin_once_a_day(monkeypatch: pytest.Monkey
 def test_a_refresh_that_misses_boards_names_them_and_a_clean_one_sends_nothing(monkeypatch: pytest.MonkeyPatch):
     alerts = capture_alerts(monkeypatch)
     fetches = [{"board": "lever/b", "outcome": "unreachable"}, {"board": "ashby/a", "outcome": "ok"}]
-    monkeypatch.setattr(refresh, "refresh_boards", lambda service: {"jobs": 10, "boards": 1, "board_fetches": fetches})
+    monkeypatch.setattr(refresh, "refresh_boards", lambda service, **_: {"jobs": 10, "boards": 1, "board_fetches": fetches})
 
-    refresh.run_refresh(fake_settings())
+    refresh.run_refresh(fake_settings(anthropic_api_key=None))
 
     [(subject, lines, _)] = alerts
     assert subject == "Board refresh couldn't reach 1 board" and "lever/b" in lines
 
     alerts.clear()
-    monkeypatch.setattr(refresh, "refresh_boards", lambda service: {"jobs": 10, "boards": 1, "board_fetches": fetches[1:]})
-    refresh.run_refresh(fake_settings())
+    monkeypatch.setattr(refresh, "refresh_boards", lambda service, **_: {"jobs": 10, "boards": 1, "board_fetches": fetches[1:]})
+    refresh.run_refresh(fake_settings(anthropic_api_key=None))
     assert alerts == []
