@@ -43,7 +43,8 @@ async function JobsData({ searchParams }: Pick<PageProps<"/jobs">, "searchParams
     repository.listTrackedCompanies("jobs"),
     repository.listRuns(1),
   ]);
-  const rescoreRun = runs[0]?.kind === "rescore" && rescoreScope(runs[0]) === "jobs" ? runs[0] : null;
+  const rescoreRun =
+    runs[0]?.kind === "rescore" && rescoreScope(runs[0]) === "jobs" && runs[0].status !== "done" ? runs[0] : null;
   const stale = resume ? await repository.countStaleJobs(resume.id, "jobs") : 0;
 
   return (
