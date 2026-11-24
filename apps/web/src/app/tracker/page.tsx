@@ -49,9 +49,10 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
   const { repository } = await getSignedInSource();
   const params = await searchParams;
   const view = parseJobQuery(params).rated ? "rated" : "tracker";
-  const [resume, runs, companies, trackerTotal] = await Promise.all([
+  const [resume, [latest], searches, companies, trackerTotal] = await Promise.all([
     getPrimaryResume(),
-    repository.listRuns(10),
+    repository.listRuns(1),
+    repository.listRuns(10, "search"),
     repository.listTrackedCompanies(view),
     repository.countTrackerJobs(),
   ]);
@@ -60,13 +61,13 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
     repository.listTrackedJobs(view, query.sort, query.page, query.filters),
     resume && !query.rated ? repository.countStaleJobs(resume.id, "tracker") : 0,
   ]);
-  const banner = runs[0]?.kind === "rescore" && rescoreScope(runs[0]) === "jobs" ? null : runs[0];
+  const banner = latest?.kind === "rescore" && rescoreScope(latest) === "jobs" ? null : latest;
 
   return (
     <>
       <PageReady />
       {banner && !(trackerTotal === 0 && banner.status === "done" && (banner.jobs_added ?? 0) > 0) && <RunStatus run={banner} />}
-      <RecentRuns runs={runs} />
+      <RecentRuns runs={searches} />
       <section className="mt-8">
         <nav aria-label="Tracker view" className="mb-4 flex gap-1 text-sm">
           {VIEWS.map((option) => (
@@ -94,7 +95,7 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
                 <p className="font-medium">Searching…</p>
                 <p className="mt-1 text-sm text-muted-foreground">Matches show up here as they&apos;re scored.</p>
               </>
-            ) : runs.length > 0 ? (
+            ) : searches.length > 0 ? (
               <>
                 <p className="font-medium">Your Tracker is empty</p>
                 <p className="mt-1 text-sm text-muted-foreground">Run a search above to add new matches.</p>

@@ -208,14 +208,14 @@ export class JobFinderRepository {
     }
   }
 
-  async listRuns(limit = 5): Promise<AgentRunRow[]> {
-    const { data, error } = await this.client
+  async listRuns(limit = 5, kind?: string): Promise<AgentRunRow[]> {
+    let query = this.client
       .from("agent_runs")
       .select(
         "id, user_id, kind, input, status, error, error_code, progress, usage, timings, jobs_added, created_at, updated_at, finished_at",
-      )
-      .order("created_at", { ascending: false })
-      .limit(limit);
+      );
+    if (kind) query = query.eq("kind", kind);
+    const { data, error } = await query.order("created_at", { ascending: false }).limit(limit);
     if (error) throw error;
     return data;
   }
