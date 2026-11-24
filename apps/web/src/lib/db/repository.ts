@@ -57,6 +57,8 @@ export type DirectoryCompany = CompanyRow & { hidden: boolean };
 
 export type ApplicationPatch = { status?: ApplicationStatusRow; notes?: string | null; fit_label?: FitLabelRow | null };
 
+export type JobEdits = Pick<ApplicationRow, "edited_title" | "edited_company" | "edited_description">;
+
 /** One page of a list: its rows, the page number shown and how many pages there are. */
 export type Page<T> = { items: T[]; page: number; pageCount: number; total: number };
 
@@ -120,6 +122,7 @@ export class JobFinderRepository {
     page = 1,
     filters: JobFilters = {},
   ): Promise<Page<TrackedJob>> {
+    const atCompany = filters.company ? await this.idsAtCompany(filters.company) : null;
     const result = await this.paged<TrackedJobRow>(page, (from, to) => {
       let query = this.client
         .from("applications")
@@ -129,7 +132,7 @@ export class JobFinderRepository {
         );
       query = inView(query, view);
       if (filters.status) query = query.eq("status", filters.status);
-      if (filters.company) query = query.eq("posting.company", filters.company);
+      if (atCompany) query = query.in("id", atCompany);
       if (filters.hideClosed) query = query.is("posting.closed_at", null);
       if (filters.hideClearance) {
         query = query.or("details_extracted_at.is.null,clearance.is.null", { referencedTable: "posting" });
@@ -150,7 +153,11 @@ export class JobFinderRepository {
               : query.order("fit_score", { ascending: sort === "asc", nullsFirst: false });
       return ordered.order("id").order("changed_at", { referencedTable: "events" }).range(from, to);
     });
-    return { ...result, items: await this.withSignals(result.items) };
+    const items = result.items.map((job) => ({
+      ...job,
+      posting: { ...job.posting, title: job.edited_title ?? job.posting.title, company: job.edited_company ?? job.posting.company },
+    }));
+    return { ...result, items: await this.withSignals(items) };
   }
 
   /**
@@ -161,14 +168,14 @@ export class JobFinderRepository {
     if (!jobs.length) return [];
     const [{ data: reposts, error }, { data: tracked, error: trackedError }] = await Promise.all([
       this.client.rpc("reposted_postings", { job_ids: jobs.map((job) => job.posting.id), days: REPOST_DAYS }),
-      this.client.from("applications").select("id, status, posting:postings!inner(company, title)"),
+      this.client.from("applications").select("id, status, edited_title, edited_company, posting:postings!inner(company, title)"),
     ]);
     if (error) throw error;
     if (trackedError) throw trackedError;
     const reposted = new Set(reposts.map((row) => row.id));
     const copies = new Map<string, { id: string; status: ApplicationStatusRow }[]>();
     for (const row of tracked) {
-      const key = jobKey(row.posting.company, row.posting.title);
+      const key = jobKey(row.edited_company ?? row.posting.company, row.edited_title ?? row.posting.title);
       copies.set(key, [...(copies.get(key) ?? []), { id: row.id, status: row.status }]);
     }
     const now = Date.now();
@@ -322,10 +329,10 @@ export class JobFinderRepository {
 
   /** Companies of the jobs in a view, for its company filter. */
   async listTrackedCompanies(view: JobView): Promise<string[]> {
-    const query = this.client.from("applications").select("posting:postings!inner(company)");
+    const query = this.client.from("applications").select("edited_company, posting:postings!inner(company)");
     const { data, error } = await inView(query, view);
     if (error) throw error;
-    return [...new Set(data.map((row) => row.posting.company))].sort((a, b) => a.localeCompare(b));
+    return [...new Set(data.map((row) => row.edited_company ?? row.posting.company))].sort((a, b) => a.localeCompare(b));
   }
 
   /** Every job on the Tracker, whatever the filters, since Clear empties all of them. */
@@ -420,6 +427,41 @@ export class JobFinderRepository {
     const { data, error } = await this.client.rpc("admin_storage");
     if (error) throw error;
     return data;
+  }
+
+  /** The user's saved jobs at a company, by their own company name for the job when they set one, else the job's. */
+  private async idsAtCompany(company: string): Promise<string[]> {
+    const [edited, original] = await Promise.all([
+      this.client.from("applications").select("id").eq("edited_company", company),
+      this.client.from("applications").select("id, posting:postings!inner(company)").is("edited_company", null).eq("posting.company", company),
+    ]);
+    if (edited.error) throw edited.error;
+    if (original.error) throw original.error;
+    return [...edited.data, ...original.data].map((row) => row.id);
+  }
+
+  /** The title, company and description a saved job shows: the user's own where they set them, else the job's. */
+  async getJobText(id: string): Promise<{ title: string; company: string; description: string }> {
+    const { data, error } = await this.client
+      .from("applications")
+      .select("edited_title, edited_company, edited_description, posting:postings!inner(title, company, description)")
+      .eq("id", id)
+      .single();
+    if (error) throw error;
+    return {
+      title: data.edited_title ?? data.posting.title,
+      company: data.edited_company ?? data.posting.company,
+      description: data.edited_description ?? data.posting.description,
+    };
+  }
+
+  /** Saves the user's corrections; the job's score and gap analysis become out of date until it is scored again. */
+  async editJob(id: string, edits: JobEdits): Promise<void> {
+    const { error } = await this.client
+      .from("applications")
+      .update({ ...edits, resume_id: null, gap_analysis: null, gap_analyzed_at: null })
+      .eq("id", id);
+    if (error) throw error;
   }
 }
 

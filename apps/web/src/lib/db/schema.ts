@@ -126,6 +126,9 @@ export type ApplicationRow = {
   fit_label: FitLabelRow | null;
   gap_analysis: GapAnalysis | null;
   gap_analyzed_at: string | null;
+  edited_title: string | null;
+  edited_company: string | null;
+  edited_description: string | null;
   created_at: string;
   updated_at: string;
 };

@@ -4,6 +4,7 @@ import { ChevronDown, ExternalLink, ThumbsDown, ThumbsUp, Trash2 } from "lucide-
 import { useState } from "react";
 
 import { analyzeGaps, deleteApplication, updateApplication } from "@/app/actions";
+import { EditJob } from "@/components/edit-job";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -187,16 +188,22 @@ export function JobRow({
                 </div>
               </div>
             )}
-            {job.gap_analysis ? (
+            {job.gap_analysis && (
               <div className="grid gap-3 text-sm sm:grid-cols-3">
                 {GAP_SECTIONS.map(([key, title]) => (
                   <GapList key={key} title={title} items={job.gap_analysis![key]} />
                 ))}
               </div>
-            ) : (
-              <Button variant="outline" size="sm" onClick={analyze} disabled={pending}>
-                {pending ? "Analyzing…" : "Analyze gaps"}
-              </Button>
+            )}
+            {(!job.gap_analysis || showNotes) && (
+              <div className="flex flex-wrap gap-2">
+                {!job.gap_analysis && (
+                  <Button variant="outline" size="sm" onClick={analyze} disabled={pending}>
+                    {pending ? "Analyzing…" : "Analyze gaps"}
+                  </Button>
+                )}
+                {showNotes && <EditJob id={job.id} />}
+              </div>
             )}
           </div>
         )}

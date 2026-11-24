@@ -530,11 +530,11 @@ def rescore(
     rows = user.select(
         "applications",
         {
-            "select": f"posting_id,posting:postings({','.join(Posting.model_fields)})",
+            "select": f"posting_id,{EDITED_FIELDS},posting:postings({','.join(Posting.model_fields)})",
             "and": f"(or(resume_id.is.null,resume_id.neq.{resume_id}),{RESCORE_SCOPES[scope]})",
         },
     )
-    todo = [(row["posting_id"], Posting.model_validate(row["posting"])) for row in rows]
+    todo = [(row["posting_id"], with_edits(row)) for row in rows]
     if not todo:
         report("Every job is already scored with your current resume.")
         return []
@@ -1084,3 +1084,12 @@ def current_lessons(client: Any, settings: Settings, user: Rest, user_id: str) -
     except Exception as error:
         logger.warning("learning preferences failed: %s", error)
     return saved_lessons(user, now)
+
+
+EDITED_FIELDS = "edited_title,edited_company,edited_description"
+
+
+def with_edits(row: dict[str, Any]) -> Posting:
+    """The application row's posting with the user's own title, company and description in place of the job's."""
+    edits = {field: row.get(f"edited_{field}") for field in ("title", "company", "description")}
+    return Posting.model_validate(row["posting"]).model_copy(update={k: v for k, v in edits.items() if v})

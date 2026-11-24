@@ -307,3 +307,27 @@ export async function refreshLessons(): Promise<ActionResult> {
     await callAgent("/me/lessons/refresh", { method: "POST" });
   });
 }
+
+export type JobTextResult = ActionResult & { text?: { title: string; company: string; description: string } };
+
+/** The title, company and description a saved job shows, for editing them. */
+export async function loadJobText(id: string): Promise<JobTextResult> {
+  let jobText: JobTextResult["text"];
+  const result = await run([], async () => {
+    const { repository } = await getSignedInSource();
+    jobText = await repository.getJobText(id);
+  });
+  return { ...result, text: jobText };
+}
+
+/** Saves the user's own title, company and description for a saved job; a field left blank goes back to the job's. */
+export async function editJob(id: string, formData: FormData): Promise<ActionResult> {
+  return run(["/jobs", "/tracker"], async () => {
+    const { repository } = await getSignedInSource();
+    await repository.editJob(id, {
+      edited_title: text(formData.get("title")) || null,
+      edited_company: text(formData.get("company")) || null,
+      edited_description: text(formData.get("description")) || null,
+    });
+  });
+}

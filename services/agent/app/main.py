@@ -12,12 +12,14 @@ from pydantic import BaseModel
 from app.agents.gap_analysis.agent import GapAnalysisError, analyze_gaps
 from app.agents.lessons.agent import MIN_JOBS, LessonsError, relearn, signal_jobs
 from app.agents.orchestrator import (
+    EDITED_FIELDS,
     ImportResult,
     SearchResult,
     import_companies,
     job_key,
     rescore as orchestrate_rescore,
     run_search as orchestrate_search,
+    with_edits,
 )
 from app.agents.schemas import (
     AnthropicKeyRequest,
@@ -293,12 +295,15 @@ def post_gap_analysis(application_id: str, user: User, settings: Config) -> dict
     import anthropic
 
     db = user_db(settings, user.access_token)
-    rows = db.select("applications", {"id": f"eq.{application_id}", "select": f"id,posting:postings({','.join(Posting.model_fields)})"})
+    rows = db.select(
+        "applications",
+        {"id": f"eq.{application_id}", "select": f"id,{EDITED_FIELDS},posting:postings({','.join(Posting.model_fields)})"},
+    )
     if not rows:
         raise HTTPException(404, "Job not found.")
     client, resume_text, calls = claude_and_resume(user, settings)
     try:
-        analysis = analyze_gaps(client, settings.analysis_model, resume_text, Posting.model_validate(rows[0]["posting"]))
+        analysis = analyze_gaps(client, settings.analysis_model, resume_text, with_edits(rows[0]))
     except (GapAnalysisError, anthropic.APIError) as error:
         raise HTTPException(502, f"Couldn't analyze this job: {error}")
     finally:
