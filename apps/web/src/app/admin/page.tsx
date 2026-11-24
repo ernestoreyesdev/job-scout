@@ -40,7 +40,7 @@ const STEP_LABELS: Record<string, string> = {
   other: "Other",
 };
 
-type BoardFetches = { fetches: number; failures: number; cached: number; median_ms: number; max_ms: number; jobs: number };
+type BoardFetches = { fetches: number; failures: number; cached: number; median_ms: number | null; max_ms: number | null; jobs: number };
 
 type AdminStats = {
   generated_at: string;
@@ -55,7 +55,6 @@ type AdminStats = {
   calls: StepCalls[];
   boards: {
     sources: (BoardFetches & { source: string; total_ms: number })[];
-    slowest: (BoardFetches & { board: string; source: string })[];
   };
   vitals: { page: string; metric: (typeof WEB_VITALS)[number]; count: number; median: number; p75: number }[];
   model_weeks: {
@@ -96,15 +95,6 @@ type AdminStats = {
     embedded_jobs: number;
     deleted_jobs: number;
     failures: number;
-  }[];
-  refresh_boards: {
-    board: string;
-    source: string;
-    median_ms: number | null;
-    last_ms: number | null;
-    last_outcome: string | null;
-    failures: number;
-    open_jobs: number;
   }[];
   storage: { bytes: number; unembedded: number };
   companies: { name: string; source: string; board: string; kind: CompanyKindRow | null; open_jobs: number; missed_checks: number }[];
@@ -154,13 +144,6 @@ async function AdminData() {
   return (
     <div className="mt-8 space-y-6">
       <PageReady />
-      <SectionCard collapsible
-        title="Shared Anthropic key"
-        description="Runs use a user's own key when they saved one before, otherwise this key, otherwise the ANTHROPIC_API_KEY setting. Anthropic checks a new key before it's saved."
-      >
-        <KeyForm hint={key.hint} fallback={key.fallback} />
-      </SectionCard>
-
       <SectionCard collapsible title="Usage" description={`The last ${stats.days} days, estimated at Claude Haiku prices. Your Anthropic console has the exact bill.`}>
         <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile label="Users" value={stats.users.total} note={`${stats.users.active} active in the last ${ACTIVE_DAYS} days`} />
@@ -199,15 +182,9 @@ async function AdminData() {
 
       <SpeedSection runs={searches} />
 
-      <BoardSection boards={stats.boards} names={names} days={stats.days} />
+      <BoardSection boards={stats.boards} days={stats.days} />
 
-      <RefreshSection
-        refreshes={stats.refreshes}
-        boards={stats.refresh_boards}
-        storage={stats.storage}
-        names={names}
-        days={stats.days}
-      />
+      <RefreshSection refreshes={stats.refreshes} boards={stats.companies.length} storage={stats.storage} days={stats.days} />
 
       <SectionCard collapsible
         title="Claude calls by step"
@@ -273,6 +250,13 @@ async function AdminData() {
         description={`${marked.length} jobs marked good or bad by all users.${marked.length < MIN_LABELED ? ` These numbers need about ${MIN_LABELED} before they mean much.` : ""}`}
       >
         <AccuracyTable rows={accuracyByCut(stats.labels)} />
+      </SectionCard>
+
+      <SectionCard collapsible
+        title="Shared Anthropic key"
+        description="Runs use a user's own key when they saved one before, otherwise this key, otherwise the ANTHROPIC_API_KEY setting. Anthropic checks a new key before it's saved."
+      >
+        <KeyForm hint={key.hint} fallback={key.fallback} />
       </SectionCard>
     </div>
   );
@@ -425,7 +409,7 @@ function PageSpeedSection({ vitals, days }: { vitals: AdminStats["vitals"]; days
   return (
     <SectionCard collapsible
       title="Page speed"
-      description={`What signed-in users' browsers measured over the last ${days} days. Data shown is from opening a page, by a click or a full load, until its data is on screen; the other columns only cover full loads in most browsers. 75% means three in four were at least this fast. Green is good, amber needs work and red is poor.`}
+      description={`What signed-in users' browsers measured over the last ${days} days. Data shown is from opening a page, by a click or a full load, until its data is on screen; the other columns only cover full loads in most browsers. 75% means three in four were at least this fast. Green is good, yellow needs work and red is poor.`}
     >
       {pages.length === 0 ? (
         <p className="text-sm text-muted-foreground">No measurements yet. Browsers report them from now on.</p>
@@ -461,7 +445,7 @@ function PageSpeedSection({ vitals, days }: { vitals: AdminStats["vitals"]; days
                             ? "text-emerald-600 dark:text-emerald-400"
                             : value > poor
                               ? "text-destructive"
-                              : "text-amber-600 dark:text-amber-400"),
+                              : "text-yellow-600 dark:text-yellow-400"),
                       )}
                     >
                       {value === undefined ? "–" : column.metric === "CLS" ? value.toFixed(2) : seconds(Math.round(value))}
@@ -477,13 +461,13 @@ function PageSpeedSection({ vitals, days }: { vitals: AdminStats["vitals"]; days
   );
 }
 
-/** Where the "Checking companies" step spends its time: totals per job system and the slowest boards. */
-function BoardSection({ boards, names, days }: { boards: AdminStats["boards"]; names: Map<string, string>; days: number }) {
+/** Where the "Checking companies" step spends its time, per job system. */
+function BoardSection({ boards, days }: { boards: AdminStats["boards"]; days: number }) {
 
   return (
     <SectionCard collapsible
       title="Board fetches"
-      description={`Every board searches checked over the last ${days} days, timed from the first request to the last page, retry included. Boards refreshed within the last 25 hours are read from saved jobs and count as from cache.`}
+      description={`Every board searches checked over the last ${days} days, timed from the first request to the last page, retry included. Boards refreshed within the last 25 hours are read from saved jobs and count as from cache; median and slowest leave those out.`}
     >
       {boards.sources.length === 0 ? (
         <p className="text-sm text-muted-foreground">No board fetches recorded yet. Searches across all companies record them from now on.</p>
@@ -509,36 +493,9 @@ function BoardSection({ boards, names, days }: { boards: AdminStats["boards"]; n
                   <TableCell className="text-right tabular-nums">{row.fetches}</TableCell>
                   <TableCell className="text-right tabular-nums">{row.cached}</TableCell>
                   <TableCell className={cn("text-right tabular-nums", row.failures > 0 && "text-destructive")}>{row.failures}</TableCell>
-                  <TableCell className="text-right tabular-nums">{seconds(row.median_ms)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{seconds(row.max_ms)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.median_ms === null ? "–" : seconds(row.median_ms)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{row.max_ms === null ? "–" : seconds(row.max_ms)}</TableCell>
                   <TableCell className="text-right tabular-nums">{seconds(row.total_ms)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          <p className="mt-6 text-sm font-medium">Slowest boards</p>
-          <Table className="mt-1">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Company</TableHead>
-                <TableHead>Board</TableHead>
-                <TableHead className="text-right">Median</TableHead>
-                <TableHead className="text-right">Slowest</TableHead>
-                <TableHead className="text-right">Jobs</TableHead>
-                <TableHead className="text-right">Failed</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {boards.slowest.map((row) => (
-                <TableRow key={row.board}>
-                  <TableCell>{names.get(row.board) ?? "–"}</TableCell>
-                  <TableCell className="max-w-56 truncate font-mono text-xs" title={row.board}>
-                    {row.board}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">{seconds(row.median_ms)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{seconds(row.max_ms)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{row.jobs.toLocaleString()}</TableCell>
-                  <TableCell className={cn("text-right tabular-nums", row.failures > 0 && "text-destructive")}>{row.failures}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -562,132 +519,103 @@ function size(bytes: number): string {
   return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
 }
 
-/**
- * The daily board refreshes, newest first, and every board's refresh fetch times with the jobs it has saved and the
- * database space they take; slowest boards first.
- */
+/** The daily board refreshes: how long each took as a chart, oldest first, with every run in a table under it. */
 function RefreshSection({
   refreshes,
   boards,
   storage,
-  names,
   days,
 }: {
   refreshes: AdminStats["refreshes"];
-  boards: AdminStats["refresh_boards"];
+  boards: number;
   storage: AdminStats["storage"];
-  names: Map<string, string>;
   days: number;
 }) {
   const { bytes: totalBytes, unembedded } = storage;
-  const worth = boards.filter((row, rank) => rank < SLOWEST_BOARDS || row.failures > 0);
+  const ran = refreshes.filter((row) => !row.stopped_at);
+  const timed = ran
+    .filter((row) => row.finished_at)
+    .map((row) => ({ ...row, ms: new Date(row.finished_at!).getTime() - new Date(row.started_at).getTime() }))
+    .reverse();
+  const longest = Math.max(1, ...timed.map((row) => row.ms));
 
   return (
     <SectionCard collapsible
       title="Board refresh"
       description={`Every directory board is fetched once a day and its jobs saved, so searches read them from the database. Refreshes over the last ${days} days.`}
     >
-      {refreshes.length === 0 ? (
+      {ran.length === 0 ? (
         <p className="text-sm text-muted-foreground">No refreshes yet. The first one runs at 10:17 UTC.</p>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Started</TableHead>
-              <TableHead className="text-right">Took</TableHead>
-              <TableHead className="text-right">Boards</TableHead>
-              <TableHead className="text-right">Jobs</TableHead>
-              <TableHead className="text-right">New</TableHead>
-              <TableHead className="text-right">Closed</TableHead>
-              <TableHead className="text-right">Embedded</TableHead>
-              <TableHead className="text-right">Deleted</TableHead>
-              <TableHead className="text-right">Failed</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {refreshes.map((row) => (
-              <TableRow key={row.id}>
-                <TableCell className="tabular-nums">{utcTime(row.started_at)}</TableCell>
-                <TableCell className="text-right tabular-nums">
-                  {row.finished_at
-                    ? seconds(new Date(row.finished_at).getTime() - new Date(row.started_at).getTime())
-                    : row.stopped_at
-                      ? "Stopped"
-                      : "Unfinished"}
-                </TableCell>
-                <TableCell className="text-right tabular-nums">{row.boards}</TableCell>
-                <TableCell className="text-right tabular-nums">{row.jobs.toLocaleString()}</TableCell>
-                <TableCell className="text-right tabular-nums">{row.new_jobs.toLocaleString()}</TableCell>
-                <TableCell className="text-right tabular-nums">{row.closed_jobs.toLocaleString()}</TableCell>
-                <TableCell className="text-right tabular-nums">{row.embedded_jobs.toLocaleString()}</TableCell>
-                <TableCell className="text-right tabular-nums">{row.deleted_jobs.toLocaleString()}</TableCell>
-                <TableCell className={cn("text-right tabular-nums", row.failures > 0 && "text-destructive")}>{row.failures}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
-      {boards.length > 0 && (
         <>
-          <p className="mt-6 text-sm font-medium">
-            {boards.length} boards, {size(totalBytes)} saved in all
-          </p>
-          {unembedded > 0 && (
-            <p className="text-xs text-muted-foreground">
-              {unembedded.toLocaleString()} open {unembedded === 1 ? "job has" : "jobs have"} no embedding yet, so searches rank{" "}
-              {unembedded === 1 ? "it" : "them"} after the rest. The next refresh embeds {unembedded === 1 ? "it" : "them"}.
-            </p>
+          <p className="text-sm font-medium">Time per refresh</p>
+          <div className="mt-3 flex h-32 items-end gap-1.5" role="img" aria-label={`Time each refresh took over the last ${days} days`}>
+            {timed.map((row) => (
+              <div
+                key={row.id}
+                className="flex h-full flex-1 flex-col justify-end"
+                title={`${utcTime(row.started_at)}: ${seconds(row.ms)}, ${row.failures} ${row.failures === 1 ? "board" : "boards"} failed`}
+              >
+                <div className="rounded-t-sm bg-primary" style={{ height: `${(row.ms / longest) * 100}%` }} />
+              </div>
+            ))}
+          </div>
+          {timed.length > 0 && (
+            <div className="mt-1 flex justify-between text-xs text-muted-foreground">
+              <span>{timed[0].started_at.slice(0, 10)}</span>
+              <span>{timed.at(-1)!.started_at.slice(0, 10)}</span>
+            </div>
           )}
-          <p className="mt-4 text-sm font-medium">Slowest and failing boards</p>
-          <RefreshBoardTable boards={worth} names={names} />
-          {boards.length > worth.length && (
-            <details className="mt-4">
-              <summary className="cursor-pointer text-sm font-medium">All boards ({boards.length})</summary>
-              <RefreshBoardTable boards={boards} names={names} />
-            </details>
-          )}
-          <p className="mt-3 text-xs text-muted-foreground">
-            Fetching boards costs nothing per call. What they use is database space, against Supabase&apos;s 500 MB free plan.
-          </p>
+          <details className="mt-4">
+            <summary className="cursor-pointer text-sm font-medium">All refreshes ({ran.length})</summary>
+            <Table className="mt-1">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Started</TableHead>
+                  <TableHead className="text-right">Took</TableHead>
+                  <TableHead className="text-right">Boards</TableHead>
+                  <TableHead className="text-right">Jobs</TableHead>
+                  <TableHead className="text-right">New</TableHead>
+                  <TableHead className="text-right">Closed</TableHead>
+                  <TableHead className="text-right">Embedded</TableHead>
+                  <TableHead className="text-right">Deleted</TableHead>
+                  <TableHead className="text-right">Failed</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {ran.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="tabular-nums">{utcTime(row.started_at)}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.finished_at ? seconds(new Date(row.finished_at).getTime() - new Date(row.started_at).getTime()) : "Unfinished"}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">{row.boards}</TableCell>
+                    <TableCell className="text-right tabular-nums">{row.jobs.toLocaleString()}</TableCell>
+                    <TableCell className="text-right tabular-nums">{row.new_jobs.toLocaleString()}</TableCell>
+                    <TableCell className="text-right tabular-nums">{row.closed_jobs.toLocaleString()}</TableCell>
+                    <TableCell className="text-right tabular-nums">{row.embedded_jobs.toLocaleString()}</TableCell>
+                    <TableCell className="text-right tabular-nums">{row.deleted_jobs.toLocaleString()}</TableCell>
+                    <TableCell className={cn("text-right tabular-nums", row.failures > 0 && "text-destructive")}>{row.failures}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </details>
         </>
       )}
+      <p className="mt-6 text-sm font-medium">
+        {boards} boards, {size(totalBytes)} saved in all
+      </p>
+      {unembedded > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {unembedded.toLocaleString()} open {unembedded === 1 ? "job has" : "jobs have"} no embedding yet, so searches rank{" "}
+          {unembedded === 1 ? "it" : "them"} after the rest. The next refresh embeds {unembedded === 1 ? "it" : "them"}.
+        </p>
+      )}
+      <p className="mt-3 text-xs text-muted-foreground">
+        Fetching boards costs nothing per call. What they use is database space, against Supabase&apos;s 500 MB free plan.
+      </p>
     </SectionCard>
-  );
-}
-
-const SLOWEST_BOARDS = 15;
-
-/** One row per board: fetch times, failures, jobs, embeddings and the space its saved jobs take. */
-function RefreshBoardTable({ boards, names }: { boards: AdminStats["refresh_boards"]; names: Map<string, string> }) {
-  return (
-    <Table className="mt-1">
-      <TableHeader>
-        <TableRow>
-          <TableHead>Company</TableHead>
-          <TableHead>Board</TableHead>
-          <TableHead className="text-right">Median</TableHead>
-          <TableHead className="text-right">Last</TableHead>
-          <TableHead className="text-right">Failed</TableHead>
-          <TableHead className="text-right">Open jobs</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {boards.map((row) => (
-          <TableRow key={row.board}>
-            <TableCell>{names.get(row.board) ?? "–"}</TableCell>
-            <TableCell className="max-w-56 truncate font-mono text-xs" title={row.board}>
-              {row.board}
-            </TableCell>
-            <TableCell className="text-right tabular-nums">{row.median_ms === null ? "–" : seconds(row.median_ms)}</TableCell>
-            <TableCell className={cn("text-right tabular-nums", row.last_outcome !== null && row.last_outcome !== "ok" && "text-destructive")}>
-              {row.last_ms === null ? "–" : row.last_outcome === "ok" ? seconds(row.last_ms) : row.last_outcome}
-            </TableCell>
-            <TableCell className={cn("text-right tabular-nums", row.failures > 0 && "text-destructive")}>{row.failures}</TableCell>
-            <TableCell className="text-right tabular-nums">{row.open_jobs.toLocaleString()}</TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
   );
 }
 

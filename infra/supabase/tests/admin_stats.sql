@@ -3,7 +3,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 set local search_path = public, extensions;
-select plan(32);
+select plan(30);
 
 insert into auth.users (id, email) values ('00000000-0000-0000-0000-0000000000a1', 'admin@example.com');
 select set_config('request.jwt.claims', '{"app_metadata":{"role":"admin"}}', true);
@@ -48,14 +48,17 @@ select is(
 );
 select is(admin_stats() -> 'vitals' -> 0 ->> 'page', 'Tracker', 'the most measured page comes first');
 
--- Board fetches by job system and the slowest boards.
+-- Board fetches by job system.
 delete from agent_runs;
 insert into agent_runs (user_id, kind, status, board_fetches) values (
   '00000000-0000-0000-0000-0000000000a1', 'search', 'done',
   '[{"board": "workday/acme", "source": "workday", "ms": 9000, "jobs": 1800, "outcome": "ok"},
     {"board": "workday/acme", "source": "workday", "ms": 11000, "jobs": 1850, "outcome": "ok"},
     {"board": "lever/beta", "source": "lever", "ms": 400, "jobs": 30, "outcome": "ok"},
-    {"board": "lever/gone", "source": "lever", "ms": 200, "jobs": 0, "outcome": "gone"}]'
+    {"board": "lever/gone", "source": "lever", "ms": 200, "jobs": 0, "outcome": "gone"},
+    {"board": "lever/saved", "source": "lever", "ms": 0, "jobs": 12, "outcome": "cached"},
+    {"board": "lever/kept", "source": "lever", "ms": 0, "jobs": 8, "outcome": "cached"},
+    {"board": "ashby/kept", "source": "ashby", "ms": 0, "jobs": 5, "outcome": "cached"}]'
 );
 
 select is(
@@ -64,47 +67,29 @@ select is(
   'the job system with the most fetch time comes first, with its fetches and most jobs'
 );
 select is(
-  (select jsonb_build_array(s -> 'fetches', s -> 'failures') from jsonb_array_elements(admin_stats() -> 'boards' -> 'sources') s where s ->> 'source' = 'lever'),
-  '[2, 1]'::jsonb,
-  'a fetch that found the board gone counts as failed'
+  (select jsonb_build_array(s -> 'fetches', s -> 'failures', s -> 'cached') from jsonb_array_elements(admin_stats() -> 'boards' -> 'sources') s where s ->> 'source' = 'lever'),
+  '[4, 1, 2]'::jsonb,
+  'a fetch that found the board gone counts as failed, and jobs read from the database as cached'
 );
 select is(
-  (select jsonb_agg(b ->> 'board') from jsonb_array_elements(admin_stats() -> 'boards' -> 'slowest') b),
-  '["workday/acme", "lever/beta", "lever/gone"]'::jsonb,
-  'boards are listed slowest first'
+  (select jsonb_build_array(s -> 'median_ms', s -> 'max_ms') from jsonb_array_elements(admin_stats() -> 'boards' -> 'sources') s where s ->> 'source' = 'lever'),
+  '[400, 400]'::jsonb,
+  'median and slowest leave out jobs read from the database'
 );
-select is((admin_stats() -> 'boards' -> 'slowest' -> 0 -> 'median_ms')::int, 11000, 'two fetches take the later one as the median');
+select is(
+  (select jsonb_build_array(s -> 'median_ms', s -> 'max_ms') from jsonb_array_elements(admin_stats() -> 'boards' -> 'sources') s where s ->> 'source' = 'ashby'),
+  '[null, null]'::jsonb,
+  'a job system read only from the database has no times'
+);
+select ok(not (admin_stats() -> 'boards' ? 'slowest'), 'boards are not listed one by one');
 
--- Refresh fetches joined with the directory.
+-- Refreshes.
 delete from board_refreshes;
-delete from companies;
 insert into board_refreshes (started_at, stopped_at, board_fetches) values
-  (now() - interval '1 hour', null, '[{"board": "ashby/acme", "ms": 300, "outcome": "ok"}, {"board": "lever/beta", "ms": 900, "outcome": "unreachable"}]'),
+  (now() - interval '1 hour', null, '[{"board": "ashby/acme", "ms": 300, "outcome": "ok"}]'),
   (now() - interval '2 hours', now(), '[{"board": "ashby/acme", "ms": 100, "outcome": "ok"}]');
-insert into companies (name, source, board, found_by, open_jobs) values
-  ('Acme', 'ashby', 'acme', 'lookup', 10),
-  ('New', 'greenhouse', 'new', 'lookup', 0);
 
-select is(
-  (select jsonb_agg(b ->> 'board') from jsonb_array_elements(admin_stats() -> 'refresh_boards') b),
-  '["lever/beta", "ashby/acme", "greenhouse/new"]'::jsonb,
-  'refresh boards are listed slowest first, unfetched ones last'
-);
-select is(
-  (select jsonb_build_array(b -> 'median_ms', b -> 'last_ms', b -> 'failures', b -> 'open_jobs') from jsonb_array_elements(admin_stats() -> 'refresh_boards') b where b ->> 'board' = 'ashby/acme'),
-  '[300, 300, 0, 10]'::jsonb,
-  'a board gives its median and latest fetch time, failures and open jobs'
-);
-select is(
-  (select jsonb_build_array(b -> 'failures', b -> 'open_jobs') from jsonb_array_elements(admin_stats() -> 'refresh_boards') b where b ->> 'board' = 'lever/beta'),
-  '[1, 0]'::jsonb,
-  'a fetched board missing from the directory has no open jobs'
-);
-select is(
-  (select jsonb_build_array(b -> 'median_ms', b -> 'open_jobs') from jsonb_array_elements(admin_stats() -> 'refresh_boards') b where b ->> 'board' = 'greenhouse/new'),
-  '[null, 0]'::jsonb,
-  'a directory board never fetched has no times'
-);
+select ok(not (admin_stats() ? 'refresh_boards'), 'refresh boards are not listed one by one');
 select is(
   (select jsonb_agg(r ->> 'stopped_at' is not null) from jsonb_array_elements(admin_stats() -> 'refreshes') r),
   '[false, true]'::jsonb,
