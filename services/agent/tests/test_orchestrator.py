@@ -1432,3 +1432,29 @@ def test_scoring_saves_only_the_fetched_descriptions_that_have_text():
     assert [posting_id for posting_id, _ in ready] == ["posting-1", "posting-2"]
     [rows] = service.inserted("postings")
     assert [(row["external_id"], row["description"]) for row in rows] == [("1", "Fetched description.")]
+
+
+def test_hacker_news_companies_come_from_the_board_their_post_links_to(monkeypatch: pytest.MonkeyPatch):
+    service = FakeRest(companies=[{"name": "Listed Co"}])
+    service.stored = [
+        {"id": "p-1", "company": "Return", "description": "Apply at https://jobs.polymer.co/return/41723."},
+        {"id": "p-2", "company": "Plain Co", "description": "Email jobs@plain.co or see https://plain.co/careers"},
+        {"id": "p-3", "company": "Listed Co", "description": "https://jobs.gem.com/listed"},
+    ]
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(orchestrator, "import_companies", lambda **kwargs: calls.append(kwargs))
+
+    orchestrator.add_hiring_thread_companies(service, None, SETTINGS, None)
+
+    [call] = calls
+    assert call["entries"] == ["Plain Co", "https://jobs.polymer.co/return/41723."]
+    assert call["origin"] == "hacker_news" and call["finder"] is orchestrator.find_company_with_jobs
+
+
+def test_a_name_lookup_that_finds_only_an_empty_board_finds_nothing(monkeypatch: pytest.MonkeyPatch):
+    boards = {"Empty Co": CompanyBoard("workable", "emptyco", "Empty Co", []), "Hiring Co": CompanyBoard("ashby", "hiringco", "Hiring Co", JOBS[:1])}
+    monkeypatch.setattr(orchestrator, "find_company", lambda name: boards[name])
+
+    assert orchestrator.find_company_with_jobs("Hiring Co").board == "hiringco"
+    with pytest.raises(CompanyNotFound):
+        orchestrator.find_company_with_jobs("Empty Co")

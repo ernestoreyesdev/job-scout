@@ -43,6 +43,8 @@ DISCOVERY_SEARCH_DAYS = 30
 DAILY_DISCOVERIES = 2
 # Boards from a company's web lookup checked before giving up.
 MAX_LOOKUP_BOARDS = 5
+# A link in a Hacker News post's text.
+LINK = re.compile(r"https?://[^\s)\]\"'<>]+")
 # Company kinds never searched, refreshed or saved.
 SKIPPED_KINDS = frozenset({"staffing"})
 # Jobs scored per company in a search across the directory.
@@ -1128,26 +1130,42 @@ def grow_directory(service: Rest, client: Any, settings: Settings, since: str | 
 def add_hiring_thread_companies(
     service: Rest, client: Any, settings: Settings, since: str | None
 ) -> ImportResult | None:
-    """Looks up by name the companies of Hacker News jobs saved since `since`, or all of them without it."""
-    params = {"select": "id,company", "source": "eq.hackernews", **({"created_at": f"gte.{since}"} if since else {})}
+    """
+    Adds the companies of Hacker News jobs saved since `since`, or all of them
+    without it: from the job board a company's post links to, else by name.
+    """
+    params = {"select": "id,company,description", "source": "eq.hackernews", **({"created_at": f"gte.{since}"} if since else {})}
     rows = service.select_all("postings", params)
-    return add_companies_by_name(service, client, settings, [row["company"] for row in rows], "hacker_news")
+    links: dict[str, str] = {}
+    for row in rows:
+        url = next((url for url in LINK.findall(row["description"] or "") if board_from_url(url)), None)
+        if url:
+            links.setdefault(" ".join(row["company"].lower().split()), url)
+    return add_companies_by_name(service, client, settings, [row["company"] for row in rows], "hacker_news", links)
 
 
 def add_companies_by_name(
-    service: Rest, client: Any, settings: Settings, names: list[str], origin: str
+    service: Rest, client: Any, settings: Settings, names: list[str], origin: str, links: dict[str, str] | None = None
 ) -> ImportResult | None:
     """
-    Adds the companies in `names` that no directory company is named, looked up
-    on every system's spellings and recorded as found by `origin`. None when there were none to look up.
+    Adds the companies in `names` that no directory company is named, recorded
+    as found by `origin`: from the job board URL `links` gives for the lowercased
+    name, else looked up on every system's spellings, where a board with no open
+    jobs counts as not found. None when there were none to look up.
     """
     listed = {" ".join(c["name"].lower().split()) for c in service.select("companies", {"select": "name"})}
     wanted = {" ".join(name.split()) for name in names if name and name.strip()}
-    entries = sorted(name for name in wanted if name.lower() not in listed)
+    entries = sorted((links or {}).get(name.lower(), name) for name in wanted if name.lower() not in listed)
     if not entries:
         return None
     return import_companies(
-        entries=entries, client=client, settings=settings, service=service, report=lambda _: None, origin=origin
+        entries=entries,
+        client=client,
+        settings=settings,
+        service=service,
+        report=lambda _: None,
+        finder=find_company_with_jobs,
+        origin=origin,
     )
 
 
@@ -1195,3 +1213,11 @@ def discover_for_recent_searches(
     if added:
         remove_duplicate_names(service)
     return added
+
+
+def find_company_with_jobs(company: str) -> CompanyBoard:
+    """The board find_company finds, counting one with no open jobs as not found."""
+    found = find_company(company)
+    if not found.postings:
+        raise CompanyNotFound(f"Couldn't find open jobs for {company}.")
+    return found
