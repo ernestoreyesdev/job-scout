@@ -28,7 +28,7 @@ from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, Posti
 from app.telemetry import CallLog, RecordingClient
 
 FIT = FitScore(
-    score=72,
+    score=90,
     summary="Solid match.",
     strengths=["Python"],
     gaps=["Kubernetes"],
@@ -250,7 +250,7 @@ def test_scores_and_saves_every_match():
     [stored] = service.called("save_postings")
     assert sorted(row["external_id"] for row in stored["jobs"]) == ["1", "2", "3", "4"]
     saved = user.inserted("applications")[0]
-    assert saved["fit_score"] == 72 and saved["gaps"] == ["Kubernetes"] and "status" not in saved
+    assert saved["fit_score"] == 90 and saved["gaps"] == ["Kubernetes"] and "status" not in saved
     assert saved["score_model"] == "claude-haiku-5-5" and len(saved["score_prompt_version"]) == 8
     assert (usage.input_tokens, usage.output_tokens) == (300, 60)
     assert progress[:3] == ["Gathering open jobs…", "Matching jobs to your search…", "Scoring jobs against your resume…"]

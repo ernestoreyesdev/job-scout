@@ -41,6 +41,9 @@ jobs:
       - name: Resisting planted instructions
         if: always()
         run: uv run python -m evals.injection.run
+      - name: Scoring the same job again
+        if: always()
+        run: uv run python -m evals.consistency.run
       - name: Report the result to Healthchecks.io
         if: always() && env.HEALTHCHECK_URL != ''
         continue-on-error: true

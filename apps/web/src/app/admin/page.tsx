@@ -625,6 +625,12 @@ function evalSummary(run: AdminStats["evals"][number]): string {
     cases?: number;
     resisted?: number;
     largest_shift?: number;
+    jobs?: number;
+    repeats?: number;
+    mean_spread?: number;
+    largest_spread?: number;
+    label_flips?: Record<string, number>;
+    steadied?: { mean_spread: number; label_flips: Record<string, number> };
   };
   if (metrics.skipped) return `Skipped: ${metrics.skipped}`;
   if (metrics.arms) {
@@ -637,6 +643,13 @@ function evalSummary(run: AdminStats["evals"][number]): string {
   }
   if (metrics.cases !== undefined) {
     return `${metrics.resisted} of ${metrics.cases} attacks resisted · largest score shift ${Math.round(metrics.largest_shift ?? 0)}`;
+  }
+  if (metrics.mean_spread !== undefined) {
+    const flips = (counts: Record<string, number> | undefined) =>
+      Object.entries(counts ?? {}).map(([cut, count]) => `${count} across ${cut}`).join(" · ");
+    const single = `${metrics.jobs} jobs × ${metrics.repeats} · spread ${metrics.mean_spread.toFixed(1)} on average, ${metrics.largest_spread} at most · ${flips(metrics.label_flips)}`;
+    if (!metrics.steadied) return single;
+    return `${single} · averaged near a cut: spread ${metrics.steadied.mean_spread.toFixed(1)} · ${flips(metrics.steadied.label_flips)}`;
   }
   return "–";
 }
@@ -789,7 +802,9 @@ function ModelQualitySection({ stats }: { stats: AdminStats }) {
                       ? "Picking jobs to score"
                       : run.eval === "injection"
                         ? "Resisting planted instructions"
-                        : run.eval}</TableCell>
+                        : run.eval === "consistency"
+                          ? "Scoring the same job again"
+                          : run.eval}</TableCell>
                 <TableCell className="font-mono text-xs">{run.prompt_version ?? "–"}</TableCell>
                 <TableCell className="max-w-96 whitespace-normal text-xs">{evalSummary(run)}</TableCell>
                 <TableCell className="text-right tabular-nums">{run.cost === null ? "–" : DOLLARS.format(Number(run.cost))}</TableCell>

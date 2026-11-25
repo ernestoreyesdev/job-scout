@@ -16,6 +16,10 @@ from app.telemetry import ContextThreadPool, prompt_version
 logger = logging.getLogger("agent")
 
 SCORE_CONCURRENCY = 8
+# The Possible and Strong fit labels' lowest scores; a first score within NEAR_CUT of one is scored EXTRA_SCORES more times.
+SCORE_CUTS = (50, 70)
+NEAR_CUT = 10
+EXTRA_SCORES = 2
 
 
 class ScoringError(Exception):
@@ -82,25 +86,26 @@ def score_and_save(
 
     def score_one(posting_id: str, posting: Posting) -> None:
         fit = score_posting(client, model, effort, resume_text, posting, examples, lessons)
+        score = steady_score(fit.score, lambda: score_posting(client, model, effort, resume_text, posting, examples, lessons).score)
         user.insert(
             "applications",
             {
                 "user_id": user_id,
                 "posting_id": posting_id,
                 "resume_id": resume_id,
-                "fit_score": fit.score,
+                "fit_score": score,
                 "fit_summary": fit.summary,
                 "strengths": fit.strengths,
                 "gaps": fit.gaps,
                 "score_model": model,
                 "score_prompt_version": prompt_version(FIT_SYSTEM, FitScore),
-                **({"in_tracker": False} if min_score is not None and fit.score < min_score else {}),
+                **({"in_tracker": False} if min_score is not None and score < min_score else {}),
             },
             on_conflict="user_id,posting_id",
         )
         service.update("postings", {"id": f"eq.{posting_id}"}, posting_details(fit.details, posting))
         with lock:
-            scores[posting_id] = fit.score
+            scores[posting_id] = score
             done["scored"] += 1
             scored = done["scored"]
         report(f"Scoring jobs against your resume ({scored} of {len(todo)})…")
@@ -138,3 +143,11 @@ def posting_details(details: JobDetails, posting: Posting) -> dict[str, Any]:
     if posting.workplace_type is None and details.workplace_type is not None:
         columns["workplace_type"] = details.workplace_type
     return columns
+
+
+def steady_score(first: int, again: Callable[[], int]) -> int:
+    """The first score, or when it is near a cut, the rounded average of it and EXTRA_SCORES more from `again`."""
+    if all(abs(first - cut) > NEAR_CUT for cut in SCORE_CUTS):
+        return first
+    scores = [first, *(again() for _ in range(EXTRA_SCORES))]
+    return round(sum(scores) / len(scores))
