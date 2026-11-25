@@ -1,13 +1,7 @@
 import re
-import threading
-import time
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from urllib.parse import urlparse
-
-import httpx
 
 from app.sources.base import BoardNotFound, JobSource, Posting
 from app.sources.text import html_to_text, workplace_from_location
@@ -17,11 +11,6 @@ PAGE_SIZE = 20
 # Workday serves at most this many jobs per query; later offsets repeat the first page.
 MAX_JOBS = 2000
 PAGE_CONCURRENCY = 16
-# Workday requests out at once across every board, and the waits before retrying one Workday answered 429.
-MAX_REQUESTS = 8
-RETRY_WAITS = (2.0, 4.0, 8.0)
-MAX_RETRY_WAIT = 30.0
-_requests = threading.BoundedSemaphore(MAX_REQUESTS)
 BOARD = re.compile(r"^(?P<tenant>[a-z0-9-]+)\.(?P<server>wd\d+)/(?P<site>[a-z0-9_-]+)$")
 LOCALE = re.compile(r"^[a-z]{2}-[a-z]{2}$")
 DAYS_AGO = re.compile(r"(\d+)\+? Days? Ago")
@@ -75,6 +64,7 @@ class WorkdaySource(JobSource):
     board_hosts = (HOST,)
     not_found_statuses = frozenset({404, 422})
     max_jobs = MAX_JOBS
+    max_requests = 8
 
     def fetch(self, board: str, company: str) -> list[Posting]:
         tenant, server, site = _parts(board)
@@ -143,27 +133,3 @@ class WorkdaySource(JobSource):
     def careers_url(self, board: str) -> str:
         tenant, server, site = _parts(board)
         return f"https://{tenant}.{server}.{HOST}/{site}"
-
-    def _get_json(self, board: str, url: str, params: dict[str, Any] | None = None) -> Any:
-        return self._json(board, _limited(lambda: self._http.get(url, params=params)))
-
-    def _post_json(self, board: str, url: str, body: dict[str, Any]) -> Any:
-        return self._json(board, _limited(lambda: self._http.post(url, json=body)))
-
-
-def _limited(send: Callable[[], httpx.Response]) -> httpx.Response:
-    """Sends a request while at most MAX_REQUESTS are out, retrying after a wait when Workday answers 429."""
-    for wait in RETRY_WAITS:
-        with _requests:
-            res = send()
-        if res.status_code != 429:
-            return res
-        time.sleep(min(_retry_after(res) or wait, MAX_RETRY_WAIT))
-    with _requests:
-        return send()
-
-
-def _retry_after(res: httpx.Response) -> float | None:
-    """The seconds a 429 asks to wait, when it says in seconds."""
-    value = res.headers.get("Retry-After", "")
-    return float(value) if value.isdigit() else None

@@ -53,21 +53,28 @@ def find_company(company: str, sources: tuple[JobSource, ...] | None = None, cac
     A company's board and open postings, trying each system's spellings of the
     name. The board with the most open postings wins, since companies that
     switch systems often leave an old board behind with a few stale jobs. A
-    board with no postings still counts as finding the company. With cached,
-    recent fetches are reused.
+    board with no postings still counts as finding the company. A system that
+    fails is skipped; its error is raised only when no system found the
+    company. With cached, recent fetches are reused.
     """
     name = display_name(company)
     best: CompanyBoard | None = None
+    failure: Exception | None = None
     for source in sources if sources is not None else all_sources():
         for board in source.board_candidates(company):
             try:
                 postings = cached_fetch(source, board, name) if cached else source.fetch(board, name)
             except BoardNotFound:
                 continue
+            except Exception as error:
+                failure = error
+                continue
             if best is None or len(postings) > len(best.postings):
                 best = CompanyBoard(source.name, board, postings[0].company if postings else name, postings)
 
     if best is None:
+        if failure is not None:
+            raise failure
         raise CompanyNotFound(f"Couldn't find job listings for {company}.")
     return best
 

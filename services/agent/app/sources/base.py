@@ -1,13 +1,16 @@
 import hashlib
 import re
+import threading
+import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, ClassVar, Literal
 from urllib.parse import urlparse
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 SourceName = Literal[
     "greenhouse",
@@ -27,6 +30,9 @@ SourceName = Literal[
 WorkplaceType = Literal["onsite", "hybrid", "remote"]
 
 BOARD_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+# Waits before retrying a request a rate-limited system answered 429.
+RETRY_WAITS = (2.0, 4.0, 8.0)
+MAX_RETRY_WAIT = 30.0
 
 
 class Posting(BaseModel):
@@ -43,6 +49,11 @@ class Posting(BaseModel):
     posted_at: datetime | None
     workplace_type: WorkplaceType | None = None
     id: str | None = None
+
+    @field_validator("title", "company")
+    @classmethod
+    def trimmed(cls, value: str) -> str:
+        return value.strip()
 
     def row(self) -> dict[str, Any]:
         """The columns to save, with the description's hash; an empty description is left out so a saved one stays."""
@@ -88,7 +99,8 @@ class JobSource(ABC):
     are site pages. With subdomain_boards, the board is the subdomain of a board
     host instead, and reserved_paths are subdomains. not_found_statuses are the response codes meaning a board
     doesn't exist. max_jobs is the most one fetch returns, so a board at that
-    size may have more.
+    size may have more. With max_requests, at most that many requests to the
+    system are out at once and a 429 is retried after a wait.
     """
 
     name: ClassVar[SourceName]
@@ -98,9 +110,11 @@ class JobSource(ABC):
     subdomain_boards: ClassVar[bool] = False
     not_found_statuses: ClassVar[frozenset[int]] = frozenset({404})
     max_jobs: ClassVar[int | None] = None
+    max_requests: ClassVar[int | None] = None
 
     def __init__(self, http: httpx.Client | None = None):
         self._http = http or httpx.Client(timeout=30, headers={"User-Agent": "job-finder"})
+        self._requests = threading.BoundedSemaphore(self.max_requests) if self.max_requests else None
 
     @abstractmethod
     def fetch(self, board: str, company: str) -> list[Posting]:
@@ -137,15 +151,15 @@ class JobSource(ABC):
 
     def _get_json(self, board: str, url: str, params: dict[str, Any] | None = None) -> Any:
         """GET a board's JSON; a not-found status means the board doesn't exist on this system."""
-        return self._json(board, self._http.get(url, params=params))
+        return self._json(board, self._send(lambda: self._http.get(url, params=params)))
 
     def _post_json(self, board: str, url: str, body: dict[str, Any]) -> Any:
         """POST to a board's JSON endpoint; a not-found status means the board doesn't exist on this system."""
-        return self._json(board, self._http.post(url, json=body))
+        return self._json(board, self._send(lambda: self._http.post(url, json=body)))
 
     def _get_text(self, board: str, url: str, params: dict[str, Any] | None = None) -> str:
         """GET a board's page or feed as text; a not-found status means the board doesn't exist on this system."""
-        return self._checked(board, self._http.get(url, params=params)).text
+        return self._checked(board, self._send(lambda: self._http.get(url, params=params))).text
 
     def _json(self, board: str, res: httpx.Response) -> Any:
         return self._checked(board, res).json()
@@ -160,7 +174,26 @@ class JobSource(ABC):
         """The company's public job listing page on this system."""
         return f"https://{self.board_hosts[0]}/{board}"
 
+    def _send(self, send: Callable[[], httpx.Response]) -> httpx.Response:
+        """Sends a request, within max_requests and retrying 429s after a wait when the system sets it."""
+        if self._requests is None:
+            return send()
+        for wait in RETRY_WAITS:
+            with self._requests:
+                res = send()
+            if res.status_code != 429:
+                return res
+            time.sleep(min(_retry_after(res) or wait, MAX_RETRY_WAIT))
+        with self._requests:
+            return send()
+
 
 def description_hash(description: str) -> str:
     """The MD5 of a description, matching Postgres's md5() of the same text."""
     return hashlib.md5(description.encode()).hexdigest()
+
+
+def _retry_after(res: httpx.Response) -> float | None:
+    """The seconds a 429 asks to wait, when it says in seconds."""
+    value = res.headers.get("Retry-After", "")
+    return float(value) if value.isdigit() else None

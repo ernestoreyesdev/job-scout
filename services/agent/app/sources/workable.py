@@ -21,6 +21,7 @@ class WorkableSource(JobSource):
     label = "Workable"
     board_hosts = ("apply.workable.com",)
     reserved_paths = frozenset({"j", "api"})
+    max_requests = 4
 
     def fetch(self, board: str, company: str) -> list[Posting]:
         data = self._get_json(board, f"{API}/{board}", {"details": "true"})
