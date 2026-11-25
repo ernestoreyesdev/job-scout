@@ -221,6 +221,14 @@ export type WebVitalRow = {
   created_at: string;
 };
 
+/** A search the user marked to run each morning, emailing them its new strong matches; `rule` is the run's input. */
+export type SearchAlertRow = {
+  id: string;
+  user_id: string;
+  rule: Record<string, unknown>;
+  created_at: string;
+};
+
 export type HiddenCompanyRow = {
   user_id: string;
   company_id: string;
@@ -336,6 +344,12 @@ export type Database = {
       hidden_companies: {
         Row: HiddenCompanyRow;
         Insert: Partial<HiddenCompanyRow> & Pick<HiddenCompanyRow, "user_id" | "company_id">;
+        Update: never;
+        Relationships: [];
+      };
+      search_alerts: {
+        Row: SearchAlertRow;
+        Insert: Pick<SearchAlertRow, "user_id" | "rule">;
         Update: never;
         Relationships: [];
       };

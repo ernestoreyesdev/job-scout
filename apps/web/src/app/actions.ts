@@ -23,6 +23,7 @@ import {
 } from "@/lib/db";
 import { AgentError, callAgent } from "@/lib/agent";
 import { getSignedInSource } from "@/lib/repository";
+import { sameRule } from "@/lib/runs";
 
 export interface ActionResult {
   ok: boolean;
@@ -194,6 +195,18 @@ export async function setCompanyHidden(companyId: string, hidden: boolean): Prom
   return run("/companies", async () => {
     const { repository } = await getSignedInSource();
     await repository.setCompanyHidden(companyId, hidden);
+  });
+}
+
+/** Marks a past search to run each morning and email its new strong matches, or unmarks it. */
+export async function setSearchAlert(runId: string, on: boolean): Promise<ActionResult> {
+  return run("/tracker", async () => {
+    const { repository } = await getSignedInSource();
+    const search = await repository.getRun(runId);
+    if (!search || search.kind !== "search") throw new Error("Search not found.");
+    const alert = (await repository.listSearchAlerts()).find((row) => sameRule(row.rule, search.input));
+    if (on && !alert) await repository.addSearchAlert(search.input);
+    if (!on && alert) await repository.deleteSearchAlert(alert.id);
   });
 }
 

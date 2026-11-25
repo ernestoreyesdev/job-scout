@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     resend_api_key: str | None = None
     email_from: str = "Job Scout <onboarding@resend.dev>"
     admin_email: str | None = None
+    app_url: str = "https://job-role-scout-ai.vercel.app"
 
 
 @lru_cache

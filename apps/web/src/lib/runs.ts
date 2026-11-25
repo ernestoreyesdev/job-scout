@@ -34,3 +34,8 @@ function workplaces(types: WorkplaceTypeRow[]): string {
 export function rescoreScope(run: AgentRunRow): RescoreScope {
   return (run.input as { scope?: RescoreScope }).scope ?? "tracker";
 }
+
+/** Whether two search inputs, both read back from jsonb columns so their keys come in the same order, are one search. */
+export function sameRule(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}

@@ -14,7 +14,7 @@ import { SearchForm } from "@/components/search-form";
 import { PageReady } from "@/components/web-vitals";
 import { JOB_SORTS } from "@/lib/db";
 import { parseJobQuery } from "@/lib/job-query";
-import { rescoreScope } from "@/lib/runs";
+import { rescoreScope, sameRule } from "@/lib/runs";
 import { getPrimaryResume, getSignedInSource } from "@/lib/repository";
 import { cn } from "@/lib/utils";
 
@@ -49,10 +49,11 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
   const { repository } = await getSignedInSource();
   const params = await searchParams;
   const view = parseJobQuery(params).rated ? "rated" : "tracker";
-  const [resume, [latest], searches, companies, trackerTotal] = await Promise.all([
+  const [resume, [latest], searches, alerts, companies, trackerTotal] = await Promise.all([
     getPrimaryResume(),
     repository.listRuns(1),
     repository.listRuns(10, "search"),
+    repository.listSearchAlerts(),
     repository.listTrackedCompanies(view),
     repository.countTrackerJobs(),
   ]);
@@ -67,7 +68,10 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
     <>
       <PageReady />
       {banner && !(trackerTotal === 0 && banner.status === "done" && (banner.jobs_added ?? 0) > 0) && <RunStatus run={banner} />}
-      <RecentRuns runs={searches} />
+      <RecentRuns
+        runs={searches}
+        alerted={searches.filter((search) => alerts.some((alert) => sameRule(alert.rule, search.input))).map((search) => search.id)}
+      />
       <section className="mt-8">
         <nav aria-label="Tracker view" className="mb-4 flex gap-1 text-sm">
           {VIEWS.map((option) => (

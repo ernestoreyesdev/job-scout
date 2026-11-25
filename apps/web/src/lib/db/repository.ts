@@ -14,6 +14,7 @@ import type {
   PostingRow,
   RescoreScope,
   ResumeRow,
+  SearchAlertRow,
   ThemeRow,
 } from "./schema";
 import { GHOST_JOB_DAYS, LESSON_FADE_DAYS, REPOST_DAYS, SKIPPED_COMPANY_KINDS } from "./schema";
@@ -461,6 +462,26 @@ export class JobFinderRepository {
       .from("applications")
       .update({ ...edits, resume_id: null, gap_analysis: null, gap_analyzed_at: null })
       .eq("id", id);
+    if (error) throw error;
+  }
+
+  /** The searches the user marked to run each morning. */
+  async listSearchAlerts(): Promise<SearchAlertRow[]> {
+    const { data, error } = await this.client.from("search_alerts").select("*").order("created_at");
+    if (error) throw error;
+    return data;
+  }
+
+  /** Marks a search's rule to run each morning; marking the same rule twice keeps one. */
+  async addSearchAlert(rule: Record<string, unknown>): Promise<void> {
+    const { error } = await this.client
+      .from("search_alerts")
+      .upsert({ user_id: this.userId, rule }, { onConflict: "user_id,rule", ignoreDuplicates: true });
+    if (error) throw error;
+  }
+
+  async deleteSearchAlert(id: string): Promise<void> {
+    const { error } = await this.client.from("search_alerts").delete().eq("id", id);
     if (error) throw error;
   }
 }
