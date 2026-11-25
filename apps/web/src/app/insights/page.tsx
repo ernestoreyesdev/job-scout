@@ -24,6 +24,12 @@ const SOURCE_LABELS: Record<string, string> = {
   bamboohr: "BambooHR",
   icims: "iCIMS",
   jobvite: "Jobvite",
+  gem: "Gem",
+  rippling: "Rippling",
+  pinpoint: "Pinpoint",
+  teamtailor: "Teamtailor",
+  polymer: "Polymer",
+  oracle: "Oracle",
   hackernews: "Hacker News",
   manual: "Entered by hand",
 };

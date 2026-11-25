@@ -1,6 +1,6 @@
 # Job Sources
 
-The agent reads open jobs from applicant tracking systems (ATS): their public job board APIs, the JSON endpoints their own career pages call (Workday, BambooHR) and, for iCIMS and Jobvite, their HTML career pages. It also reads Hacker News "Who is hiring?" threads. None of them need credentials. This document covers how the source layer is built and what each source looks like, as verified against the live sites on the date each section gives (2026-10-29 unless stated).
+The agent reads open jobs from applicant tracking systems (ATS): their public job board APIs, the JSON endpoints their own career pages call (Workday, BambooHR, Oracle), a Teamtailor RSS feed and, for iCIMS and Jobvite, their HTML career pages. It also reads Hacker News "Who is hiring?" threads. None of them need credentials. This document covers how the source layer is built and what each source looks like, as verified against the live sites on the date each section gives (2026-10-29 unless stated).
 
 ## Architecture
 
@@ -277,6 +277,113 @@ Verified on 2026-11-02.
 | Job URL | `https://jobs.jobvite.com/{board}/job/{id}` |
 | Verified | Egnyte (28 jobs), NinjaOne (74), Optimizely (16) |
 
+### Gem
+
+Verified on 2026-11-25.
+
+| | |
+|---|---|
+| Endpoint | `GET https://api.gem.com/job_board/v0/{board}/job_posts/` |
+| Unknown board | 404 |
+| Pagination | None; one response holds every job |
+| Description | `content`: HTML |
+| Company name | Not provided |
+| Location | Each of `offices[].location.name`, then `location.name` |
+| Workplace type | `location_type`: `in_office` → onsite, `hybrid`, `remote` |
+| Posted | `first_published_at`, falling back to `created_at` |
+| Job URL | `absolute_url` |
+| Job page host | `jobs.gem.com` (board is the first path segment) |
+
+### Rippling
+
+Verified on 2026-11-25.
+
+| | |
+|---|---|
+| List | `GET https://api.rippling.com/platform/api/ats/v1/board/{board}/jobs` |
+| One job | `GET .../board/{board}/jobs/{uuid}`, used by `describe` |
+| Unknown board | 404 |
+| Pagination | None |
+| Description | Not in the list. The job's `description.company` then `description.role`, both HTML |
+| Company name | Not provided in the list |
+| Location | `workLocation.label` |
+| Workplace type | Not provided. Inferred from the location text |
+| Posted | Not in the list, so null |
+| Job URL | `url` |
+| Job page host | `ats.rippling.com`. The board is the first path segment, after an optional locale segment (`/en-ca/`), so `board_from_url` is overridden |
+
+### Pinpoint
+
+Verified on 2026-11-25.
+
+| | |
+|---|---|
+| Endpoint | `GET https://{board}.pinpointhq.com/postings.json` |
+| Unknown board | 404 |
+| Pagination | None |
+| Description | `description`, `key_responsibilities`, `skills_knowledge_expertise` and `benefits` (HTML), each after its `*_header` when one is set |
+| Company name | Not provided |
+| Location | `location.name` (e.g. "Remote - USA"), falling back to `location.city` and `location.province` |
+| Workplace type | `workplace_type`: `remote`, `hybrid`, `onsite`; otherwise inferred from the location |
+| Posted | Not provided, so null |
+| Job URL | `url` |
+| Job page host | `{board}.pinpointhq.com`: the board is the **subdomain** |
+
+### Teamtailor
+
+Verified on 2026-11-25. **An RSS feed**, read as XML.
+
+| | |
+|---|---|
+| Endpoint | `GET https://{board}.teamtailor.com/jobs.rss` |
+| Unknown board | 404 |
+| Pagination | None |
+| Description | `<description>`: entity-escaped HTML |
+| Company name | The channel's `<title>` |
+| Location | Each `<tt:location>`'s `<tt:name>` (namespace `https://teamtailor.com/locations`) |
+| Workplace type | `<remoteStatus>`: `fully` → remote, `hybrid`; anything else null |
+| Posted | `<pubDate>` (RFC 822) |
+| Job ID, URL | `<guid>`, `<link>` |
+| Job page host | `{board}.teamtailor.com`: the board is the **subdomain**. Companies on their own careers domain can't be found |
+
+### Polymer
+
+Verified on 2026-11-25.
+
+| | |
+|---|---|
+| List | `GET https://api.polymer.co/v1/hire/organizations/{board}/jobs?page={n}` |
+| One job | `GET .../organizations/{board}/jobs/{id}`, used by `describe` |
+| Unknown board | **422** |
+| Pagination | `page`, from 1, until `meta.is_last` |
+| Description | Not in the list. The job's `description`: HTML |
+| Company name | `organization_name` |
+| Location | `display_location` (e.g. "Amsterdam, NL") |
+| Workplace type | `remoteness_pretty`: `Remote`, `Hybrid`, `On-site` |
+| Posted | `published_at`, falling back to `created_at` |
+| Job URL | `job_post_url` |
+| Job page host | `jobs.polymer.co` (board is the first path segment) |
+
+### Oracle Recruiting Cloud
+
+Verified on 2026-11-25 against JPMorganChase (6,784 open jobs). **Not a published API**: the JSON endpoint Oracle's own career pages call.
+
+| | |
+|---|---|
+| Board | `{tenant}.fa/{site}` or `{tenant}.fa.{region}/{site}`: the host before `.oraclecloud.com` and the site number from the page URL, lowercased (e.g. `jpmc.fa/cx_1001`). Site numbers are case-insensitive |
+| List | `GET https://{host}/hcmRestApi/resources/latest/recruitingCEJobRequisitions?onlyData=true&expand=requisitionList&finder=findReqs;siteNumber={SITE},limit=200,offset={n},sortBy=POSTING_DATES_DESC` |
+| One job | `GET .../recruitingCEJobRequisitionDetails?onlyData=true&expand=all&finder=ById;Id="{id}",siteNumber={SITE}`, used by `describe` |
+| Unknown board | An unknown site number answers with the tenant's **default site**, and an unknown tenant doesn't resolve. Boards only come from job links, so neither is checked |
+| Pagination | `limit` up to 200 and `offset`; `items[0].TotalJobsCount` sets how many pages. Read newest first, up to 2,000 jobs |
+| Rate limit | `max_requests = 8`, with 429 retries |
+| Description | Not in the list. `ExternalDescriptionStr`, `ExternalResponsibilitiesStr`, `ExternalQualificationsStr`, all HTML |
+| Company name | Not provided |
+| Location | `PrimaryLocation` |
+| Workplace type | `WorkplaceType` is usually empty; inferred from it or the location |
+| Posted | `PostedDate` (a date) |
+| Job URL | `https://{host}/hcmUI/CandidateExperience/en/sites/{SITE}/job/{id}` |
+| Name lookups | Board names can't be guessed from a company name, so `board_candidates` returns none |
+
 ## Hacker News "Who is hiring?"
 
 Not a `JobSource`: one monthly thread holds posts from hundreds of companies, so it doesn't fit a per-company board. Verified on 2026-11-02.
@@ -294,3 +401,6 @@ Not a `JobSource`: one monthly thread holds posts from hundreds of companies, so
 | System | Status |
 |--------|--------|
 | IBM Kenexa BrassRing | Used by Publix. No public listing endpoint found; only reachable through an aggregator |
+| JazzHR (`applytojob.com`) | 2026-11-25: only an HTML list page; no JSON endpoint found |
+| Dover (`app.dover.com`) | 2026-11-25: no public listing endpoint found |
+| Y Combinator Work at a Startup | 2026-11-25: answers a plain request with 406 |

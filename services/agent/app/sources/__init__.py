@@ -11,13 +11,19 @@ from functools import cache
 from app.sources.ashby import AshbySource
 from app.sources.bamboohr import BambooHRSource
 from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, JobSource, Posting, SourceName
+from app.sources.gem import GemSource
 from app.sources.greenhouse import GreenhouseSource
 from app.sources.icims import ICIMSSource
 from app.sources.jobvite import JobviteSource
 from app.sources.lever import LeverSource
+from app.sources.oracle import OracleSource
 from app.sources.personio import PersonioSource
+from app.sources.pinpoint import PinpointSource
+from app.sources.polymer import PolymerSource
 from app.sources.recruitee import RecruiteeSource
+from app.sources.rippling import RipplingSource
 from app.sources.smartrecruiters import SmartRecruitersSource
+from app.sources.teamtailor import TeamtailorSource
 from app.sources.workable import WorkableSource
 from app.sources.workday import WorkdaySource
 
@@ -39,6 +45,12 @@ SOURCES: tuple[type[JobSource], ...] = (
     BambooHRSource,
     ICIMSSource,
     JobviteSource,
+    GemSource,
+    RipplingSource,
+    PinpointSource,
+    TeamtailorSource,
+    PolymerSource,
+    OracleSource,
 )
 
 

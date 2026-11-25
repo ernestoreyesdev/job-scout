@@ -15,6 +15,12 @@ export type JobSourceRow =
   | "bamboohr"
   | "icims"
   | "jobvite"
+  | "gem"
+  | "rippling"
+  | "pinpoint"
+  | "teamtailor"
+  | "polymer"
+  | "oracle"
   | "hackernews"
   | "manual";
 

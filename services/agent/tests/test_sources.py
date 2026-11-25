@@ -157,6 +157,20 @@ def test_board_from_url_covers_every_system():
     assert board_from_url("https://hubstaff.bamboohr.com/careers/21") == ("bamboohr", "hubstaff")
     assert board_from_url("https://careers-gdms.icims.com/jobs/76097/role/job") == ("icims", "careers-gdms")
     assert board_from_url("https://jobs.jobvite.com/egnyte/job/opPUAfws") == ("jobvite", "egnyte")
+    assert board_from_url("https://jobs.gem.com/silkline/am9icG9zdDrLws") == ("gem", "silkline")
+    assert board_from_url("https://ats.rippling.com/etc/jobs/3300a2a6") == ("rippling", "etc")
+    assert board_from_url("https://ats.rippling.com/en-ca/flyover-las-vegas/jobs/2a13ee") == ("rippling", "flyover-las-vegas")
+    assert board_from_url("https://prophetexchange.pinpointhq.com/en/postings/5d226f78") == ("pinpoint", "prophetexchange")
+    assert board_from_url("https://axmed.teamtailor.com/jobs/8175859-ai-engineer") == ("teamtailor", "axmed")
+    assert board_from_url("https://jobs.polymer.co/return/41723") == ("polymer", "return")
+    assert board_from_url("https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210792038") == (
+        "oracle",
+        "jpmc.fa/cx_1001",
+    )
+    assert board_from_url("https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/requisitions") == (
+        "oracle",
+        "eeho.fa.us2/cx_1",
+    )
 
 
 def test_board_from_url_skips_site_pages_and_other_hosts():
@@ -165,6 +179,8 @@ def test_board_from_url_skips_site_pages_and_other_hosts():
     assert board_from_url("https://www.recruitee.com/pricing") is None
     assert board_from_url("https://example.com/acme") is None
     assert board_from_url("https://jobs.lever.co/") is None
+    assert board_from_url("https://www.teamtailor.com/en/pricing") is None
+    assert board_from_url("https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/") is None
 
 
 def test_board_hosts_lists_every_system():
@@ -180,6 +196,12 @@ def test_board_hosts_lists_every_system():
         "bamboohr.com",
         "icims.com",
         "jobs.jobvite.com",
+        "jobs.gem.com",
+        "ats.rippling.com",
+        "pinpointhq.com",
+        "teamtailor.com",
+        "jobs.polymer.co",
+        "oraclecloud.com",
     }
 
 
@@ -196,6 +218,12 @@ def test_careers_urls_for_every_system():
     assert careers_url("bamboohr", "hubstaff") == "https://hubstaff.bamboohr.com/careers"
     assert careers_url("icims", "careers-gdms") == "https://careers-gdms.icims.com/jobs/search?ss=1"
     assert careers_url("jobvite", "egnyte") == "https://jobs.jobvite.com/egnyte/jobs"
+    assert careers_url("gem", "silkline") == "https://jobs.gem.com/silkline"
+    assert careers_url("rippling", "etc") == "https://ats.rippling.com/etc/jobs"
+    assert careers_url("pinpoint", "prophetexchange") == "https://prophetexchange.pinpointhq.com/"
+    assert careers_url("teamtailor", "axmed") == "https://axmed.teamtailor.com/jobs"
+    assert careers_url("polymer", "return") == "https://jobs.polymer.co/return"
+    assert careers_url("oracle", "jpmc.fa/cx_1001") == "https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001"
     assert careers_url("workday", "nvidia.wd5/nvidiaexternalcareersite") == (
         "https://nvidia.wd5.myworkdayjobs.com/nvidiaexternalcareersite"
     )
