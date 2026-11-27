@@ -484,6 +484,12 @@ export class JobFinderRepository {
     const { error } = await this.client.from("search_alerts").delete().eq("id", id);
     if (error) throw error;
   }
+
+  /** Turns the user's daily match emails on or off, creating their profile row if it doesn't exist yet. */
+  async saveDailyEmails(on: boolean): Promise<void> {
+    const { error } = await this.client.from("profiles").upsert({ user_id: this.userId, daily_emails: on });
+    if (error) throw error;
+  }
 }
 
 interface ViewFilter {

@@ -1,14 +1,13 @@
 import { ChevronDown } from "lucide-react";
 
-import { SearchAlertToggle } from "@/components/search-alert-toggle";
 import type { AgentRunRow } from "@/lib/db";
 import { describeRun } from "@/lib/runs";
 
 // Swedish formatting is ISO: "2026-11-13 21:37".
 const WHEN = new Intl.DateTimeFormat("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 
-/** Collapsible list of past searches with what each one did, each with a switch to run it daily; `alerted` are the ids of runs marked so. */
-export function RecentRuns({ runs, alerted }: { runs: AgentRunRow[]; alerted: string[] }) {
+/** Collapsible list of past searches with what each one did. */
+export function RecentRuns({ runs }: { runs: AgentRunRow[] }) {
   if (runs.length === 0) return null;
 
   return (
@@ -29,7 +28,6 @@ export function RecentRuns({ runs, alerted }: { runs: AgentRunRow[]; alerted: st
                 <span className={run.status === "failed" ? "block text-destructive" : "block text-muted-foreground"}>
                   {run.status === "failed" ? run.error : (run.progress ?? run.status)}
                 </span>
-                <SearchAlertToggle runId={run.id} on={alerted.includes(run.id)} />
               </span>
             </li>
           );

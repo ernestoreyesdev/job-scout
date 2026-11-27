@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { cache } from "react";
 
-import { JobFinderRepository, type ResumeRow, type ThemeRow } from "@/lib/db";
+import { JobFinderRepository, type ProfileRow, type ResumeRow, type ThemeRow } from "@/lib/db";
 
 import { createClient } from "./supabase/server";
 
@@ -46,15 +46,18 @@ export const currentUser = cache(async () => {
 });
 
 /** The signed-in user's saved theme for this request, or null when signed out or not saved. */
-export const currentTheme = cache(async (): Promise<ThemeRow | null> => {
-  const signedIn = await currentUser();
-  if (!signedIn) return null;
-  const { data } = await signedIn.supabase.from("profiles").select("theme").maybeSingle();
-  return data?.theme ?? null;
-});
+export const currentTheme = cache(async (): Promise<ThemeRow | null> => (await currentProfile())?.theme ?? null);
 
 /** The signed-in user's primary resume, read once per request. */
 export const getPrimaryResume = cache(async (): Promise<ResumeRow | null> => {
   const { repository } = await getSignedInSource();
   return repository.getPrimaryResume();
+});
+
+/** The signed-in user's theme and daily email switch, read once per request; null when signed out or not saved. */
+export const currentProfile = cache(async (): Promise<Pick<ProfileRow, "theme" | "daily_emails"> | null> => {
+  const signedIn = await currentUser();
+  if (!signedIn) return null;
+  const { data } = await signedIn.supabase.from("profiles").select("theme, daily_emails").maybeSingle();
+  return data;
 });

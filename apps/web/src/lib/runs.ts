@@ -9,19 +9,7 @@ export function describeRun(run: AgentRunRow): { title: string; detail: string }
     const entries = (run.input as { entries?: string[] }).entries ?? [];
     return { title: "Import companies", detail: ` (${entries.length} ${entries.length === 1 ? "entry" : "entries"})` };
   }
-  const input = run.input as Partial<SearchRuleInput>;
-  const parts = [
-    input.keywords?.join(", "),
-    input.workplace_types?.length ? workplaces(input.workplace_types) : null,
-    input.location,
-    input.exclude?.length ? `excluding ${input.exclude.join(", ")}` : null,
-    input.posted_within_days
-      ? `posted in the last ${input.posted_within_days === 1 ? "day" : `${input.posted_within_days} days`}`
-      : null,
-    input.limit !== undefined ? `up to ${input.limit} ${input.limit === 1 ? "job" : "jobs"}` : null,
-    input.score && input.min_score ? `score ${input.min_score}+` : null,
-  ].filter(Boolean);
-  return { title: input.company || "All companies", detail: parts.length ? ` · ${parts.join(" · ")}` : "" };
+  return describeSearch(run.input as Partial<SearchRuleInput>);
 }
 
 /** "Hybrid", "Hybrid or remote", "On-site, hybrid or remote". */
@@ -38,4 +26,20 @@ export function rescoreScope(run: AgentRunRow): RescoreScope {
 /** Whether two search inputs, both read back from jsonb columns so their keys come in the same order, are one search. */
 export function sameRule(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** One-line description of a search rule: the company or all companies, then its keywords and filters. */
+export function describeSearch(input: Partial<SearchRuleInput>): { title: string; detail: string } {
+  const parts = [
+    input.keywords?.join(", "),
+    input.workplace_types?.length ? workplaces(input.workplace_types) : null,
+    input.location,
+    input.exclude?.length ? `excluding ${input.exclude.join(", ")}` : null,
+    input.posted_within_days
+      ? `posted in the last ${input.posted_within_days === 1 ? "day" : `${input.posted_within_days} days`}`
+      : null,
+    input.limit !== undefined ? `up to ${input.limit} ${input.limit === 1 ? "job" : "jobs"}` : null,
+    input.score && input.min_score ? `score ${input.min_score}+` : null,
+  ].filter(Boolean);
+  return { title: input.company || "All companies", detail: parts.length ? ` · ${parts.join(" · ")}` : "" };
 }

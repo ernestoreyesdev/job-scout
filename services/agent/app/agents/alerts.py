@@ -47,13 +47,14 @@ def run_alerts(
 ) -> dict[str, int]:
     """
     Runs every marked search for its user and emails each user their new strong
-    matches. A user without a primary resume, or with a run already going, is
+    matches. A user with daily emails off or without a primary resume, or with a run already going, is
     skipped, and a user whose searches fail doesn't stop the others. Returns how
     many searches ran and how many emails went out.
     """
     alerts = service.select("search_alerts", {"select": "user_id,rule", "order": "created_at"})
+    switched_on = {row["user_id"] for row in service.select("profiles", {"select": "user_id", "daily_emails": "eq.true"})}
     rules: dict[str, list[dict[str, Any]]] = {}
-    for alert in alerts:
+    for alert in (alert for alert in alerts if alert["user_id"] in switched_on):
         rules.setdefault(alert["user_id"], []).append(alert["rule"])
 
     searches = emails = 0
@@ -94,12 +95,12 @@ def run_alert(
 ) -> bool:
     """
     Runs one marked search as a scored search keeping jobs at MIN_ALERT_SCORE or
-    more, recorded in agent_runs like one the user started. Returns whether it ran.
+    more, recorded in agent_runs under the rule as the user marked it. Returns whether it ran.
     """
     body = SearchRule.model_validate({**rule, "score": True, "min_score": MIN_ALERT_SCORE, "web_lookup": False})
     try:
         [run] = user.insert(
-            "agent_runs", {"user_id": user_id, "kind": "search", "input": body.model_dump(), "status": "running"}, select="id"
+            "agent_runs", {"user_id": user_id, "kind": "search", "input": rule, "status": "running"}, select="id"
         )
     except httpx.HTTPStatusError as error:
         if error.response.status_code == 409:
@@ -214,7 +215,7 @@ def matches_body(settings: Settings, jobs: list[dict[str, Any]]) -> str:
         "</tr></table>"
         "</td></tr>"
         '<tr><td style="padding:16px 4px 0;font-size:12px;line-height:1.5;color:#71717a">'
-        "Turn a daily search off under Recent searches on the Tracker.</td></tr>"
+        "Change your daily emails from the account menu on Job Scout.</td></tr>"
         "</table></div>"
     )
 

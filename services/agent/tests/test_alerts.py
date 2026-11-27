@@ -59,6 +59,7 @@ def test_marked_searches_run_as_their_user_with_a_minimum_of_70_and_email_the_ne
         {
             "search_alerts": [{"user_id": "u1", "rule": {"keywords": ["backend engineer"], "limit": 5, "min_score": 50}}],
             "resumes": [{"user_id": "u1", "id": "resume-1", "text": "Engineer."}],
+            "profiles": [{"user_id": "u1"}],
         }
     )
     user = FakeDb({"applications": [MATCH]})
@@ -70,7 +71,7 @@ def test_marked_searches_run_as_their_user_with_a_minimum_of_70_and_email_the_ne
     assert search["user"] is user and search["user_id"] == "u1" and search["resume_id"] == "resume-1"
     assert (search["rule"].score, search["rule"].min_score, search["rule"].web_lookup) == (True, 70, False)
     [(table, run)] = user.inserts
-    assert table == "agent_runs" and run["kind"] == "search" and run["input"]["min_score"] == 70
+    assert table == "agent_runs" and run["kind"] == "search" and run["input"] == {"keywords": ["backend engineer"], "limit": 5, "min_score": 50}
     assert user.updates[0][2]["status"] == "done"
     [(_, to, subject, _, key)] = sent
     assert to == "u1@example.com" and subject == "1 new job with a high matching score on Job Scout" and key.startswith("matches/u1/")
@@ -81,6 +82,7 @@ def test_no_email_goes_out_when_nothing_new_scored_70():
         {
             "search_alerts": [{"user_id": "u1", "rule": {"keywords": ["backend engineer"]}}],
             "resumes": [{"user_id": "u1", "id": "resume-1", "text": "Engineer."}],
+            "profiles": [{"user_id": "u1"}],
         }
     )
 
@@ -90,7 +92,9 @@ def test_no_email_goes_out_when_nothing_new_scored_70():
 
 
 def test_a_user_without_a_resume_is_skipped():
-    service = FakeDb({"search_alerts": [{"user_id": "u1", "rule": {"keywords": ["designer"]}}], "resumes": []})
+    service = FakeDb(
+        {"search_alerts": [{"user_id": "u1", "rule": {"keywords": ["designer"]}}], "resumes": [], "profiles": [{"user_id": "u1"}]}
+    )
 
     summary, searches, sent = daily(service, {})
 
@@ -111,6 +115,7 @@ def test_a_failed_search_is_recorded_and_the_email_still_covers_the_rest(monkeyp
         {
             "search_alerts": [{"user_id": "u1", "rule": {"keywords": ["a"]}}, {"user_id": "u1", "rule": {"keywords": ["b"]}}],
             "resumes": [{"user_id": "u1", "id": "resume-1", "text": "Engineer."}],
+            "profiles": [{"user_id": "u1"}],
         }
     )
     user = FakeDb({"applications": [MATCH]})
@@ -143,6 +148,7 @@ def test_only_the_best_10_matches_across_searches_stay_on_the_tracker_and_get_em
         {
             "search_alerts": [{"user_id": "u1", "rule": {"keywords": ["a"]}}, {"user_id": "u1", "rule": {"keywords": ["b"]}}],
             "resumes": [{"user_id": "u1", "id": "resume-1", "text": "Engineer."}],
+            "profiles": [{"user_id": "u1"}],
         }
     )
     matches = [{**MATCH, "id": f"app-{n}", "fit_score": 95 - n} for n in range(12)]
@@ -155,3 +161,17 @@ def test_only_the_best_10_matches_across_searches_stay_on_the_tracker_and_get_em
     assert subject == "10 new jobs with a high matching score on Job Scout" and ">86</div>" in body and ">85</div>" not in body
     [(_, filters, patch)] = [update for update in user.updates if update[0] == "applications"]
     assert filters == {"id": "in.(app-10,app-11)"} and patch == {"in_tracker": False}
+
+
+def test_a_user_with_daily_emails_off_gets_no_searches_or_email():
+    service = FakeDb(
+        {
+            "search_alerts": [{"user_id": "u1", "rule": {"keywords": ["backend engineer"]}}],
+            "resumes": [{"user_id": "u1", "id": "resume-1", "text": "Engineer."}],
+            "profiles": [],
+        }
+    )
+
+    summary, searches, sent = daily(service, {"token-u1": FakeDb({"applications": [MATCH]})})
+
+    assert summary == {"searches": 0, "emails": 0} and searches == [] and sent == []

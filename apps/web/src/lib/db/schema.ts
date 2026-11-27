@@ -74,6 +74,7 @@ export type ProfileRow = {
   user_id: string;
   anthropic_key_hint: string | null;
   theme: ThemeRow;
+  daily_emails: boolean;
   lessons_fingerprint: string | null;
   updated_at: string;
 };

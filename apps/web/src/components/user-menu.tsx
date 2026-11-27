@@ -1,11 +1,18 @@
 import { SignOut } from "@/components/sign-out";
-import { currentTheme, currentUser } from "@/lib/repository";
+import { currentProfile, currentUser } from "@/lib/repository";
 
-/** The account menu for the signed-in user, with their saved theme; empty when nobody is signed in. */
+/** The account menu for the signed-in user, with their saved theme and daily email switch; empty when nobody is signed in. */
 export async function UserMenu() {
   const user = (await currentUser())?.user;
   if (!user?.email) return null;
-  const theme = await currentTheme();
+  const profile = await currentProfile();
 
-  return <SignOut email={user.email} theme={theme ?? "light"} admin={user.app_metadata?.role === "admin"} />;
+  return (
+    <SignOut
+      email={user.email}
+      theme={profile?.theme ?? "light"}
+      dailyEmails={profile?.daily_emails ?? false}
+      admin={user.app_metadata?.role === "admin"}
+    />
+  );
 }

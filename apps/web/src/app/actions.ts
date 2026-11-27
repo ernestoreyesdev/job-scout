@@ -16,6 +16,7 @@ import {
   WORKPLACE_TYPES,
   type ApplicationStatusRow,
   type FitLabelRow,
+  type AgentRunRow,
   type RescoreScope,
   type SearchRuleInput,
   type ThemeRow,
@@ -23,7 +24,7 @@ import {
 } from "@/lib/db";
 import { AgentError, callAgent } from "@/lib/agent";
 import { getSignedInSource } from "@/lib/repository";
-import { sameRule } from "@/lib/runs";
+import { describeSearch, sameRule } from "@/lib/runs";
 
 export interface ActionResult {
   ok: boolean;
@@ -198,14 +199,21 @@ export async function setCompanyHidden(companyId: string, hidden: boolean): Prom
   });
 }
 
-/** Marks a past search to run each morning and email its new strong matches, or unmarks it. */
-export async function setSearchAlert(runId: string, on: boolean): Promise<ActionResult> {
-  return run("/tracker", async () => {
+/**
+ * Marks a search to run each morning and email its new strong matches, or unmarks it. A search is a past run, or a
+ * marked search too old to be among the recent runs, which can only be unmarked.
+ */
+export async function setSearchAlert(search: { runId: string | null; alertId: string | null }, on: boolean): Promise<ActionResult> {
+  return run([], async () => {
     const { repository } = await getSignedInSource();
-    const search = await repository.getRun(runId);
-    if (!search || search.kind !== "search") throw new Error("Search not found.");
-    const alert = (await repository.listSearchAlerts()).find((row) => sameRule(row.rule, search.input));
-    if (on && !alert) await repository.addSearchAlert(search.input);
+    if (!search.runId) {
+      if (!on && search.alertId) await repository.deleteSearchAlert(search.alertId);
+      return;
+    }
+    const past = await repository.getRun(search.runId);
+    if (!past || past.kind !== "search") throw new Error("Search not found.");
+    const alert = (await repository.listSearchAlerts()).find((row) => sameRule(row.rule, past.input));
+    if (on && !alert) await repository.addSearchAlert(past.input);
     if (!on && alert) await repository.deleteSearchAlert(alert.id);
   });
 }
@@ -343,4 +351,48 @@ export async function editJob(id: string, formData: FormData): Promise<ActionRes
       edited_description: text(formData.get("description")) || null,
     });
   });
+}
+
+/** Turns the signed-in user's daily match emails on or off; their marked searches stay marked either way. */
+export async function saveDailyEmails(on: boolean): Promise<ActionResult> {
+  return run([], async () => {
+    const { repository } = await getSignedInSource();
+    await repository.saveDailyEmails(on === true);
+  });
+}
+
+/** A search the daily email dialog lists, as `describeSearch` words it, and whether it runs each morning. */
+export interface DailySearch {
+  runId: string | null;
+  alertId: string | null;
+  title: string;
+  detail: string;
+  on: boolean;
+}
+
+export type DailySearchesResult = ActionResult & { searches?: DailySearch[] };
+
+const DAILY_SEARCH_CHOICES = 5;
+
+/** The user's last DAILY_SEARCH_CHOICES different searches, then any marked search older than those. */
+export async function listDailySearches(): Promise<DailySearchesResult> {
+  let searches: DailySearch[] = [];
+  const result = await run([], async () => {
+    const { repository } = await getSignedInSource();
+    const [runs, alerts] = await Promise.all([repository.listRuns(50, "search"), repository.listSearchAlerts()]);
+    const recent: AgentRunRow[] = [];
+    for (const past of runs) {
+      if (recent.length === DAILY_SEARCH_CHOICES) break;
+      if (!recent.some((seen) => sameRule(seen.input, past.input))) recent.push(past);
+    }
+    const older = alerts.filter((alert) => !recent.some((past) => sameRule(past.input, alert.rule)));
+    searches = [
+      ...recent.map((past) => {
+        const alert = alerts.find((row) => sameRule(row.rule, past.input));
+        return { runId: past.id, alertId: alert?.id ?? null, on: !!alert, ...describeSearch(past.input as Partial<SearchRuleInput>) };
+      }),
+      ...older.map((alert) => ({ runId: null, alertId: alert.id, on: true, ...describeSearch(alert.rule as Partial<SearchRuleInput>) })),
+    ];
+  });
+  return { ...result, searches };
 }

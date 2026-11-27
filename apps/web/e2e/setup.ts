@@ -1,7 +1,7 @@
 import { expect, test as setup } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 
-import { EMAIL, JOB_TITLE, RATED_TITLE } from "./test-user";
+import { EMAIL, JOB_TITLE, RATED_TITLE, SEARCH_KEYWORDS } from "./test-user";
 
 /** Local Supabase admin client; the service key comes from `supabase status`. */
 function admin() {
@@ -10,7 +10,7 @@ function admin() {
   });
 }
 
-setup("seed a user with two new jobs and sign in by email link", async ({ page }) => {
+setup("seed a user with two new jobs and a past search, and sign in by email link", async ({ page }) => {
   const db = admin();
   const { data: users, error: listError } = await db.auth.admin.listUsers();
   if (listError) throw listError;
@@ -48,6 +48,14 @@ setup("seed a user with two new jobs and sign in by email link", async ({ page }
       .insert({ user_id: user.id, posting_id: posting.id, status: "new", in_tracker: true });
     if (applicationError) throw applicationError;
   }
+  await db.from("search_alerts").delete().eq("user_id", user.id);
+  await db.from("agent_runs").delete().eq("user_id", user.id);
+  const { error: profileError } = await db.from("profiles").upsert({ user_id: user.id, daily_emails: false });
+  if (profileError) throw profileError;
+  const { error: runError } = await db
+    .from("agent_runs")
+    .insert({ user_id: user.id, kind: "search", input: { keywords: [SEARCH_KEYWORDS] }, status: "done", progress: "Added 1 job." });
+  if (runError) throw runError;
 
   const sent = Date.now();
   await page.goto("/login");

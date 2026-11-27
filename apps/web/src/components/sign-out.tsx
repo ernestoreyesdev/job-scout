@@ -1,10 +1,10 @@
 "use client";
 
-import { LogOut, Moon, Sun, Trash2 } from "lucide-react";
+import { ListChecks, LogOut, Mail, Moon, Sun, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { deleteAccount, saveTheme } from "@/app/actions";
+import { deleteAccount, listDailySearches, saveDailyEmails, saveTheme, type DailySearch } from "@/app/actions";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -14,9 +14,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { DailySearchesDialog } from "@/components/daily-searches-dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -33,12 +35,26 @@ import { applyTheme } from "@/lib/theme";
 
 /**
  * The account menu behind a round button with the email's first letter: the email, a light or dark theme saved to
- * the account, signing out and, for anyone but an admin, deleting the account once the email is typed to confirm.
+ * the account, the daily match emails switch and the dialog picking their searches, signing out and, for anyone but an admin, deleting the account once the email is typed to confirm.
  * Signing out or deleting sends the browser to the sign-in page.
  */
-export function SignOut({ email, theme, admin }: { email: string; theme: ThemeRow; admin: boolean }) {
+export function SignOut({
+  email,
+  theme,
+  dailyEmails,
+  admin,
+}: {
+  email: string;
+  theme: ThemeRow;
+  dailyEmails: boolean;
+  admin: boolean;
+}) {
   const router = useRouter();
   const [selected, setSelected] = useState(theme);
+  const [emailsOn, setEmailsOn] = useState(dailyEmails);
+  const [choosing, setChoosing] = useState(false);
+  const [searches, setSearches] = useState<DailySearch[] | null>(null);
+  const [searchesError, setSearchesError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [typed, setTyped] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +68,25 @@ export function SignOut({ email, theme, admin }: { email: string; theme: ThemeRo
     applyTheme(next);
     startSaving(async () => {
       await saveTheme(next);
+    });
+  }
+
+  function toggleEmails(on: boolean) {
+    setEmailsOn(on);
+    startSaving(async () => {
+      const result = await saveDailyEmails(on);
+      if (!result.ok) setEmailsOn(!on);
+    });
+  }
+
+  function chooseSearches() {
+    setChoosing(true);
+    setSearches(null);
+    setSearchesError(null);
+    startSaving(async () => {
+      const result = await listDailySearches();
+      if (result.ok) setSearches(result.searches ?? []);
+      else setSearchesError(result.error ?? "Could not load your searches.");
     });
   }
 
@@ -107,6 +142,16 @@ export function SignOut({ email, theme, admin }: { email: string; theme: ThemeRo
             </DropdownMenuRadioItem>
           </DropdownMenuRadioGroup>
           <DropdownMenuSeparator />
+          <DropdownMenuLabel>Emails</DropdownMenuLabel>
+          <DropdownMenuCheckboxItem checked={emailsOn} onCheckedChange={toggleEmails} onSelect={(event) => event.preventDefault()}>
+            <Mail />
+            Daily match emails
+          </DropdownMenuCheckboxItem>
+          <DropdownMenuItem onSelect={chooseSearches}>
+            <ListChecks />
+            Choose searches…
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={signOut} disabled={pending}>
             <LogOut />
             {pending ? "Signing out…" : "Sign out"}
@@ -119,6 +164,14 @@ export function SignOut({ email, theme, admin }: { email: string; theme: ThemeRo
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+      <DailySearchesDialog
+        open={choosing}
+        onOpenChange={setChoosing}
+        emailsOn={emailsOn}
+        searches={searches}
+        loadError={searchesError}
+        onChange={setSearches}
+      />
       <AlertDialog open={confirming} onOpenChange={(open) => !deleting && openConfirm(open)}>
         <AlertDialogContent>
           <AlertDialogHeader>
