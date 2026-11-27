@@ -13,6 +13,8 @@ import {
 /** Score cuts the accuracy table reports; DEFAULT_CUT is highlighted. */
 export const SCORE_CUTS = [POSSIBLE_FIT_SCORE, 60, STRONG_FIT_SCORE, 80] as const;
 export const DEFAULT_CUT = STRONG_FIT_SCORE;
+/** Each job's furthest funnel stage, worked out once however many groupings read it. */
+const FURTHEST = new WeakMap<FunnelJob, number>();
 /** Marked jobs needed before precision and recall mean much. */
 export const MIN_LABELED = 30;
 /** The model PRICES are for. */
@@ -68,7 +70,11 @@ export type SourceStats = {
 /** Scored jobs per source, with their average score, thumbs and how many moved past "new"; busiest first. */
 export function statsBySource(jobs: ScoredJob[]): SourceStats[] {
   const groups = new Map<JobSourceRow, ScoredJob[]>();
-  for (const job of jobs) groups.set(job.source, [...(groups.get(job.source) ?? []), job]);
+  for (const job of jobs) {
+    const group = groups.get(job.source) ?? [];
+    group.push(job);
+    groups.set(job.source, group);
+  }
   return [...groups.entries()]
     .map(([source, group]) => {
       const scores = group.map((job) => job.fit_score).filter((score): score is number => score !== null);
@@ -130,7 +136,12 @@ export type FunnelRow = {
 
 /** The furthest funnel stage a job reached, as an index into FUNNEL_STAGES, or -1 when it was never applied to. */
 function furthestStage(job: FunnelJob): number {
-  return Math.max(-1, ...job.statuses.map((status) => FUNNEL_STAGES.indexOf(status as (typeof FUNNEL_STAGES)[number])));
+  let stage = FURTHEST.get(job);
+  if (stage === undefined) {
+    stage = Math.max(-1, ...job.statuses.map((status) => FUNNEL_STAGES.indexOf(status as (typeof FUNNEL_STAGES)[number])));
+    FURTHEST.set(job, stage);
+  }
+  return stage;
 }
 
 /**
@@ -142,7 +153,9 @@ export function funnel(jobs: FunnelJob[], group?: (job: FunnelJob) => string): F
   const groups = new Map<string, FunnelJob[]>();
   for (const job of jobs) {
     const label = group ? group(job) : "All";
-    groups.set(label, [...(groups.get(label) ?? []), job]);
+    const members = groups.get(label) ?? [];
+    members.push(job);
+    groups.set(label, members);
   }
   return [...groups.entries()]
     .map(([label, members]) => {

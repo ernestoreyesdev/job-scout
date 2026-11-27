@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import { ResumeUpload } from "@/components/resume-upload";
 import { SectionCard } from "@/components/section-card";
 import { PageReady } from "@/components/web-vitals";
-import { getSignedInSource } from "@/lib/repository";
+import { getPrimaryResume } from "@/lib/repository";
 
 export const metadata: Metadata = { title: "Resume" };
 
@@ -27,8 +27,7 @@ export default function ResumePage() {
 }
 
 async function PrimaryResume() {
-  const { repository } = await getSignedInSource();
-  const resume = await repository.getPrimaryResume();
+  const resume = await getPrimaryResume();
   if (!resume) return <PageReady />;
 
   return (

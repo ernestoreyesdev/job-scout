@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { JobRow } from "@/components/job-row";
-import type { TrackedJob } from "@/lib/db";
+import { RATED_PATH, type TrackedJob } from "@/lib/db";
 import { ISO_DAY } from "@/lib/format";
 
 /**
@@ -31,7 +31,7 @@ export function JobsTable({
           <span>
             {moved.title} moved to {moved.to === "rated" ? "Rated" : "Jobs"}.
           </span>
-          <Link href={moved.to === "rated" ? "/tracker?view=rated" : "/jobs"} className="font-medium underline">
+          <Link href={moved.to === "rated" ? RATED_PATH : "/jobs"} className="font-medium underline">
             {moved.to === "rated" ? "Open Rated" : "Open Jobs"}
           </Link>
           <button type="button" onClick={() => setMoved(null)} className="ml-auto text-muted-foreground hover:text-foreground">

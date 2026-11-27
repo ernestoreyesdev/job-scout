@@ -1,23 +1,23 @@
 "use client";
 
 import { RefreshCw } from "lucide-react";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
 import { rescoreJobs } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import type { RescoreScope } from "@/lib/db";
+import { useAction } from "@/lib/use-action";
 
 /** Starts a run that scores this page's jobs scored against an older resume or not scored yet. */
 export function RescoreButton({ count, scope }: { count: number; scope: RescoreScope }) {
-  const [message, setMessage] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const [started, setStarted] = useState(false);
+  const { run, pending, error } = useAction();
 
   function rescore() {
-    startTransition(async () => {
-      const result = await rescoreJobs(scope);
-      setMessage(result.ok ? "Scoring started." : (result.error ?? "Could not start."));
-    });
+    run(() => rescoreJobs(scope), "Could not start.", (result) => setStarted(result.ok));
   }
+
+  const message = error ?? (started ? "Scoring started." : null);
 
   return (
     <div className="flex items-center gap-3 text-sm">

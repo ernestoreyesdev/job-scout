@@ -38,6 +38,7 @@ const DAYS_PER_MONTH = 30;
 /** Longest all-capitals word kept as a likely acronym. */
 const MAX_ACRONYM_LENGTH = 3;
 const LONG_CAPITALS = new RegExp(`[A-Z]{${MAX_ACRONYM_LENGTH + 1}}`);
+const MONEY_FORMATS = new Map<string, Intl.NumberFormat>();
 const SHORT_WORDS = new Set(["NEW", "THE", "AND", "FOR", "OF", "IN", "AT", "TO", "SAN", "LOS", "LAS", "ALL", "ANY"]);
 
 const CHIP = "inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-foreground/80";
@@ -76,6 +77,48 @@ export function JobRow({
   const facts = postingFacts(job.posting);
   const stack = job.posting.tech_stack;
   const posted = job.posting.posted_at && openDays !== null ? postedAgo(openDays) : null;
+  const chips = [
+    addedByUser && (
+      <span key="added" className={CHIP}>
+        Added by you
+      </span>
+    ),
+    closedOn && (
+      <span key="closed" className="inline-flex items-center rounded-full bg-destructive/10 px-2 py-0.5 text-xs text-destructive">
+        Closed since {closedOn}
+      </span>
+    ),
+    ...facts.map((fact) => (
+      <span key={fact} className={CHIP}>
+        {fact}
+      </span>
+    )),
+    ...stack.slice(0, STACK_CHIPS).map((tool) => (
+      <span key={tool} className={CHIP}>
+        {tool}
+      </span>
+    )),
+    stack.length > STACK_CHIPS && (
+      <span key="more" className="px-1 py-0.5 text-xs text-muted-foreground" title={stack.slice(STACK_CHIPS).join(", ")}>
+        +{stack.length - STACK_CHIPS}
+      </span>
+    ),
+    ...ghost.map((label) => (
+      <span key={label} className={WARNING_CHIP} title="A common sign of a ghost job">
+        {label}
+      </span>
+    )),
+    staleResume && (
+      <span key="stale" className={WARNING_CHIP}>
+        Scored with an older resume
+      </span>
+    ),
+    duplicateOf && (
+      <span key="duplicate" className={WARNING_CHIP} title="You track another job with the same company and title">
+        Possible duplicate, other copy {duplicateOf}
+      </span>
+    ),
+  ].filter(Boolean);
 
   function save(field: "status" | "notes" | "fitLabel", value: string) {
     const formData = new FormData();
@@ -118,42 +161,7 @@ export function JobRow({
             .filter(Boolean)
             .join(" · ")}
         </p>
-        {(facts.length > 0 || stack.length > 0 || ghost.length > 0 || staleResume || closedOn || addedByUser || duplicateOf) && (
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {addedByUser && <span className={CHIP}>Added by you</span>}
-            {closedOn && (
-              <span className="inline-flex items-center rounded-full bg-destructive/10 px-2 py-0.5 text-xs text-destructive">
-                Closed since {closedOn}
-              </span>
-            )}
-            {facts.map((fact) => (
-              <span key={fact} className={CHIP}>
-                {fact}
-              </span>
-            ))}
-            {stack.slice(0, STACK_CHIPS).map((tool) => (
-              <span key={tool} className={CHIP}>
-                {tool}
-              </span>
-            ))}
-            {stack.length > STACK_CHIPS && (
-              <span className="px-1 py-0.5 text-xs text-muted-foreground" title={stack.slice(STACK_CHIPS).join(", ")}>
-                +{stack.length - STACK_CHIPS}
-              </span>
-            )}
-            {ghost.map((label) => (
-              <span key={label} className={WARNING_CHIP} title="A common sign of a ghost job">
-                {label}
-              </span>
-            ))}
-            {staleResume && <span className={WARNING_CHIP}>Scored with an older resume</span>}
-            {duplicateOf && (
-              <span className={WARNING_CHIP} title="You track another job with the same company and title">
-                Possible duplicate, other copy {duplicateOf}
-              </span>
-            )}
-          </div>
-        )}
+        {chips.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{chips}</div>}
         {job.fit_summary && (
           <p className={cn("mt-2 text-sm text-muted-foreground", !expanded && "line-clamp-2")}>{job.fit_summary}</p>
         )}
@@ -181,22 +189,21 @@ export function JobRow({
             {timeline.length > 0 && <p className="text-xs text-muted-foreground">{timeline.join(" · ")}</p>}
             {(job.strengths.length > 0 || job.gaps.length > 0) && (
               <div className="grid gap-3 text-sm sm:grid-cols-2">
-                <div>
-                  <p className="font-medium">Strengths</p>
-                  <ul className="mt-1 list-disc space-y-1 pl-4 text-muted-foreground">
-                    {job.strengths.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div>
-                  <p className="font-medium">Gaps</p>
-                  <ul className="mt-1 list-disc space-y-1 pl-4 text-muted-foreground">
-                    {job.gaps.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                </div>
+                {(
+                  [
+                    ["Strengths", job.strengths],
+                    ["Gaps", job.gaps],
+                  ] as const
+                ).map(([title, items]) => (
+                  <div key={title}>
+                    <p className="font-medium">{title}</p>
+                    <ul className="mt-1 list-disc space-y-1 pl-4 text-muted-foreground">
+                      {items.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
               </div>
             )}
             {job.gap_analysis && (
@@ -274,12 +281,7 @@ export function JobRow({
 function postingFacts(posting: TrackedJob["posting"]): string[] {
   const facts: string[] = [];
   if (posting.salary_min !== null || posting.salary_max !== null) {
-    const money = new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: posting.salary_currency ?? "USD",
-      notation: "compact",
-      maximumFractionDigits: 1,
-    });
+    const money = moneyFormat(posting.salary_currency ?? "USD");
     const low = posting.salary_min ?? posting.salary_max;
     const high = posting.salary_max ?? posting.salary_min;
     const range = low === high ? money.format(low!) : `${money.format(low!)}–${money.format(high!)}`;
@@ -366,4 +368,14 @@ function tidyCase(text: string): string {
 /** A location without a trailing country name for the US, which every search is limited to. */
 function shortLocation(location: string): string {
   return location.replace(/,\s*(United States( of America)?|USA|US)$/i, "") || location;
+}
+
+/** A compact currency format per currency, built once. */
+function moneyFormat(currency: string): Intl.NumberFormat {
+  let format = MONEY_FORMATS.get(currency);
+  if (!format) {
+    format = new Intl.NumberFormat("en-US", { style: "currency", currency, notation: "compact", maximumFractionDigits: 1 });
+    MONEY_FORMATS.set(currency, format);
+  }
+  return format;
 }

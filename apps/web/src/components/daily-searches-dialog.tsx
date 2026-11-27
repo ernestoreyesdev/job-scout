@@ -79,7 +79,7 @@ export function DailySearchesDialog({
                   />
                   <span className="min-w-0">
                     <span className="font-medium">{search.title}</span>
-                    {search.detail && <span className="block text-muted-foreground">{search.detail.replace(/^ · /, "")}</span>}
+                    {search.detail && <span className="block text-muted-foreground">{search.detail}</span>}
                   </span>
                 </label>
               </li>

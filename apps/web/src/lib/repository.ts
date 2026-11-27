@@ -1,13 +1,13 @@
+import type { User } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 
-import { HOME_PATH, JobFinderRepository, type ProfileRow, type ResumeRow, type ThemeRow } from "@/lib/db";
+import { HOME_PATH, JobFinderRepository, type ProfileRow, type ResumeRow } from "@/lib/db";
 
 import { createClient } from "./supabase/server";
 
 export interface SignedInSource {
   repository: JobFinderRepository;
-  email?: string;
   admin: boolean;
 }
 
@@ -23,8 +23,7 @@ export const getSignedInSource = cache(async (): Promise<SignedInSource> => {
   const { supabase, user } = signedIn;
   return {
     repository: new JobFinderRepository(supabase, user.id),
-    email: user.email,
-    admin: user.app_metadata?.role === "admin",
+    admin: isAdmin(user),
   };
 });
 
@@ -45,9 +44,6 @@ export const currentUser = cache(async () => {
   return user ? { supabase, user } : null;
 });
 
-/** The signed-in user's saved theme for this request, or null when signed out or not saved. */
-export const currentTheme = cache(async (): Promise<ThemeRow | null> => (await currentProfile())?.theme ?? null);
-
 /** The signed-in user's primary resume, read once per request. */
 export const getPrimaryResume = cache(async (): Promise<ResumeRow | null> => {
   const { repository } = await getSignedInSource();
@@ -61,3 +57,8 @@ export const currentProfile = cache(async (): Promise<Pick<ProfileRow, "theme" |
   const { data } = await signedIn.supabase.from("profiles").select("theme, daily_emails").maybeSingle();
   return data;
 });
+
+/** Whether the user has the admin role, which only the service role can set. */
+export function isAdmin(user: User): boolean {
+  return user.app_metadata?.role === "admin";
+}

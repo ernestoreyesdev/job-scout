@@ -13,7 +13,7 @@ import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components
 import { PageReady } from "@/components/web-vitals";
 import { COMPANY_SORTS, type CompanySort } from "@/lib/db";
 import { ISO_DAY } from "@/lib/format";
-import { jobListHref } from "@/lib/job-query";
+import { first, jobListHref } from "@/lib/job-query";
 import { getSignedInSource } from "@/lib/repository";
 
 export const metadata: Metadata = { title: "Companies" };
@@ -38,11 +38,11 @@ export default function CompaniesPage({ searchParams }: PageProps<"/companies">)
 
 async function CompaniesData({ searchParams }: Pick<PageProps<"/companies">, "searchParams">) {
   const params = await searchParams;
-  const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value)?.trim() ?? "";
   const search = first(params.q).slice(0, MAX_SEARCH_LENGTH);
   const sortValue = first(params.sort);
   const sort: CompanySort = sortValue in COMPANY_SORTS ? (sortValue as CompanySort) : "jobs";
-  const order = first(params.order) === "asc" || first(params.order) === "desc" ? first(params.order) : COMPANY_SORTS[sort];
+  const orderValue = first(params.order);
+  const order = orderValue === "asc" || orderValue === "desc" ? orderValue : COMPANY_SORTS[sort];
   const listParams: Record<string, string> = {
     ...(search && { q: search }),
     ...(sort !== "jobs" && { sort }),
@@ -50,7 +50,7 @@ async function CompaniesData({ searchParams }: Pick<PageProps<"/companies">, "se
   };
   const { repository } = await getSignedInSource();
   const [companies, runs] = await Promise.all([
-    repository.listCompanies(Number(params.page) || 1, search, sort, order === "asc"),
+    repository.listCompanies(Number(first(params.page)) || 1, search, sort, order === "asc"),
     repository.listRuns(1),
   ]);
   const importRun = runs[0]?.kind === "import" ? runs[0] : null;

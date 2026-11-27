@@ -2,12 +2,13 @@
 
 import { CircleAlert, CircleCheck, CircleStop, LoaderCircle, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect } from "react";
 
 import { rerunSearch, rescoreJobs, stopRun } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import type { AgentRunRow, RunStatusRow, SearchRuleInput } from "@/lib/db";
 import { describeRun, rescoreScope } from "@/lib/runs";
+import { useAction } from "@/lib/use-action";
 import { cn } from "@/lib/utils";
 
 const REFRESH_MS = 3000;
@@ -26,21 +27,14 @@ const STATUS_LOOK: Record<RunStatusRow, { Icon: LucideIcon; tone: string }> = {
 export function RunStatus({ run }: { run: AgentRunRow }) {
   const router = useRouter();
   const active = run.status === "queued" || run.status === "running";
-  const [rerunError, setRerunError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
+  const { run: act, pending, error: rerunError } = useAction();
 
   function rerun(webLookup: boolean) {
-    startTransition(async () => {
-      const result = run.kind === "rescore" ? await rescoreJobs(rescoreScope(run)) : await rerunSearch(run.id, webLookup);
-      setRerunError(result.ok ? null : (result.error ?? "Could not re-run the search."));
-    });
+    act(() => (run.kind === "rescore" ? rescoreJobs(rescoreScope(run)) : rerunSearch(run.id, webLookup)), "Could not re-run the search.");
   }
 
   function stop() {
-    startTransition(async () => {
-      const result = await stopRun(run.id);
-      setRerunError(result.ok ? null : (result.error ?? "Could not stop the search."));
-    });
+    act(() => stopRun(run.id), "Could not stop the search.");
   }
 
   // Polls the agent's progress, which lives outside React, until the run finishes.

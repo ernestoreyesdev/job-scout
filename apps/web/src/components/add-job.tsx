@@ -3,12 +3,12 @@
 import { ChevronDown, CircleAlert, Plus } from "lucide-react";
 import { useState, type FormEvent } from "react";
 
-import { addOutsideJob } from "@/app/actions";
+import { addOutsideJob, type AddJobResult } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { OUTSIDE_STATUSES } from "@/lib/db";
+import { OUTSIDE_STATUSES, STATUS_LABELS } from "@/lib/db";
 import { useAction } from "@/lib/use-action";
 
 const FIELD = "h-9 w-full rounded-md border bg-transparent px-3 text-sm shadow-xs";
@@ -20,16 +20,16 @@ const LABEL = "font-normal text-muted-foreground";
  */
 export function AddJob() {
   const { run, pending, error } = useAction();
-  const [message, setMessage] = useState<string | null>(null);
+  const [last, setLast] = useState<AddJobResult | null>(null);
   const [needsDetails, setNeedsDetails] = useState(false);
-  const [unreadLink, setUnreadLink] = useState(false);
+  const message = last?.ok ? (last.message ?? null) : null;
+  const unreadLink = last?.ok === false && !!last.needsDetails;
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     run(() => addOutsideJob(new FormData(form)), "Could not add the job.", (result) => {
-      setMessage(result.ok ? (result.message ?? null) : null);
-      setUnreadLink(!result.ok && !!result.needsDetails);
+      setLast(result);
       if (result.ok) {
         form.reset();
         setNeedsDetails(false);
@@ -110,7 +110,7 @@ export function AddJob() {
             <select id="status" name="status" defaultValue="applied" className={FIELD}>
               {OUTSIDE_STATUSES.map((status) => (
                 <option key={status} value={status}>
-                  {status.charAt(0).toUpperCase() + status.slice(1)}
+                  {STATUS_LABELS[status]}
                 </option>
               ))}
             </select>

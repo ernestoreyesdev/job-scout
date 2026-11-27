@@ -9,7 +9,8 @@ export function describeRun(run: AgentRunRow): { title: string; detail: string }
     const entries = (run.input as { entries?: string[] }).entries ?? [];
     return { title: "Import companies", detail: ` (${entries.length} ${entries.length === 1 ? "entry" : "entries"})` };
   }
-  return describeSearch(run.input as Partial<SearchRuleInput>);
+  const { title, detail } = describeSearch(run.input as Partial<SearchRuleInput>);
+  return { title, detail: detail && ` · ${detail}` };
 }
 
 /** "Hybrid", "Hybrid or remote", "On-site, hybrid or remote". */
@@ -28,7 +29,7 @@ export function sameRule(a: Record<string, unknown>, b: Record<string, unknown>)
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** One-line description of a search rule: the company or all companies, then its keywords and filters. */
+/** A search rule's company or all companies, and its keywords and filters joined by " · ". */
 export function describeSearch(input: Partial<SearchRuleInput>): { title: string; detail: string } {
   const parts = [
     input.keywords?.join(", "),
@@ -41,5 +42,5 @@ export function describeSearch(input: Partial<SearchRuleInput>): { title: string
     input.limit !== undefined ? `up to ${input.limit} ${input.limit === 1 ? "job" : "jobs"}` : null,
     input.score && input.min_score ? `score ${input.min_score}+` : null,
   ].filter(Boolean);
-  return { title: input.company || "All companies", detail: parts.length ? ` · ${parts.join(" · ")}` : "" };
+  return { title: input.company || "All companies", detail: parts.join(" · ") };
 }

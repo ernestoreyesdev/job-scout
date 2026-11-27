@@ -25,6 +25,14 @@ export type JobSourceRow =
   | "manual";
 
 export const APPLICATION_STATUSES = ["new", "saved", "applied", "interviewing", "offer", "rejected"] as const;
+export const STATUS_LABELS: Record<(typeof APPLICATION_STATUSES)[number], string> = {
+  new: "New",
+  saved: "Saved",
+  applied: "Applied",
+  interviewing: "Interviewing",
+  offer: "Offer",
+  rejected: "Rejected",
+};
 
 /** Statuses a job applied to outside the app can be added with. */
 export const OUTSIDE_STATUSES = ["applied", "interviewing", "offer", "rejected"] as const;
@@ -84,6 +92,8 @@ export const DAILY_EMAIL_MATCHES = 10;
 
 /** The page signing in and the logo lead to. */
 export const HOME_PATH = "/tracker";
+/** The Tracker's view of jobs the user rated. */
+export const RATED_PATH = "/tracker?view=rated";
 
 export const BYTES_PER_MB = 1024 * 1024;
 export const DAY_MS = 24 * 60 * 60 * 1000;
@@ -414,3 +424,8 @@ export type Database = {
     CompositeTypes: { [_ in never]: never };
   };
 };
+
+/** Whether a company's kind keeps it out of every search. */
+export function isSkippedKind(kind: CompanyKindRow | null): boolean {
+  return kind !== null && SKIPPED_COMPANY_KINDS.includes(kind);
+}

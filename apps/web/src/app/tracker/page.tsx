@@ -12,7 +12,7 @@ import { RescoreButton } from "@/components/rescore-button";
 import { RunStatus } from "@/components/run-status";
 import { SearchForm } from "@/components/search-form";
 import { PageReady } from "@/components/web-vitals";
-import { JOB_SORTS } from "@/lib/db";
+import { JOB_SORTS, RATED_PATH } from "@/lib/db";
 import { parseJobQuery } from "@/lib/job-query";
 import { rescoreScope } from "@/lib/runs";
 import { getPrimaryResume, getSignedInSource } from "@/lib/repository";
@@ -22,7 +22,7 @@ export const metadata: Metadata = { title: "Tracker" };
 
 const VIEWS = [
   { rated: false, href: "/tracker", label: "New" },
-  { rated: true, href: "/tracker?view=rated", label: "Rated" },
+  { rated: true, href: RATED_PATH, label: "Rated" },
 ] as const;
 /** Past searches listed under Recent searches. */
 const RECENT_SEARCHES = 10;
@@ -51,17 +51,17 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
   const { repository } = await getSignedInSource();
   const params = await searchParams;
   const view = parseJobQuery(params).rated ? "rated" : "tracker";
-  const [resume, [latest], searches, companies, trackerTotal] = await Promise.all([
-    getPrimaryResume(),
+  const resumeLoad = getPrimaryResume();
+  const queryLoad = resumeLoad.then((loaded) => parseJobQuery(params, loaded?.text ? "desc" : "posted"));
+  const [resume, query, [latest], searches, companies, trackerTotal, jobs, stale] = await Promise.all([
+    resumeLoad,
+    queryLoad,
     repository.listRuns(1),
     repository.listRuns(RECENT_SEARCHES, "search"),
     repository.listTrackedCompanies(view),
     repository.countTrackerJobs(),
-  ]);
-  const query = parseJobQuery(params, resume?.text ? "desc" : "posted");
-  const [jobs, stale] = await Promise.all([
-    repository.listTrackedJobs(view, query.sort, query.page, query.filters),
-    resume && !query.rated ? repository.countStaleJobs(resume.id, "tracker") : 0,
+    queryLoad.then((loaded) => repository.listTrackedJobs(view, loaded.sort, loaded.page, loaded.filters)),
+    resumeLoad.then((loaded) => (loaded && view === "tracker" ? repository.countStaleJobs(loaded.id, "tracker") : 0)),
   ]);
   const banner = latest?.kind === "rescore" && rescoreScope(latest) === "jobs" ? null : latest;
 

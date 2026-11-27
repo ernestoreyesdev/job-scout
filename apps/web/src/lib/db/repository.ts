@@ -17,7 +17,7 @@ import type {
   SearchAlertRow,
   ThemeRow,
 } from "./schema";
-import { DAY_MS, GHOST_JOB_DAYS, LESSON_FADE_DAYS, REPOST_DAYS, SKIPPED_COMPANY_KINDS } from "./schema";
+import { DAY_MS, GHOST_JOB_DAYS, LESSON_FADE_DAYS, REPOST_DAYS, isSkippedKind } from "./schema";
 import type { FunnelJob, ScoredJob } from "../insights";
 import { jobKey } from "../job-key";
 
@@ -178,7 +178,9 @@ export class JobFinderRepository {
     const copies = new Map<string, { id: string; status: ApplicationStatusRow }[]>();
     for (const row of tracked) {
       const key = jobKey(row.edited_company ?? row.posting.company, row.edited_title ?? row.posting.title);
-      copies.set(key, [...(copies.get(key) ?? []), { id: row.id, status: row.status }]);
+      const group = copies.get(key) ?? [];
+      group.push({ id: row.id, status: row.status });
+      copies.set(key, group);
     }
     const now = Date.now();
     const days = (date: string) => daysSince(date, now);
@@ -282,7 +284,7 @@ export class JobFinderRepository {
       ...companies,
       items: companies.items.map((company) => ({
         ...company,
-        hidden: (company.kind !== null && SKIPPED_COMPANY_KINDS.includes(company.kind)) || (choices.get(company.id) ?? false),
+        hidden: isSkippedKind(company.kind) || (choices.get(company.id) ?? false),
       })),
     };
   }
@@ -339,10 +341,7 @@ export class JobFinderRepository {
 
   /** Every job on the Tracker, whatever the filters, since Clear empties all of them. */
   async countTrackerJobs(): Promise<number> {
-    const { count, error } = await this.client
-      .from("applications")
-      .select("id", { count: "exact", head: true })
-      .eq("in_tracker", true);
+    const { count, error } = await inView(this.client.from("applications").select("id", { count: "exact", head: true }), "tracker");
     if (error) throw error;
     return count ?? 0;
   }

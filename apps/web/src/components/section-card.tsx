@@ -4,22 +4,18 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * A titled card that groups one part of a page, with an optional action at the top right.
- * A collapsible card starts open and folds to its title when the title is clicked; its action shows only while open.
+ * A titled card that groups one part of a page. A collapsible card starts open and folds to its title when the
+ * title is clicked.
  */
 export function SectionCard({
   title,
   description,
-  action,
   collapsible = false,
-  className,
   children,
 }: {
   title: string;
   description?: ReactNode;
-  action?: ReactNode;
   collapsible?: boolean;
-  className?: string;
   children: ReactNode;
 }) {
   const heading = (
@@ -28,7 +24,7 @@ export function SectionCard({
       {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
     </div>
   );
-  const cardClass = cn("rounded-xl border bg-card p-5 text-card-foreground shadow-xs", className);
+  const cardClass = "rounded-xl border bg-card p-5 text-card-foreground shadow-xs";
 
   if (collapsible) {
     return (
@@ -40,7 +36,6 @@ export function SectionCard({
             className="mt-0.5 size-5 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
           />
         </summary>
-        {action && <div className="mt-3 flex justify-end">{action}</div>}
         <div className="mt-4">{children}</div>
       </details>
     );
@@ -48,10 +43,7 @@ export function SectionCard({
 
   return (
     <section className={cardClass}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        {heading}
-        {action}
-      </div>
+      {heading}
       <div className="mt-4">{children}</div>
     </section>
   );

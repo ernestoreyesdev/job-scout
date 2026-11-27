@@ -91,12 +91,14 @@ export function SignOut({
     });
   }
 
+  async function leave(scope?: "local") {
+    await createClient()?.auth.signOut(scope && { scope });
+    router.push("/login");
+    router.refresh();
+  }
+
   function signOut() {
-    startTransition(async () => {
-      await createClient()?.auth.signOut();
-      router.push("/login");
-      router.refresh();
-    });
+    startTransition(() => leave());
   }
 
   function openConfirm(open: boolean) {
@@ -112,9 +114,7 @@ export function SignOut({
         setError(result.error ?? "Could not delete the account.");
         return;
       }
-      await createClient()?.auth.signOut({ scope: "local" });
-      router.push("/login");
-      router.refresh();
+      await leave("local");
     });
   }
 

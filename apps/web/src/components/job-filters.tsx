@@ -3,7 +3,7 @@
 import Link from "next/link";
 import type { ChangeEvent, ReactNode } from "react";
 
-import { APPLICATION_STATUSES, type ApplicationStatusRow, type JobSort } from "@/lib/db";
+import { APPLICATION_STATUSES, STATUS_LABELS, type ApplicationStatusRow, type JobSort } from "@/lib/db";
 import { jobListHref, type JobQuery } from "@/lib/job-query";
 
 const SORT_LABELS: Record<JobSort, string> = {
@@ -61,7 +61,7 @@ export function JobListFilters({
           <option value="">Any status</option>
           {statuses.map((status) => (
             <option key={status} value={status}>
-              {status.charAt(0).toUpperCase() + status.slice(1)}
+              {STATUS_LABELS[status]}
             </option>
           ))}
         </select>

@@ -10,7 +10,7 @@ import { Pager } from "@/components/pager";
 import { RescoreButton } from "@/components/rescore-button";
 import { RunStatus } from "@/components/run-status";
 import { PageReady } from "@/components/web-vitals";
-import { APPLICATION_STATUSES, JOB_SORTS } from "@/lib/db";
+import { APPLICATION_STATUSES, JOB_SORTS, RATED_PATH } from "@/lib/db";
 import { parseJobQuery } from "@/lib/job-query";
 import { rescoreScope } from "@/lib/runs";
 import { getPrimaryResume, getSignedInSource } from "@/lib/repository";
@@ -36,16 +36,17 @@ async function JobsData({ searchParams }: Pick<PageProps<"/jobs">, "searchParams
   const { repository } = await getSignedInSource();
   const query = parseJobQuery(await searchParams, "status");
   // Rated jobs moved to the Tracker; older links still land there.
-  if (query.rated) redirect("/tracker?view=rated");
-  const [resume, jobs, companies, runs] = await Promise.all([
-    getPrimaryResume(),
+  if (query.rated) redirect(RATED_PATH);
+  const resumeLoad = getPrimaryResume();
+  const [resume, jobs, companies, runs, stale] = await Promise.all([
+    resumeLoad,
     repository.listTrackedJobs("jobs", query.sort, query.page, query.filters),
     repository.listTrackedCompanies("jobs"),
     repository.listRuns(1),
+    resumeLoad.then((loaded) => (loaded ? repository.countStaleJobs(loaded.id, "jobs") : 0)),
   ]);
   const rescoreRun =
     runs[0]?.kind === "rescore" && rescoreScope(runs[0]) === "jobs" && runs[0].status !== "done" ? runs[0] : null;
-  const stale = resume ? await repository.countStaleJobs(resume.id, "jobs") : 0;
 
   return (
     <section className="mt-8">

@@ -11,7 +11,8 @@ export type JobQuery = {
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-function first(value: string | string[] | undefined): string {
+/** The first value of a search param, trimmed; empty when missing. */
+export function first(value: string | string[] | undefined): string {
   return (Array.isArray(value) ? value[0] : value)?.trim() ?? "";
 }
 

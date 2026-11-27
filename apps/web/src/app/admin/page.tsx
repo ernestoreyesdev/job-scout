@@ -18,6 +18,13 @@ const ACTIVE_DAYS = 7;
 const CHART_DAYS = 14;
 const RECENT_FAILURES = 8;
 const BYTES_PER_KB = 1024;
+const NO_USAGE: Required<RunUsage> = {
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_read_input_tokens: 0,
+  cache_creation_input_tokens: 0,
+  web_search_requests: 0,
+};
 /** Values the agent, the workflows and Supabase set, shown in the page's text. */
 const RUN_TIME_LIMIT_MINUTES = 10;
 const FRESH_BOARD_HOURS = 25;
@@ -62,6 +69,12 @@ const STEP_LABELS: Record<string, string> = {
   gap_analysis: "Gap analysis",
   lessons: "Learning preferences",
   other: "Other",
+};
+const EVAL_LABELS: Record<string, string> = {
+  labels: "Scoring vs. ratings",
+  ranking: "Picking jobs to score",
+  injection: "Resisting planted instructions",
+  consistency: "Scoring the same job again",
 };
 
 type BoardFetches = { fetches: number; failures: number; cached: number; median_ms: number | null; max_ms: number | null; jobs: number };
@@ -238,7 +251,7 @@ async function AdminData() {
                     <TableCell className={cn("text-right tabular-nums", row.errors > 0 && "text-destructive")}>{row.errors}</TableCell>
                     <TableCell className="text-right tabular-nums">{seconds(row.median_ms)}</TableCell>
                     <TableCell className="text-right tabular-nums">{seconds(row.p95_ms)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{input ? PERCENT.format(row.cache_read_input_tokens / input) : "–"}</TableCell>
+                    <TableCell className="text-right tabular-nums">{share(row.cache_read_input_tokens, input)}</TableCell>
                     <TableCell className="text-right tabular-nums">{DOLLARS.format(runCost(row))}</TableCell>
                   </TableRow>
                 );
@@ -294,7 +307,7 @@ function seconds(ms: number): string {
 function SpeedSection({ runs }: { runs: AdminStats["runs"] }) {
   const done = runs.filter((run) => run.status === "done" && run.finished_at);
   const durations = done
-    .map((run) => new Date(run.finished_at!).getTime() - new Date(run.created_at).getTime())
+    .map((run) => durationMs(run.created_at, run.finished_at!))
     .sort((a, b) => a - b);
   const timed = done.filter((run) => run.timings);
   const steps = Object.entries(
@@ -535,7 +548,7 @@ function RefreshSection({
   const ran = refreshes.filter((row) => !row.stopped_at);
   const timed = ran
     .filter((row) => row.finished_at)
-    .map((row) => ({ ...row, ms: new Date(row.finished_at!).getTime() - new Date(row.started_at).getTime() }))
+    .map((row) => ({ ...row, ms: durationMs(row.started_at, row.finished_at!) }))
     .reverse();
   const longest = Math.max(1, ...timed.map((row) => row.ms));
 
@@ -587,7 +600,7 @@ function RefreshSection({
                   <TableRow key={row.id}>
                     <TableCell className="tabular-nums">{utcTime(row.started_at)}</TableCell>
                     <TableCell className="text-right tabular-nums">
-                      {row.finished_at ? seconds(new Date(row.finished_at).getTime() - new Date(row.started_at).getTime()) : "Unfinished"}
+                      {row.finished_at ? seconds(durationMs(row.started_at, row.finished_at)) : "Unfinished"}
                     </TableCell>
                     <TableCell className="text-right tabular-nums">{row.boards}</TableCell>
                     <TableCell className="text-right tabular-nums">{row.jobs.toLocaleString()}</TableCell>
@@ -753,13 +766,7 @@ function ModelQualitySection({ stats }: { stats: AdminStats }) {
           </TableHeader>
           <TableBody>
             {stats.model_weeks.map((row) => {
-              const usage: RunUsage = {
-                input_tokens: row.search_usage.input_tokens ?? 0,
-                output_tokens: row.search_usage.output_tokens ?? 0,
-                cache_read_input_tokens: row.search_usage.cache_read_input_tokens ?? 0,
-                cache_creation_input_tokens: row.search_usage.cache_creation_input_tokens ?? 0,
-                web_search_requests: row.search_usage.web_search_requests ?? 0,
-              };
+              const usage = filledUsage(row.search_usage);
               const problems = row.errors + row.broken;
               return (
                 <TableRow key={row.week}>
@@ -800,15 +807,7 @@ function ModelQualitySection({ stats }: { stats: AdminStats }) {
             {stats.evals.map((run) => (
               <TableRow key={`${run.eval}-${run.created_at}`}>
                 <TableCell className="tabular-nums">{utcTime(run.created_at)}</TableCell>
-                <TableCell>{run.eval === "labels"
-                    ? "Scoring vs. ratings"
-                    : run.eval === "ranking"
-                      ? "Picking jobs to score"
-                      : run.eval === "injection"
-                        ? "Resisting planted instructions"
-                        : run.eval === "consistency"
-                          ? "Scoring the same job again"
-                          : run.eval}</TableCell>
+                <TableCell>{EVAL_LABELS[run.eval] ?? run.eval}</TableCell>
                 <TableCell className="font-mono text-xs">{run.prompt_version ?? "–"}</TableCell>
                 <TableCell className="max-w-96 whitespace-normal text-xs">{evalSummary(run)}</TableCell>
                 <TableCell className="text-right tabular-nums">{run.cost === null ? "–" : DOLLARS.format(Number(run.cost))}</TableCell>
@@ -838,4 +837,15 @@ async function StorageNote({ boards }: { boards: number }) {
       )}
     </>
   );
+}
+
+/** Milliseconds between two timestamps. */
+function durationMs(start: string, end: string): number {
+  return new Date(end).getTime() - new Date(start).getTime();
+}
+
+/** Token counts with every missing or null field as 0. */
+function filledUsage(partial: Partial<RunUsage>): Required<RunUsage> {
+  const entries = Object.keys(NO_USAGE).map((key) => [key, partial[key as keyof RunUsage] ?? 0]);
+  return Object.fromEntries(entries) as Required<RunUsage>;
 }

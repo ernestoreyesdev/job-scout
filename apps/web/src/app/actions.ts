@@ -218,9 +218,9 @@ export async function setSearchAlert(search: { runId: string | null; alertId: st
       if (!on && search.alertId) await repository.deleteSearchAlert(search.alertId);
       return;
     }
-    const past = await repository.getRun(search.runId);
+    const [past, alerts] = await Promise.all([repository.getRun(search.runId), repository.listSearchAlerts()]);
     if (!past || past.kind !== "search") throw new Error("Search not found.");
-    const alert = (await repository.listSearchAlerts()).find((row) => sameRule(row.rule, past.input));
+    const alert = alerts.find((row) => sameRule(row.rule, past.input));
     if (on && !alert) await repository.addSearchAlert(past.input);
     if (!on && alert) await repository.deleteSearchAlert(alert.id);
   });

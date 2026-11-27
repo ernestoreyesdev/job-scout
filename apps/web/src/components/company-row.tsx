@@ -5,7 +5,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { setCompanyHidden } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
-import { SKIPPED_COMPANY_KINDS, type DirectoryCompany } from "@/lib/db";
+import { isSkippedKind, type DirectoryCompany } from "@/lib/db";
 import { useAction } from "@/lib/use-action";
 import { cn } from "@/lib/utils";
 
@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
  */
 export function CompanyRow({ company, checked }: { company: DirectoryCompany; checked: string }) {
   const { run, pending, error } = useAction();
-  const skipped = company.kind !== null && SKIPPED_COMPANY_KINDS.includes(company.kind);
+  const skipped = isSkippedKind(company.kind);
 
   function toggle() {
     run(() => setCompanyHidden(company.id, !company.hidden), "Could not update this company.");
