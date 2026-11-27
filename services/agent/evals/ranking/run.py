@@ -10,13 +10,12 @@ calls per job in the pool. Point it at the hosted project by setting
 SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and ANTHROPIC_API_KEY.
 """
 
+import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from itertools import zip_longest
 from typing import Any
-
-import anthropic
 
 from app.agents.orchestrator import (
     MAX_PER_COMPANY,
@@ -41,8 +40,8 @@ from app.embeddings import embed_jobs
 from app.sources import describe
 from app.sources.base import Posting
 from app.sources.filters import matches_rule
-from app.telemetry import CallLog, ContextThreadPool, RecordingClient, prompt_version
-from evals.results import save_result, usage_cost
+from app.telemetry import ContextThreadPool, prompt_version
+from evals.results import eval_client, print_cost, save_result, skip, usage_cost
 
 DEFAULT_CUT = STRONG_FIT_SCORE
 # Recent runs read to find the latest scored search.
@@ -57,7 +56,7 @@ def main() -> None:
     settings = get_settings()
     if not settings.anthropic_api_key:
         print("Set ANTHROPIC_API_KEY to the key the scoring calls should use.")
-        return
+        sys.exit(1)
     db = service_db(settings)
     runs = db.select(
         "agent_runs",
@@ -72,8 +71,7 @@ def main() -> None:
     )
     run = next((r for r in runs if r["input"].get("score", True) and not r["input"].get("company")), None)
     if run is None:
-        print("No finished scored search across all companies yet.")
-        save_result(db, "ranking", {"skipped": "No finished scored search across all companies yet."})
+        skip(db, "ranking", "No finished scored search across all companies yet.")
         return
     rule = SearchRule.model_validate(run["input"])
     resumes = db.select("resumes", {"select": "text", "user_id": f"eq.{run['user_id']}", "is_primary": "eq.true"})
@@ -84,8 +82,7 @@ def main() -> None:
     cut = rule.min_score or DEFAULT_CUT
     print(f"Search from {run['created_at'][:10]} · up to {rule.limit} jobs · cut {cut}")
 
-    calls = CallLog()
-    client = RecordingClient(anthropic.Anthropic(api_key=settings.anthropic_api_key), calls)
+    client, calls = eval_client(settings.anthropic_api_key)
     titles = related_titles(client, settings.discovery_model, rule.keywords)
     keywords = [*rule.keywords, *titles]
     rows = db.select_all(
@@ -108,8 +105,7 @@ def main() -> None:
     pool_size = rule.limit * POOL_FACTOR
     print(f"{len(rows):,} open jobs, {len(fresh):,} match and aren't tracked; each method picks {pool_size}")
     if len(fresh) <= pool_size:
-        print("Every match fits in one pool, so both methods would score the same jobs.")
-        save_result(db, "ranking", {"skipped": "The latest search's matches fit in one pool."})
+        skip(db, "ranking", "The latest search's matches fit in one pool, so both methods would score the same jobs.")
         return
 
     by_title = pick(by_title_fit(fresh, pool_size, client, settings, resume, shortlist), pool_size, MAX_PER_COMPANY)
@@ -136,7 +132,7 @@ def main() -> None:
     print(f"\n{len(both)} jobs are in both pools")
     usage = calls.usage()
     cost = usage_cost(usage)
-    print(f"Cost: ${cost:.3f} ({usage.input_tokens:,} input, {usage.output_tokens:,} output tokens)")
+    print_cost(usage)
     save_result(
         db,
         "ranking",

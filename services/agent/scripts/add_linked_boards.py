@@ -16,7 +16,7 @@ from app.config import get_settings
 from app.db import service_db
 from app.sources import board_from_url, default_name, fetch_live
 from app.sources.base import CompanyBoard, SourceName
-from app.telemetry import CallLog, RecordingClient
+from app.telemetry import recorded_claude
 
 
 def main() -> None:
@@ -47,16 +47,12 @@ def main() -> None:
         return
     import anthropic
 
-    calls = CallLog()
-    client = RecordingClient(anthropic.Anthropic(api_key=settings.anthropic_api_key), calls)
-    try:
+    with recorded_claude(service, anthropic.Anthropic(api_key=settings.anthropic_api_key)) as (client, _):
         for board in boards:
             if board.key in fetched:
                 jobs = fetched[board.key]
                 found = CompanyBoard(cast(SourceName, board.source), board.board, jobs[0].company if jobs else board.name, jobs)
                 label_if_new(found, client, settings, service, name_companies)
-    finally:
-        calls.save(service)
     print("Labeled the new companies")
 
 

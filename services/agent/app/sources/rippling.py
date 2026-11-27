@@ -24,7 +24,7 @@ class RipplingSource(JobSource):
         jobs = self._get_json(board, f"{API}/{board}/jobs")
         return [
             Posting(
-                source="rippling",
+                source=self.name,
                 board=board,
                 external_id=job["uuid"],
                 title=job["name"],

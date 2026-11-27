@@ -18,8 +18,8 @@ import httpx
 from app.agents.orchestrator import SearchResult, run_search
 from app.agents.schemas import SearchRule
 from app.config import Settings
-from app.constants import HTTP_TIMEOUT, STRONG_FIT_SCORE
-from app.db import Rest, user_db
+from app.constants import STRONG_FIT_SCORE
+from app.db import HTTP, Conflict, Rest, check, user_db
 from app.mail import send_email
 from app.telemetry import CallLog, RecordingClient
 
@@ -107,8 +107,8 @@ def run_alert(
         [run] = user.insert(
             "agent_runs", {"user_id": user_id, "kind": "search", "input": rule, "status": "running"}, select="id"
         )
-    except httpx.HTTPStatusError as error:
-        if error.response.status_code == 409:
+    except Conflict as error:
+        if error.run_already_going:
             logger.info("daily search skipped: a run is already going", extra={"user_id": user_id})
             return False
         raise
@@ -166,31 +166,27 @@ def sign_in_as(settings: Settings, user_id: str) -> UserSession:
     """
     admin = {"apikey": settings.supabase_service_role_key, "Authorization": f"Bearer {settings.supabase_service_role_key}"}
     auth = f"{settings.supabase_url}/auth/v1"
-    found = httpx.get(f"{auth}/admin/users/{user_id}", headers=admin, timeout=HTTP_TIMEOUT)
-    found.raise_for_status()
+    found = HTTP.get(f"{auth}/admin/users/{user_id}", headers=admin)
+    check(found)
     email = found.json()["email"]
-    link = httpx.post(f"{auth}/admin/generate_link", headers=admin, json={"type": "magiclink", "email": email}, timeout=HTTP_TIMEOUT)
-    link.raise_for_status()
+    link = HTTP.post(f"{auth}/admin/generate_link", headers=admin, json={"type": "magiclink", "email": email})
+    check(link)
     token_hash = link.json().get("hashed_token") or link.json()["properties"]["hashed_token"]
-    session = httpx.post(
-        f"{auth}/verify",
-        headers={"apikey": settings.supabase_anon_key},
-        json={"type": "magiclink", "token_hash": token_hash},
-        timeout=HTTP_TIMEOUT,
-    )
-    session.raise_for_status()
+    session = HTTP.post(f"{auth}/verify", headers={"apikey": settings.supabase_anon_key}, json={"type": "magiclink", "token_hash": token_hash})
+    check(session)
     return UserSession(session.json()["access_token"], email)
 
 
 def sign_out(settings: Settings, session: UserSession) -> None:
     """Ends the session sign_in_as opened; a failure is logged, since the session expires on its own."""
     try:
-        httpx.post(
-            f"{settings.supabase_url}/auth/v1/logout",
-            params={"scope": "local"},
-            headers={"apikey": settings.supabase_anon_key, "Authorization": f"Bearer {session.access_token}"},
-            timeout=HTTP_TIMEOUT,
-        ).raise_for_status()
+        check(
+            HTTP.post(
+                f"{settings.supabase_url}/auth/v1/logout",
+                params={"scope": "local"},
+                headers={"apikey": settings.supabase_anon_key, "Authorization": f"Bearer {session.access_token}"},
+            )
+        )
     except httpx.HTTPError as error:
         logger.warning("signing out of the daily search session failed: %s", error)
 

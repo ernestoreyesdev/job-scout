@@ -3,7 +3,9 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Hashable, Iterable, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, ClassVar, Literal
@@ -179,7 +181,9 @@ class JobSource(ABC):
         return res
 
     def careers_url(self, board: str) -> str:
-        """The company's public job listing page on this system."""
+        """The company's public job listing page on this system: its subdomain, or its path on the host."""
+        if self.subdomain_boards:
+            return f"https://{board}.{self.board_hosts[0]}/"
         return f"https://{self.board_hosts[0]}/{board}"
 
     def _send(self, send: Callable[[], httpx.Response]) -> httpx.Response:
@@ -195,6 +199,11 @@ class JobSource(ABC):
         with self._requests:
             return send()
 
+    def _pages[T](self, page: Callable[[int], T], starts: range, concurrency: int) -> list[T]:
+        """The pages starting at each of `starts`, `concurrency` at a time, in order, keeping the caller's logging context."""
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            return list(pool.map(lambda start: copy_context().run(page, start), starts))
+
 
 def description_hash(description: str) -> str:
     """The MD5 of a description, matching Postgres's md5() of the same text."""
@@ -205,3 +214,14 @@ def _retry_after(res: httpx.Response) -> float | None:
     """The seconds a 429 asks to wait, when it says in seconds."""
     value = res.headers.get("Retry-After", "")
     return float(value) if value.isdigit() else None
+
+
+def distinct[T](items: Iterable[T], key: Callable[[T], Hashable | None]) -> Iterator[T]:
+    """Items in order, skipping ones whose key is missing or already seen."""
+    seen: set[Hashable] = set()
+    for item in items:
+        value = key(item)
+        if value is None or value in seen:
+            continue
+        seen.add(value)
+        yield item

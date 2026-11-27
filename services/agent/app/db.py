@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 import httpx
@@ -11,6 +12,9 @@ HTTP = httpx.Client(timeout=HTTP_TIMEOUT)
 PAGE_SIZE = 1000
 # Characters of an error response body kept in the raised error.
 MAX_ERROR_BODY = 500
+# The index allowing one queued or running run per user.
+ACTIVE_RUN_CONSTRAINT = "agent_runs_one_active_per_user"
+CONSTRAINT = re.compile(r'unique constraint \\?"(\w+)')
 
 
 class Rest:
@@ -114,4 +118,21 @@ def check(res: httpx.Response) -> None:
     try:
         res.raise_for_status()
     except httpx.HTTPStatusError as error:
-        raise httpx.HTTPStatusError(f"{error}\nResponse body: {res.text[:MAX_ERROR_BODY]}", request=error.request, response=res) from None
+        message = f"{error}\nResponse body: {res.text[:MAX_ERROR_BODY]}"
+        if res.status_code == 409:
+            found = CONSTRAINT.search(res.text)
+            raise Conflict(message, request=error.request, response=res, constraint=found[1] if found else None) from None
+        raise httpx.HTTPStatusError(message, request=error.request, response=res) from None
+
+
+class Conflict(httpx.HTTPStatusError):
+    """A 409: a row broke a unique constraint, named in `constraint` when the response says which."""
+
+    def __init__(self, message: str, *, request: httpx.Request, response: httpx.Response, constraint: str | None):
+        super().__init__(message, request=request, response=response)
+        self.constraint = constraint
+
+    @property
+    def run_already_going(self) -> bool:
+        """Whether the user already has a queued or running run; an unnamed constraint on agent_runs counts too."""
+        return self.constraint in (None, ACTIVE_RUN_CONSTRAINT)

@@ -1,9 +1,8 @@
 import re
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
 
-from app.sources.base import BoardNotFound, JobSource, Posting
+from app.sources.base import BoardNotFound, JobSource, Posting, distinct
 from app.sources.text import html_to_text, workplace_from_location
 
 HOST = "myworkdayjobs.com"
@@ -77,21 +76,15 @@ class WorkdaySource(JobSource):
         first = page(0)
         jobs = list(first["jobPostings"])
         total = min(first.get("total") or 0, MAX_JOBS)
-        with ThreadPoolExecutor(max_workers=PAGE_CONCURRENCY) as pool:
-            for more in pool.map(page, range(PAGE_SIZE, total, PAGE_SIZE)):
-                jobs += more["jobPostings"]
+        jobs += [job for more in self._pages(page, range(PAGE_SIZE, total, PAGE_SIZE), PAGE_CONCURRENCY) for job in more["jobPostings"]]
 
         today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-        seen: set[str] = set()
         postings = []
-        for job in jobs:
-            path = job.get("externalPath")
-            if not path or path in seen:
-                continue
-            seen.add(path)
+        for job in distinct(jobs, lambda job: job.get("externalPath") or None):
+            path = job["externalPath"]
             postings.append(
                 Posting(
-                    source="workday",
+                    source=self.name,
                     board=board,
                     external_id=path,
                     title=job["title"],
@@ -114,7 +107,7 @@ class WorkdaySource(JobSource):
         return []
 
     def default_name(self, board: str) -> str:
-        return _parts(board)[0].replace("-", " ").title()
+        return super().default_name(_parts(board)[0])
 
     def board_from_url(self, url: str) -> str | None:
         """https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/... -> nvidia.wd5/nvidiaexternalcareersite"""

@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from app.agents.claude import DEFAULT_EFFORT
+from app.agents.claude import parse
 from app.agents.hiring_threads.prompts import EXTRACTION_SYSTEM, extraction_message
 from app.agents.schemas import HiringJobs
 from app.constants import HTTP_TIMEOUT, USER_AGENT
@@ -32,6 +32,7 @@ CALL_CONCURRENCY = 4
 CACHE_SECONDS = 60 * 60
 
 _cache: list[tuple[float, list["HiringPost"]]] = []
+_http = httpx.Client(timeout=HTTP_TIMEOUT, headers={"User-Agent": USER_AGENT})
 _cache_lock = threading.Lock()
 
 
@@ -44,7 +45,7 @@ class HiringPost:
 
 def recent_posts(http: httpx.Client | None = None) -> list[HiringPost]:
     """Top-level posts of the latest 'Ask HN: Who is hiring?' threads, read through HN's public Algolia API."""
-    http = http or httpx.Client(timeout=HTTP_TIMEOUT, headers={"User-Agent": USER_AGENT})
+    http = http or _http
     res = http.get(f"{API}/search_by_date", params={"tags": "story,author_whoishiring", "hitsPerPage": str(THREAD_SEARCH_HITS)})
     res.raise_for_status()
     threads = [hit["objectID"] for hit in res.json()["hits"] if hit["title"].startswith(THREAD_TITLE)][:THREADS]
@@ -75,23 +76,23 @@ def extract_jobs(client: Any, model: str, posts: list[HiringPost]) -> list[Posti
 
 def _extract(client: Any, model: str, posts: list[HiringPost]) -> list[Posting]:
     try:
-        response = client.beta.messages.parse(
+        found: HiringJobs = parse(
+            client,
             model=model,
             max_tokens=MAX_TOKENS,
-            output_config={"effort": DEFAULT_EFFORT},
             system=EXTRACTION_SYSTEM,
-            messages=[{"role": "user", "content": extraction_message([post.text for post in posts])}],
+            content=extraction_message([post.text for post in posts]),
             output_format=HiringJobs,
+            error=RuntimeError,
+            failure="Reading hiring posts",
         )
     except Exception as error:
         logger.warning("reading hiring posts failed: %s", error)
         return []
-    if response.parsed_output is None:
-        return []
 
     roles: dict[int, int] = {}
     postings = []
-    for job in response.parsed_output.jobs:
+    for job in found.jobs:
         if not 0 <= job.post < len(posts) or not job.company.strip() or not job.title.strip():
             continue
         post = posts[job.post]

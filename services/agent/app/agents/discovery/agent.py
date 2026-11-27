@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.agents.claude import DEFAULT_EFFORT
+from app.agents.claude import DEFAULT_EFFORT, parse
 from app.agents.discovery.prompts import (
     DISCOVERY_SYSTEM,
     NAMING_SYSTEM,
@@ -18,6 +18,10 @@ WEB_SEARCH_TOOL = "web_search_20250305"
 DISCOVERY_SEARCHES = 3
 LOOKUP_SEARCHES = 2
 MAX_TOKENS = 4000
+
+
+class NamingError(Exception):
+    pass
 
 
 @dataclass
@@ -90,20 +94,23 @@ def name_companies(client: Any, model: str, boards: list[FoundBoard]) -> dict[tu
     """
     if not boards:
         return {}
-    response = client.beta.messages.parse(
-        model=model,
-        max_tokens=MAX_TOKENS,
-        output_config={"effort": DEFAULT_EFFORT},
-        system=NAMING_SYSTEM,
-        messages=[{"role": "user", "content": naming_message(boards)}],
-        output_format=CompanyNames,
-    )
-    if response.parsed_output is None:
+    try:
+        named: CompanyNames = parse(
+            client,
+            model=model,
+            max_tokens=MAX_TOKENS,
+            system=NAMING_SYSTEM,
+            content=naming_message(boards),
+            output_format=CompanyNames,
+            error=NamingError,
+            failure="Naming companies",
+        )
+    except NamingError:
         return {}
 
     keys = {f"{b.source}/{b.board}": (b.source, b.board) for b in boards}
     return {
         keys[entry.board]: entry.model_copy(update={"name": entry.name.strip()})
-        for entry in response.parsed_output.companies
+        for entry in named.companies
         if entry.board in keys and entry.name.strip()
     }

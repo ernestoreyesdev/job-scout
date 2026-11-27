@@ -27,7 +27,7 @@ class LeverSource(JobSource):
         jobs = self._get_json(board, f"{API}/{board}", {"mode": "json"})
         return [
             Posting(
-                source="lever",
+                source=self.name,
                 board=board,
                 external_id=job["id"],
                 title=job["text"],

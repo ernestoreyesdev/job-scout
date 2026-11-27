@@ -144,7 +144,7 @@ class FakeRest(Rest):
         if table == "postings":
             after = params.get("id", "gt.")[3:]
             return [row for row in self.stored if row["id"] > after][: int(params.get("limit", "1000"))]
-        if params.get("select") == "posting_id,posting:postings!inner(title,company,location,description)":
+        if params.get("select") == "posting_id,posting:postings!inner(title,company,location)":
             return self.labeled_postings
         if params.get("fit_label", "").startswith("eq."):
             return [row for row in self.labeled if params["fit_label"] == f"eq.{row['fit_label']}"]
@@ -1126,9 +1126,10 @@ def test_labeled_jobs_are_those_nearest_the_jobs_being_scored_after_embedding_mi
     user, service = FakeRest(), FakeRest()
     user.labeled = [*[labeled_row("good", n) for n in range(3)], *[labeled_row("bad", n) for n in range(3, 6)]]
     user.labeled_postings = [
-        {"posting_id": "posting-9", "posting": {"title": "Old Role", "company": "Acme", "location": None, "description": "Old."}}
+        {"posting_id": "posting-9", "posting": {"title": "Old Role", "company": "Acme", "location": None}}
     ]
     service.embedded = ["posting-3"]
+    service.descriptions = [{"id": "posting-9", "description": "Old."}]
 
     examples = orchestrator.labeled_examples(user, service, [("posting-1", JOBS[0]), ("posting-3", JOBS[2])], fake_embed, orchestrator.label_counts(user))
 

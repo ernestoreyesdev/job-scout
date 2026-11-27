@@ -11,12 +11,10 @@ SUPABASE_SERVICE_ROLE_KEY for that project, plus ANTHROPIC_API_KEY or that
 project's AGENT_ENCRYPTION_KEY to use the account's saved key.
 """
 
-from collections import Counter
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-import anthropic
 import numpy as np
 
 from app.agents.lessons.agent import MAX_LESSONS, learn
@@ -30,8 +28,8 @@ from app.crypto import decrypt
 from app.db import service_db
 from app.embeddings import embed_jobs, job_text
 from app.sources.base import Posting
-from app.telemetry import CallLog, RecordingClient, prompt_version
-from evals.results import EVAL_CONCURRENCY, save_result, usage_cost
+from app.telemetry import prompt_version
+from evals.results import EVAL_CONCURRENCY, busiest_account, eval_client, print_cost, save_result, skip, usage_cost
 
 CUTS = (POSSIBLE_FIT_SCORE, 60, STRONG_FIT_SCORE, 80)
 HOLD_OUT_EVERY = 3
@@ -102,17 +100,11 @@ def report(name: str, scored: list[tuple[str, int]]) -> dict[str, Any]:
 def main() -> None:
     settings = get_settings()
     db = service_db(settings)
-    labeled = db.select("applications", {"select": "user_id", "fit_label": "not.is.null"})
-    resumes = {
-        row["user_id"]: row["text"]
-        for row in db.select("resumes", {"select": "user_id,text", "is_primary": "eq.true", "text": "not.is.null"})
-    }
-    counts = Counter(row["user_id"] for row in labeled if row["user_id"] in resumes)
-    if not counts:
-        print("No account has both labeled jobs and a primary resume.")
-        save_result(db, "labels", {"skipped": "No account has both rated jobs and a primary resume."})
+    account = busiest_account(db, db.select("applications", {"select": "user_id", "fit_label": "not.is.null"}))
+    if account is None:
+        skip(db, "labels", "No account has both rated jobs and a primary resume.")
         return
-    user_id = counts.most_common(1)[0][0]
+    user_id, resume = account
     credentials = db.select(
         "api_credentials", {"select": "ciphertext", "user_id": f"eq.{user_id}", "provider": "eq.anthropic"}
     )
@@ -134,13 +126,10 @@ def main() -> None:
     have = {label: (sum(r["fit_label"] == label for r in train), sum(r["fit_label"] == label for r in held)) for label in ("good", "bad")}
     print(f"{len(rows)} labeled jobs with text: " + ", ".join(f"{label} {t} examples / {h} held out" for label, (t, h) in have.items()))
     if any(t < MIN_EXAMPLES or h < MIN_HELD_OUT for t, h in have.values()):
-        print(f"Need at least {MIN_EXAMPLES + MIN_HELD_OUT} jobs with text per label. Mark more jobs good and bad, then rerun.")
-        save_result(db, "labels", {"skipped": f"Needs at least {MIN_EXAMPLES + MIN_HELD_OUT} rated jobs of each kind."})
+        skip(db, "labels", f"Needs at least {MIN_EXAMPLES + MIN_HELD_OUT} rated jobs with text of each kind.")
         return
 
-    log = CallLog()
-    client = RecordingClient(anthropic.Anthropic(api_key=api_key), log)
-    resume = resumes[user_id]
+    client, log = eval_client(api_key)
     examples = examples_from(train)
     closest = closest_from(train, held)
     if {(e.label, e.title, e.company) for e in closest} == {(e.label, e.title, e.company) for e in examples}:
@@ -176,7 +165,8 @@ def main() -> None:
         results[name] = report(name, scored)
     usage = log.usage()
     cost = usage_cost(usage)
-    print(f"\nCost: ${cost:.3f} ({usage.input_tokens:,} input, {usage.output_tokens:,} output tokens)")
+    print()
+    print_cost(usage)
     save_result(
         db,
         "labels",

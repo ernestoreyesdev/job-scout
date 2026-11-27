@@ -193,3 +193,13 @@ def configure_sentry() -> None:
     import sentry_sdk
 
     sentry_sdk.init()
+
+
+@contextmanager
+def recorded_claude(service: Rest, client: Any, run_id: str | None = None) -> Iterator[tuple["RecordingClient", CallLog]]:
+    """`client` wrapped so its calls are logged, and the log saved to llm_calls on the way out."""
+    calls = CallLog(run_id)
+    try:
+        yield RecordingClient(client, calls), calls
+    finally:
+        calls.save(service)

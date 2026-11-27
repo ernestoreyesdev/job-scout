@@ -12,11 +12,8 @@ SUPABASE_SERVICE_ROLE_KEY for the project to read from and save to.
 
 import statistics
 import sys
-from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
-
-import anthropic
 
 from app.agents.orchestrator import with_edits
 from app.agents.schemas import FitScore
@@ -24,8 +21,8 @@ from app.agents.scoring.agent import SCORE_CUTS, score_posting, steady_score
 from app.agents.scoring.prompts import FIT_SYSTEM
 from app.config import get_settings
 from app.db import service_db
-from app.telemetry import CallLog, RecordingClient, prompt_version
-from evals.results import EVAL_CONCURRENCY, save_result, usage_cost
+from app.telemetry import prompt_version
+from evals.results import EVAL_CONCURRENCY, busiest_account, eval_client, print_cost, save_result, skip, usage_cost
 
 JOBS = 10
 REPEATS = 5
@@ -37,17 +34,11 @@ def main() -> None:
         print("Set ANTHROPIC_API_KEY to the key the eval should use.")
         sys.exit(1)
     db = service_db(settings)
-    resumes = {
-        row["user_id"]: row["text"]
-        for row in db.select("resumes", {"select": "user_id,text", "is_primary": "eq.true", "text": "not.is.null"})
-    }
-    scored = db.select("applications", {"select": "user_id", "fit_score": "not.is.null"})
-    counts = Counter(row["user_id"] for row in scored if row["user_id"] in resumes)
-    if not counts:
-        print("No account has both scored jobs and a primary resume.")
-        save_result(db, "consistency", {"skipped": "No account has both scored jobs and a primary resume."})
+    account = busiest_account(db, db.select("applications", {"select": "user_id", "fit_score": "not.is.null"}))
+    if account is None:
+        skip(db, "consistency", "No account has both scored jobs and a primary resume.")
         return
-    user_id = counts.most_common(1)[0][0]
+    user_id, resume = account
     rows = db.select(
         "applications",
         {
@@ -58,13 +49,10 @@ def main() -> None:
     )
     jobs = spread_out([row for row in rows if row["edited_description"] or row["posting"]["description"]], JOBS)
     if not jobs:
-        print("None of that account's scored jobs has a description saved.")
-        save_result(db, "consistency", {"skipped": "No scored job has a description saved."})
+        skip(db, "consistency", "No scored job has a description saved.")
         return
 
-    calls = CallLog()
-    client = RecordingClient(anthropic.Anthropic(api_key=settings.anthropic_api_key), calls)
-    resume = resumes[user_id]
+    client, calls = eval_client(settings.anthropic_api_key)
 
     def score(row: dict[str, Any]) -> int:
         return score_posting(client, settings.scoring_model, settings.scoring_effort, resume, with_edits(row)).score
@@ -100,7 +88,8 @@ def main() -> None:
             f"\n{name}: spread mean {summary['mean_spread']:.1f}, largest {summary['largest_spread']}, "
             f"mean standard deviation {summary['mean_deviation']:.1f}; jobs on both sides of a cut: {flips}"
         )
-    print(f"\nCost: ${cost:.3f} ({usage.input_tokens:,} input, {usage.output_tokens:,} output tokens)")
+    print()
+    print_cost(usage)
     save_result(db, "consistency", metrics, cost, settings.scoring_model, prompt_version(FIT_SYSTEM, FitScore))
 
 

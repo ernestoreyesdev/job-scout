@@ -97,66 +97,75 @@ def display_name(company: str) -> str:
     return name.title() if name == name.lower() else name
 
 
-def fetch_board(
-    source: str, board: str, company: str, sources: tuple[JobSource, ...] | None = None, cached: bool = True
-) -> list[Posting]:
-    """Open postings on one known board, reusing a recent fetch when cached; raises BoardNotFound when it no longer exists."""
-    system = source_named(source, sources)
-    return cached_fetch(system, board, company) if cached else system.fetch(board, company)
+def fetch_board(source: str, board: str, company: str) -> list[Posting]:
+    """Open postings on one known board, reusing a recent fetch; raises BoardNotFound when it no longer exists."""
+    return cached_fetch(source_named(source), board, company)
 
 
-def source_named(name: str, sources: tuple[JobSource, ...] | None = None) -> JobSource:
-    return next(source for source in (sources if sources is not None else all_sources()) if source.name == name)
+def source_named(name: str) -> JobSource:
+    return sources_by_name()[name]
 
 
-def board_from_url(url: str, sources: tuple[JobSource, ...] | None = None) -> tuple[SourceName, str] | None:
+def board_from_url(url: str) -> tuple[SourceName, str] | None:
     """The (system, board) a public job page URL belongs to, or None for any other URL."""
-    for source in sources if sources is not None else all_sources():
+    for source in all_sources():
         board = source.board_from_url(url)
         if board:
             return source.name, board
     return None
 
 
-def board_hosts(sources: tuple[JobSource, ...] | None = None) -> list[str]:
+def board_hosts() -> list[str]:
     """Every system's job page hosts, for limiting web searches to job boards."""
-    return [host for source in (sources if sources is not None else all_sources()) for host in source.board_hosts]
+    return [host for source in all_sources() for host in source.board_hosts]
 
 
-def describe(posting: Posting, sources: tuple[JobSource, ...] | None = None) -> str:
+def describe(posting: Posting) -> str:
     """The posting's full description, fetched from its system when the job list left it out."""
-    return posting.description or source_named(posting.source, sources).describe(posting)
+    return posting.description or source_named(posting.source).describe(posting)
 
 
-def default_name(source: str, board: str, sources: tuple[JobSource, ...] | None = None) -> str:
+def default_name(source: str, board: str) -> str:
     """Company name to show for a newly found board until its jobs give the real one."""
-    return source_named(source, sources).default_name(board)
+    return source_named(source).default_name(board)
 
 
-def careers_url(source: str, board: str, sources: tuple[JobSource, ...] | None = None) -> str:
+def careers_url(source: str, board: str) -> str:
     """The company's public job listing page for a board."""
-    return source_named(source, sources).careers_url(board)
+    return source_named(source).careers_url(board)
 
 
 def cached_fetch(source: JobSource, board: str, company: str) -> list[Posting]:
-    """A board's postings, reused from memory for CACHE_SECONDS after a fetch; boards that don't exist aren't kept."""
+    """
+    A board's postings, reused from memory for CACHE_SECONDS after a fetch;
+    expired boards are dropped on each new fetch, and boards that don't exist aren't kept.
+    """
     key = (source.name, board)
     with _board_cache_lock:
         hit = _board_cache.get(key)
     if hit and time.monotonic() - hit[0] < CACHE_SECONDS:
         return hit[1]
     postings = source.fetch(board, company)
+    now = time.monotonic()
     with _board_cache_lock:
-        _board_cache[key] = (time.monotonic(), postings)
+        for expired in [cached for cached, (at, _) in _board_cache.items() if now - at >= CACHE_SECONDS]:
+            del _board_cache[expired]
+        _board_cache[key] = (now, postings)
     return postings
 
 
-def is_complete(source: str, postings: list[Posting], sources: tuple[JobSource, ...] | None = None) -> bool:
+def is_complete(source: str, postings: list[Posting]) -> bool:
     """False when a fetch hit the system's limit, so jobs missing from it may still be open."""
-    limit = source_named(source, sources).max_jobs
+    limit = source_named(source).max_jobs
     return limit is None or len(postings) < limit
 
 
 def fetch_live(source: str, board: str, company: str) -> list[Posting]:
     """Open postings on one known board, fetched from its system even when a recent fetch is in memory."""
-    return fetch_board(source, board, company, cached=False)
+    return source_named(source).fetch(board, company)
+
+
+@cache
+def sources_by_name() -> dict[str, JobSource]:
+    """The shared source instances by system name."""
+    return {source.name: source for source in all_sources()}

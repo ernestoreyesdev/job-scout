@@ -62,6 +62,9 @@ FOREIGN_CITIES = (
     "gurgaon", "gurugram", "noida", "tokyo", "seoul", "shanghai", "beijing", "shenzhen", "sydney", "melbourne",
     "manila", "paris",
 )
+# Any of the foreign countries or cities as a whole word in lowercase text.
+FOREIGN_COUNTRY = re.compile("|".join(rf"(?<![a-z]){re.escape(place)}(?![a-z])" for place in FOREIGN_COUNTRIES))
+FOREIGN_CITY = re.compile("|".join(rf"(?<![a-z]){re.escape(place)}(?![a-z])" for place in FOREIGN_CITIES))
 
 
 def matches_keywords(posting: Posting, keywords: list[str]) -> bool:
@@ -160,18 +163,14 @@ def _place_in_us(place: str) -> bool:
     words = set(re.findall(r"[a-z]+", lowered))
     if words & {"us", "usa"} or "united states" in lowered or any(state in lowered for state in US_STATES.values()):
         return True
-    if _names_any(lowered, FOREIGN_COUNTRIES):
+    if FOREIGN_COUNTRY.search(lowered):
         return False
     if any(code.lower() in US_STATES for code in re.findall(r"\b[A-Z]{2}\b", place)):
         return True
-    if _names_any(lowered, FOREIGN_CITIES):
+    if FOREIGN_CITY.search(lowered):
         return False
     last = place.split(",")[-1].strip()
     return not re.fullmatch(r"[A-Z]{2}", last)
-
-
-def _names_any(lowered: str, places: tuple[str, ...]) -> bool:
-    return any(re.search(rf"(?<![a-z]){re.escape(place)}(?![a-z])", lowered) for place in places)
 
 
 def matches_rule(posting: Posting, rule: "SearchRule", keywords: list[str]) -> bool:

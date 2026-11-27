@@ -3,9 +3,9 @@ import logging
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from typing import Annotated, Any
 
-import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -40,11 +40,11 @@ from app.agents.schemas import (
 from app.auth import CurrentUser, admin_user, current_user
 from app.config import Settings, get_settings
 from app.crypto import decrypt, encrypt, key_hint
-from app.db import Rest, service_db, user_db
+from app.db import Conflict, Rest, service_db, user_db
 from app.mail import alert_admin
 from app.sources import board_from_url, default_name, fetch_live
 from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, Posting
-from app.telemetry import CallLog, RecordingClient, configure_logging, configure_sentry, current_run
+from app.telemetry import CallLog, RecordingClient, configure_logging, configure_sentry, current_run, recorded_claude
 
 logger = logging.getLogger("agent")
 configure_logging()
@@ -68,7 +68,9 @@ Admin = Annotated[CurrentUser, Depends(admin_user)]
 Config = Annotated[Settings, Depends(get_settings)]
 
 
+@lru_cache(maxsize=16)
 def make_client(api_key: str) -> Any:
+    """One Anthropic client per key, reused across requests and runs."""
     import anthropic
 
     return anthropic.Anthropic(api_key=api_key)
@@ -559,9 +561,9 @@ def queue_run(
     fail_runs(db, {"status": UNFINISHED, "created_at": f"lt.{cutoff}"}, f"Stopped after running for more than {RUN_TIME_LIMIT.total_seconds() // 60:.0f} minutes.")
     try:
         [run] = db.insert("agent_runs", {"user_id": user.id, "kind": kind, "input": body.model_dump()}, select="id")
-    except httpx.HTTPStatusError as error:
-        if error.response.status_code == 409:
-            raise HTTPException(409, "A search is already running. Wait for it to finish.")
+    except Conflict as error:
+        if error.run_already_going:
+            raise HTTPException(409, "A search is already running. Wait for it to finish.") from None
         raise
     background.add_task(task, run["id"], body, user, settings)
     return {"run_id": run["id"]}
@@ -644,13 +646,11 @@ def label_linked_board(found: CompanyBoard, user: CurrentUser, settings: Setting
     api_key = anthropic_key(service, user.id, settings)
     if not api_key:
         return
-    calls = CallLog()
     try:
-        label_if_new(found, RecordingClient(make_client(api_key), calls), settings, service, name_companies)
+        with recorded_claude(service, make_client(api_key)) as (client, _):
+            label_if_new(found, client, settings, service, name_companies)
     except Exception as error:
         logger.warning("labeling a linked board failed: %s", error)
-    finally:
-        calls.save(service)
 
 
 def add_linked_company(company: str, user: CurrentUser, settings: Settings) -> None:
@@ -659,10 +659,8 @@ def add_linked_company(company: str, user: CurrentUser, settings: Settings) -> N
     api_key = anthropic_key(service, user.id, settings)
     if not api_key:
         return
-    calls = CallLog()
     try:
-        add_companies_by_name(service, RecordingClient(make_client(api_key), calls), settings, [company], "link")
+        with recorded_claude(service, make_client(api_key)) as (client, _):
+            add_companies_by_name(service, client, settings, [company], "link")
     except Exception as error:
         logger.warning("looking up a manually added company failed: %s", error)
-    finally:
-        calls.save(service)

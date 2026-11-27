@@ -43,7 +43,7 @@ class PersonioSource(JobSource):
             ]
         return [
             Posting(
-                source="personio",
+                source=self.name,
                 board=board,
                 external_id=position.findtext("id", ""),
                 title=position.findtext("name", "").strip(),
@@ -63,6 +63,3 @@ class PersonioSource(JobSource):
         return ElementTree.fromstring(
             self._get_text(board, f"https://{board}.{HOSTS[0]}/xml", params).encode()
         ).findall("position")
-
-    def careers_url(self, board: str) -> str:
-        return f"https://{board}.{HOSTS[0]}/"

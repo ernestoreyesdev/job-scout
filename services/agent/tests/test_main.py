@@ -10,7 +10,7 @@ from app import main
 from app.agents.orchestrator import ImportResult, SearchResult
 from app.agents.schemas import GapAnalysis, GapItem, SearchRule
 from app.auth import CurrentUser
-from app.db import Rest
+from app.db import Rest, check
 from app.sources.base import CompanyNotFound, Posting
 from tests.fakes import fake_settings
 
@@ -32,8 +32,12 @@ class FakeRest(Rest):
 
     def insert(self, table: str, rows: Any, on_conflict: str | None = None, select: str | None = None) -> list[dict[str, Any]]:
         if self.conflict:
-            response = httpx.Response(409, request=httpx.Request("POST", "http://db/rest/v1/agent_runs"))
-            raise httpx.HTTPStatusError("conflict", request=response.request, response=response)
+            response = httpx.Response(
+                409,
+                request=httpx.Request("POST", "http://db/rest/v1/agent_runs"),
+                text='{"message":"duplicate key value violates unique constraint \\"agent_runs_one_active_per_user\\""}',
+            )
+            check(response)
         self.inserts.append((table, rows))
         return [{"id": "run-1"}]
 

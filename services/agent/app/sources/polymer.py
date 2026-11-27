@@ -27,7 +27,7 @@ class PolymerSource(JobSource):
             page += 1
         return [
             Posting(
-                source="polymer",
+                source=self.name,
                 board=board,
                 external_id=str(job["id"]),
                 title=job["title"],

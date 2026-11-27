@@ -1,13 +1,8 @@
-from datetime import UTC, date, datetime, time
 
 from app.sources.base import JobSource, Posting
-from app.sources.text import html_to_text, join_locations
+from app.sources.text import html_to_text, join_locations, posted_on
 
 API = "https://apply.workable.com/api/v1/widget/accounts"
-
-
-def _posted(day: str | None) -> datetime | None:
-    return datetime.combine(date.fromisoformat(day), time(), UTC) if day else None
 
 
 class WorkableSource(JobSource):
@@ -27,20 +22,20 @@ class WorkableSource(JobSource):
         data = self._get_json(board, f"{API}/{board}", {"details": "true"})
         return [
             Posting(
-                source="workable",
+                source=self.name,
                 board=board,
                 external_id=job["shortcode"],
                 title=job["title"],
                 company=data.get("name") or company,
                 location=join_locations(
                     *(
-                        ", ".join(part for part in (place.get("city"), place.get("region"), place.get("country")) if part)
+                        join_locations(place.get("city"), place.get("region"), place.get("country"), separator=", ")
                         for place in job.get("locations") or []
                     )
                 ),
                 url=job["url"],
                 description=html_to_text(job.get("description") or ""),
-                posted_at=_posted(job.get("published_on")),
+                posted_at=posted_on(job.get("published_on")),
                 workplace_type="remote" if job.get("telecommuting") else None,
             )
             for job in data["jobs"]

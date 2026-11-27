@@ -10,16 +10,12 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import anthropic
-
 from app.agents.schemas import JobDetails
 from app.agents.scoring.agent import score_posting
 from app.config import get_settings
 from app.crypto import decrypt
 from app.db import service_db
-from app.sources.base import Posting
-from app.telemetry import CallLog, RecordingClient
-from evals.results import EVAL_CONCURRENCY, usage_cost
+from evals.results import EVAL_CONCURRENCY, eval_client, eval_posting, print_cost
 
 HERE = Path(__file__).parent
 EXACT_FIELDS = ("salary_currency", "salary_period", "clearance", "visa_sponsorship", "years_experience", "workplace_type")
@@ -53,23 +49,11 @@ def main() -> None:
     }
     resumes = db.select("resumes", {"select": "user_id,text", "is_primary": "eq.true", "text": "not.is.null"})
     resume = next(row for row in resumes if row["user_id"] in credentials)
-    credential = {"ciphertext": credentials[resume["user_id"]]}
-    calls = CallLog()
-    client = RecordingClient(anthropic.Anthropic(api_key=decrypt(credential["ciphertext"], settings.agent_encryption_key)), calls)
+    client, calls = eval_client(decrypt(credentials[resume["user_id"]], settings.agent_encryption_key))
 
     def extract(label: dict) -> tuple[dict, JobDetails]:
         item = inputs[(label["source"], label["external_id"])]
-        posting = Posting(
-            source=item["source"],
-            board="eval",
-            external_id=item["external_id"],
-            title=item["title"],
-            company=item["company"],
-            location=item["location"],
-            url="https://example.com",
-            description=item["text"],
-            posted_at=None,
-        )
+        posting = eval_posting(item["external_id"], item["title"], item["company"], item["location"], item["text"], item["source"])
         return label, score_posting(client, settings.scoring_model, settings.scoring_effort, resume["text"], posting).details
 
     # The first call runs alone so the cached resume prefix exists before the rest.
@@ -106,8 +90,8 @@ def main() -> None:
     precision = both / (both + extra) if both + extra else 0
     recall = both / (both + missed) if both + missed else 0
     print(f"\ntech_stack        precision {precision:.0%}, recall {recall:.0%} ({both} shared, {extra} extra, {missed} missed)")
-    cost = usage_cost(usage)
-    print(f"\nCost: ${cost:.3f} ({usage.input_tokens:,} input, {usage.output_tokens:,} output tokens)")
+    print()
+    print_cost(usage)
     if misses:
         print("\nMismatches:")
         print("\n".join(f"  {miss}" for miss in misses))

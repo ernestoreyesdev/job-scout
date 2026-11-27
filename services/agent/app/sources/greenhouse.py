@@ -16,7 +16,7 @@ class GreenhouseSource(JobSource):
         data = self._get_json(board, f"{API}/{board}/jobs", {"content": "true"})
         return [
             Posting(
-                source="greenhouse",
+                source=self.name,
                 board=board,
                 external_id=str(job["id"]),
                 title=job["title"],

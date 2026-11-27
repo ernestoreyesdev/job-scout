@@ -1,5 +1,5 @@
 from app.sources.base import JobSource, Posting, WorkplaceType
-from app.sources.text import html_to_text, workplace_from_location
+from app.sources.text import html_to_text, join_locations, workplace_from_location
 
 HOST = "pinpointhq.com"
 WORKPLACES: dict[str, WorkplaceType] = {"remote": "remote", "hybrid": "hybrid", "onsite": "onsite", "on_site": "onsite"}
@@ -23,7 +23,7 @@ def _description(job: dict) -> str:
 
 def _location(job: dict) -> str | None:
     location = job.get("location") or {}
-    return location.get("name") or ", ".join(p for p in (location.get("city"), location.get("province")) if p) or None
+    return location.get("name") or join_locations(location.get("city"), location.get("province"), separator=", ")
 
 
 class PinpointSource(JobSource):
@@ -42,7 +42,7 @@ class PinpointSource(JobSource):
         data = self._get_json(board, f"https://{board}.{HOST}/postings.json")
         return [
             Posting(
-                source="pinpoint",
+                source=self.name,
                 board=board,
                 external_id=str(job["id"]),
                 title=job["title"],
@@ -55,6 +55,3 @@ class PinpointSource(JobSource):
             )
             for job in data["data"]
         ]
-
-    def careers_url(self, board: str) -> str:
-        return f"https://{board}.{HOST}/"

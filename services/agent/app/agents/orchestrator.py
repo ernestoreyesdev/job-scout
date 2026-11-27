@@ -3,7 +3,7 @@ import re
 import threading
 import time
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, NamedTuple
@@ -56,6 +56,8 @@ POOL_FACTOR = 2
 # With a min score, a search scores another pool while fewer jobs than its limit pass, up to this many pools.
 MAX_SCORING_ROUNDS = 3
 FETCH_CONCURRENCY = 16
+# Job descriptions fetched at once for jobs about to be scored.
+DESCRIBE_CONCURRENCY = 8
 FETCH_RETRY_SECONDS = 2.0
 FETCH_ATTEMPTS = 2
 # Consecutive searches that find a board gone before it leaves the directory.
@@ -65,9 +67,8 @@ MAX_EXAMPLES = 15
 MIN_EXAMPLES = 3
 # A board fetched this recently is read from postings; the daily refresh keeps boards inside it.
 FRESH_BOARD_HOURS = 25
-# Jobs saved per request, requests sent at once, and days a closed job nobody tracks is kept.
+# Jobs saved per request, and days a closed job nobody tracks is kept.
 STORE_CHUNK = 100
-STORE_CONCURRENCY = 1
 STALE_JOB_DAYS = 30
 # Jobs without an embedding that a refresh loads and embeds at a time, newest first, and how many are saved per request.
 EMBED_BATCH = 1000
@@ -223,10 +224,10 @@ def run_search(
         picked = len(chosen)
         report("Scoring jobs against your resume…" if round_number == 0 else "Scoring more jobs to reach your minimum score…")
         if round_number == 0:
-            with timed(timings, "examples"):
-                examples = labeled_examples(user, service, batch, embed, labels)
-            with timed(timings, "lessons"):
-                lessons = current_lessons(client, settings, user, user_id)
+            with ContextThreadPool(max_workers=2) as pool:
+                picking = pool.submit(timed_call, timings, "examples", labeled_examples, user, service, batch, embed, labels)
+                learning = pool.submit(timed_call, timings, "lessons", current_lessons, client, settings, user, user_id)
+                examples, lessons = picking.result(), learning.result()
         with timed(timings, "scoring"):
             scoring = score_and_save(
                 client=client,
@@ -282,34 +283,18 @@ def directory_postings(
     directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,kind,open_jobs,checked_at"})
     choices = {row["company_id"]: row["hidden"] for row in user.select("hidden_companies", {"select": "company_id,hidden"})}
     known = {(c["source"], c["board"]) for c in directory}
-    boards = [
-        Board(c["source"], c["board"], c["name"], c["found_by"])
-        for c in directory
-        if c["kind"] not in SKIPPED_KINDS and not choices.get(c["id"], False)
-    ]
+    boards = searchable_boards([c for c in directory if not choices.get(c["id"], False)])
     skipped: set[BoardKey] = set()
     kinds: dict[BoardKey, str] = {}
 
     if len(directory) < MIN_DIRECTORY or discovery_due(service, rule.keywords):
         report("Gathering open jobs…")
-        found = discover(client, settings.discovery_model, rule.keywords, rule.workplace_types, rule.location)
-        new = [b for b in found if (b.source, b.board) not in known]
-        named = namer(client, settings.discovery_model, new) if new else {}
-        kinds = {key: entry.kind for key, entry in named.items()}
-        boards += [
-            Board(
-                b.source,
-                b.board,
-                named[(b.source, b.board)].name if (b.source, b.board) in named else default_name(b.source, b.board),
-                "discovery",
-            )
-            for b in new
-        ]
-        skipped = {key for key, kind in kinds.items() if kind in SKIPPED_KINDS}
-        service.insert(
-            "directory_discoveries",
-            {"keywords": rule.keywords, "boards_found": len(found), "boards_added": len(new)},
+        discovered, named = discover_new(
+            service, client, settings, rule.keywords, rule.workplace_types, rule.location, known, discover, namer
         )
+        kinds = {key: entry.kind for key, entry in named.items()}
+        boards += discovered
+        skipped = {key for key, kind in kinds.items() if kind in SKIPPED_KINDS}
 
     sizes = {(c["source"], c["board"]): c.get("open_jobs") or 0 for c in directory}
     boards.sort(key=lambda entry: sizes.get(entry.key, 0), reverse=True)
@@ -365,7 +350,7 @@ def one_per_title(postings: list[Posting]) -> list[Posting]:
     seen: set[tuple[str, str, str]] = set()
     unique = []
     for p in postings:
-        key = (p.source, p.board, " ".join(p.title.lower().split()))
+        key = (p.source, p.board, normalized(p.title))
         if key not in seen:
             seen.add(key)
             unique.append(p)
@@ -402,8 +387,8 @@ def with_descriptions(
 ) -> list[tuple[str, Posting]]:
     """
     Fills in descriptions from postings, then fetches the ones a system's job
-    list left out and saves the ones that come back with text. Jobs whose
-    description can't be fetched are dropped.
+    list left out, DESCRIBE_CONCURRENCY at a time, and saves the ones that come
+    back with text. Jobs whose description can't be fetched are dropped.
     """
     missing = [posting_id for posting_id, posting in todo if not posting.description]
     saved = (
@@ -411,21 +396,29 @@ def with_descriptions(
         if missing
         else {}
     )
-    ready: list[tuple[str, Posting]] = []
-    described: list[Posting] = []
-    for posting_id, posting in todo:
-        if not posting.description and saved.get(posting_id):
-            posting = posting.model_copy(update={"description": saved[posting_id]})
-        if posting.description:
-            ready.append((posting_id, posting))
-            continue
+    filled = [
+        (posting_id, posting.model_copy(update={"description": saved[posting_id]}) if not posting.description and saved.get(posting_id) else posting)
+        for posting_id, posting in todo
+    ]
+
+    def describe(posting: Posting) -> Posting | None:
         try:
-            full = posting.model_copy(update={"description": describer(posting)})
+            return posting.model_copy(update={"description": describer(posting)})
         except Exception as error:
             logger.warning("describing %s/%s failed: %s", posting.source, posting.external_id, error)
+            return None
+
+    bare = [posting for _, posting in filled if not posting.description]
+    with ContextThreadPool(max_workers=DESCRIBE_CONCURRENCY) as pool:
+        fetched = dict(zip([id(posting) for posting in bare], pool.map(describe, bare), strict=True))
+    ready: list[tuple[str, Posting]] = []
+    described: list[Posting] = []
+    for posting_id, posting in filled:
+        full = posting if posting.description else fetched[id(posting)]
+        if full is None:
             continue
         ready.append((posting_id, full))
-        if full.description:
+        if full is not posting and full.description:
             described.append(full)
     if described:
         service.insert("postings", [p.row() for p in described], on_conflict="source,external_id")
@@ -577,7 +570,7 @@ def rescore(
 
 def keyword_set(keywords: list[str]) -> frozenset[str]:
     """Keywords compared without case, spacing or order: ['AI  Engineer'] equals ['ai engineer']."""
-    return frozenset(" ".join(keyword.lower().split()) for keyword in keywords)
+    return frozenset(normalized(keyword) for keyword in keywords)
 
 
 @dataclass
@@ -698,8 +691,9 @@ def hiring_thread_postings(
     if not posts:
         return []
     since = min(post.posted_at for post in posts).isoformat()
-    rows = service.select("postings", {"select": ",".join(Posting.model_fields), "source": "eq.hackernews", "posted_at": f"gte.{since}"})
-    saved = [Posting.model_validate(row) for row in rows]
+    columns = ",".join(field for field in Posting.model_fields if field != "description")
+    rows = service.select("postings", {"select": columns, "source": "eq.hackernews", "posted_at": f"gte.{since}"})
+    saved = [Posting.model_validate({**row, "description": ""}) for row in rows]
     read = {post_id(posting) for posting in saved}
     new = [post for post in posts if post.id not in read]
     if not new:
@@ -720,7 +714,7 @@ def remove_duplicate_names(service: Rest) -> set[tuple[str, str]]:
     rows = service.select("companies", {"select": "id,source,board,name,open_jobs,created_at"})
     groups: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        groups.setdefault(" ".join(row["name"].lower().split()), []).append(row)
+        groups.setdefault(normalized(row["name"]), []).append(row)
 
     removed: set[tuple[str, str]] = set()
     for group in groups.values():
@@ -817,7 +811,7 @@ def nearest_examples(
     ids = [posting_id for posting_id, _ in todo]
     labeled = user.select(
         "applications",
-        {"select": "posting_id,posting:postings!inner(title,company,location,description)", "fit_label": "not.is.null"},
+        {"select": "posting_id,posting:postings!inner(title,company,location)", "fit_label": "not.is.null"},
     )
     candidates = ids + [row["posting_id"] for row in labeled]
     embedded = {
@@ -825,9 +819,14 @@ def nearest_examples(
         for row in service.select("posting_embeddings", {"select": "posting_id", "posting_id": f"in.({','.join(candidates)})"})
     }
     pending = {posting_id: job_text(p.title, p.company, p.location, p.description) for posting_id, p in todo if posting_id not in embedded}
-    for row in labeled:
-        if row["posting_id"] not in embedded:
-            pending.setdefault(row["posting_id"], job_text(**row["posting"]))
+    unembedded = [row for row in labeled if row["posting_id"] not in embedded and row["posting_id"] not in pending]
+    descriptions = (
+        {row["id"]: row["description"] for row in service.select("postings", {"select": "id,description", "id": f"in.({','.join(r['posting_id'] for r in unembedded)})"})}
+        if unembedded
+        else {}
+    )
+    for row in unembedded:
+        pending[row["posting_id"]] = job_text(**row["posting"], description=descriptions.get(row["posting_id"], ""))
     save_embeddings(service, list(pending.items()), embed)
     rows = user.rpc("nearest_labeled_jobs", {"job_ids": ids, "per_label": MAX_EXAMPLES})
     return [labeled_job(row["fit_label"], row["posting"]) for row in rows]
@@ -890,7 +889,7 @@ def store_jobs(service: Rest, fetched: dict[BoardKey, list[Posting]], since: str
     Saves every fetched job to postings as open, with its description's hash
     instead of the description, writing only new, changed and reopened ones,
     sets each job's id, and closes the jobs a complete fetch of their board no
-    longer lists. Requests run STORE_CONCURRENCY at a time. Returns how many
+    longer lists, one request at a time. Returns how many
     jobs were created at or after `since`, a database time, and how many closed.
     """
     unique = {(p.source, p.external_id): p for postings in fetched.values() for p in postings}
@@ -898,17 +897,11 @@ def store_jobs(service: Rest, fetched: dict[BoardKey, list[Posting]], since: str
     chunks = [rows[i : i + STORE_CHUNK] for i in range(0, len(rows), STORE_CHUNK)]
     complete = [key for key, postings in fetched.items() if is_complete(key[0], postings)]
 
-    def save(chunk: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return service.rpc("save_postings", {"jobs": chunk})
-
-    def close(key: BoardKey) -> int:
-        source, board = key
-        listed = [p.external_id for p in fetched[key]]
-        return service.rpc("close_unlisted_postings", {"job_source": source, "job_board": board, "listed": listed})
-
-    with ContextThreadPool(max_workers=STORE_CONCURRENCY) as pool:
-        saved = [row for chunk in pool.map(save, chunks) for row in chunk]
-        closed = sum(pool.map(close, complete))
+    saved = [row for chunk in chunks for row in service.rpc("save_postings", {"jobs": chunk})]
+    closed = sum(
+        service.rpc("close_unlisted_postings", {"job_source": source, "job_board": board, "listed": [p.external_id for p in fetched[(source, board)]]})
+        for source, board in complete
+    )
     set_ids([p for postings in fetched.values() for p in postings], saved)
     return sum(1 for row in saved if since and row["created_at"] >= since), closed
 
@@ -960,14 +953,13 @@ def refresh_boards(
     if client is not None and settings is not None:
         grow_directory(service, client, settings, previous[0]["started_at"] if previous else None)
     directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,kind,open_jobs"})
-    directory = [c for c in directory if c["kind"] not in SKIPPED_KINDS]
     directory.sort(key=lambda c: c.get("open_jobs") or 0, reverse=True)
-    boards = [Board(c["source"], c["board"], c["name"], c["found_by"]) for c in directory]
+    boards = searchable_boards(directory)
     fetched, gone, unreachable, fetches = fetch_boards(boards, fetcher, lambda _: None)
     gone_companies = [c for c in directory if (c["source"], c["board"]) in gone]
     new, closed = record_board_checks(service, boards, fetched, gone_companies, since=refresh["started_at"])
     remove_duplicate_names(service)
-    descriptions = {(p.source, p.external_id): p.description for postings in fetched.values() for p in postings}
+    descriptions = fetched_descriptions(fetched)
     embedded = 0
     while (batch := embed_missing(service, embed, EMBED_BATCH, descriptions)) == EMBED_BATCH:
         embedded += batch
@@ -1147,7 +1139,7 @@ def add_hiring_thread_companies(
     for row in rows:
         url = next((url for url in LINK.findall(row["description"] or "") if board_from_url(url)), None)
         if url:
-            links.setdefault(" ".join(row["company"].lower().split()), url)
+            links.setdefault(normalized(row["company"]), url)
     return add_companies_by_name(service, client, settings, [row["company"] for row in rows], "hacker_news", links)
 
 
@@ -1160,7 +1152,7 @@ def add_companies_by_name(
     name, else looked up on every system's spellings, where a board with no open
     jobs counts as not found. None when there were none to look up.
     """
-    listed = {" ".join(c["name"].lower().split()) for c in service.select("companies", {"select": "name"})}
+    listed = {normalized(c["name"]) for c in service.select("companies", {"select": "name"})}
     wanted = {" ".join(name.split()) for name in names if name and name.strip()}
     entries = sorted((links or {}).get(name.lower(), name) for name in wanted if name.lower() not in listed)
     if not entries:
@@ -1176,13 +1168,7 @@ def add_companies_by_name(
     )
 
 
-def discover_for_recent_searches(
-    service: Rest,
-    client: Any,
-    settings: Settings,
-    discover: Callable[..., list[FoundBoard]] = discover_boards,
-    namer: Callable[..., dict[tuple[str, str], CompanyName]] = name_companies,
-) -> int:
+def discover_for_recent_searches(service: Rest, client: Any, settings: Settings) -> int:
     """
     Runs web discovery for up to DAILY_DISCOVERIES keyword sets searched in the
     last DISCOVERY_SEARCH_DAYS days, those discovered longest ago or never
@@ -1202,21 +1188,11 @@ def discover_for_recent_searches(
     added = 0
     for key in sorted(searched, key=lambda key: last.get(key, ""))[:DAILY_DISCOVERIES]:
         keywords = searched[key]
-        found = discover(client, settings.discovery_model, keywords, [], None)
-        new = [b for b in found if (b.source, b.board) not in known]
-        named = namer(client, settings.discovery_model, new) if new else {}
-        names = {key: entry.name for key, entry in named.items()}
-        boards = [
-            Board(b.source, b.board, names.get((b.source, b.board)) or default_name(b.source, b.board), "discovery")
-            for b in new
-        ]
+        boards, named = discover_new(service, client, settings, keywords, [], None, known, discover_boards, name_companies)
         save_companies(service, boards, {})
         record_kinds(service, {board_key: entry.kind for board_key, entry in named.items()})
-        service.insert(
-            "directory_discoveries", {"keywords": keywords, "boards_found": len(found), "boards_added": len(new)}
-        )
-        known |= {(b.source, b.board) for b in new}
-        added += len(new)
+        known |= {entry.key for entry in boards}
+        added += len(boards)
     if added:
         remove_duplicate_names(service)
     return added
@@ -1228,3 +1204,44 @@ def find_company_with_jobs(company: str) -> CompanyBoard:
     if not found.postings:
         raise CompanyNotFound(f"Couldn't find open jobs for {company}.")
     return found
+
+
+def normalized(text: str) -> str:
+    """Lowercase with runs of whitespace as single spaces: ' Scale  AI ' -> 'scale ai'."""
+    return " ".join(text.lower().split())
+
+
+def searchable_boards(directory: list[dict[str, Any]]) -> list[Board]:
+    """The directory rows searches read, leaving out companies of a SKIPPED_KINDS kind."""
+    return [Board(c["source"], c["board"], c["name"], c["found_by"]) for c in directory if c["kind"] not in SKIPPED_KINDS]
+
+
+def discover_new(
+    service: Rest,
+    client: Any,
+    settings: Settings,
+    keywords: list[str],
+    workplace_types: Sequence[str],
+    location: str | None,
+    known: set[BoardKey],
+    discover: Callable[..., list[FoundBoard]],
+    namer: Callable[..., dict[tuple[str, str], CompanyName]],
+) -> tuple[list[Board], dict[tuple[str, str], CompanyName]]:
+    """
+    Runs web discovery, names the boards not in `known` and records the run in
+    directory_discoveries. Returns the new boards and what naming said of each.
+    """
+    found = discover(client, settings.discovery_model, keywords, workplace_types, location)
+    new = [b for b in found if (b.source, b.board) not in known]
+    named = namer(client, settings.discovery_model, new) if new else {}
+    boards = [
+        Board(b.source, b.board, named[(b.source, b.board)].name if (b.source, b.board) in named else default_name(b.source, b.board), "discovery")
+        for b in new
+    ]
+    service.insert("directory_discoveries", {"keywords": keywords, "boards_found": len(found), "boards_added": len(new)})
+    return boards, named
+
+
+def fetched_descriptions(fetched: dict[BoardKey, list[Posting]]) -> dict[tuple[str, str], str]:
+    """The descriptions boards listed, by (source, external id), for embedding without fetching them again."""
+    return {(p.source, p.external_id): p.description for postings in fetched.values() for p in postings}

@@ -1,5 +1,5 @@
 from app.sources.base import BoardNotFound, JobSource, Posting, WorkplaceType
-from app.sources.text import country_name, html_to_text
+from app.sources.text import country_name, html_to_text, join_locations
 
 API = "https://api.smartrecruiters.com/v1/companies"
 JOB_PAGE = "https://jobs.smartrecruiters.com"
@@ -13,8 +13,7 @@ def _workplace(location: dict) -> WorkplaceType:
 
 
 def _location(location: dict) -> str | None:
-    parts = [location.get("city"), location.get("region"), country_name(location.get("country"))]
-    return ", ".join(part for part in parts if part) or None
+    return join_locations(location.get("city"), location.get("region"), country_name(location.get("country")), separator=", ")
 
 
 class SmartRecruitersSource(JobSource):
@@ -40,7 +39,7 @@ class SmartRecruitersSource(JobSource):
 
         return [
             Posting(
-                source="smartrecruiters",
+                source=self.name,
                 board=board,
                 external_id=job["id"],
                 title=job["name"],

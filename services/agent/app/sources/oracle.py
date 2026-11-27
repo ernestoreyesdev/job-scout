@@ -1,10 +1,8 @@
 import re
-from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, date, datetime, time
 from urllib.parse import urlparse
 
-from app.sources.base import BoardNotFound, JobSource, Posting
-from app.sources.text import html_to_text, workplace_from_location
+from app.sources.base import BoardNotFound, JobSource, Posting, distinct
+from app.sources.text import html_to_text, posted_on, workplace_from_location
 
 DOMAIN = "oraclecloud.com"
 API = "hcmRestApi/resources/latest"
@@ -22,10 +20,6 @@ def _parts(board: str) -> tuple[str, str]:
     if not match:
         raise BoardNotFound(f"Oracle board '{board}' isn't in tenant.fa/site form.")
     return f"{match['host']}.{DOMAIN}", match["site"]
-
-
-def _posted(day: str | None) -> datetime | None:
-    return datetime.combine(date.fromisoformat(day), time(), UTC) if day else None
 
 
 class OracleSource(JobSource):
@@ -52,19 +46,13 @@ class OracleSource(JobSource):
         first = page(0)
         jobs = list(first["requisitionList"])
         total = min(first.get("TotalJobsCount") or 0, MAX_JOBS)
-        with ThreadPoolExecutor(max_workers=PAGE_CONCURRENCY) as pool:
-            for more in pool.map(page, range(PAGE_SIZE, total, PAGE_SIZE)):
-                jobs += more["requisitionList"]
+        jobs += [job for more in self._pages(page, range(PAGE_SIZE, total, PAGE_SIZE), PAGE_CONCURRENCY) for job in more["requisitionList"]]
 
-        seen: set[str] = set()
         postings = []
-        for job in jobs:
-            if job["Id"] in seen:
-                continue
-            seen.add(job["Id"])
+        for job in distinct(jobs, lambda job: job["Id"]):
             postings.append(
                 Posting(
-                    source="oracle",
+                    source=self.name,
                     board=board,
                     external_id=job["Id"],
                     title=job["Title"],
@@ -72,7 +60,7 @@ class OracleSource(JobSource):
                     location=job.get("PrimaryLocation") or None,
                     url=f"https://{host}/hcmUI/CandidateExperience/en/sites/{site.upper()}/job/{job['Id']}",
                     description="",
-                    posted_at=_posted(job.get("PostedDate")),
+                    posted_at=posted_on(job.get("PostedDate")),
                     workplace_type=workplace_from_location(job.get("WorkplaceType") or job.get("PrimaryLocation")),
                 )
             )
@@ -89,7 +77,7 @@ class OracleSource(JobSource):
         return []
 
     def default_name(self, board: str) -> str:
-        return _parts(board)[0].split(".")[0].replace("-", " ").title()
+        return super().default_name(_parts(board)[0].split(".")[0])
 
     def board_from_url(self, url: str) -> str | None:
         """https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/123 -> jpmc.fa/cx_1001"""

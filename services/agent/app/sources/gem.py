@@ -16,7 +16,7 @@ class GemSource(JobSource):
         jobs = self._get_json(board, f"{API}/{board}/job_posts/")
         return [
             Posting(
-                source="gem",
+                source=self.name,
                 board=board,
                 external_id=job["id"],
                 title=job["title"],

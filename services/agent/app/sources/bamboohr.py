@@ -38,7 +38,7 @@ class BambooHRSource(JobSource):
         data = self._get_json(board, f"https://{board}.{HOST}/careers/list")
         return [
             Posting(
-                source="bamboohr",
+                source=self.name,
                 board=board,
                 external_id=str(job["id"]),
                 title=job["jobOpeningName"].strip(),

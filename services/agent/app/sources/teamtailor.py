@@ -28,7 +28,7 @@ class TeamtailorSource(JobSource):
         name = (channel.findtext("title") if channel is not None else None) or company
         return [
             Posting(
-                source="teamtailor",
+                source=self.name,
                 board=board,
                 external_id=item.findtext("guid") or item.findtext("link") or "",
                 title=item.findtext("title") or "",

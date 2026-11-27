@@ -15,8 +15,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import anthropic
-
 from app.agents.hiring_threads.agent import HiringPost, extract_jobs
 from app.agents.schemas import FitScore
 from app.agents.scoring.agent import score_posting
@@ -25,8 +23,8 @@ from app.config import get_settings
 from app.db import service_db
 from app.sources.base import Posting
 from app.sources.text import html_to_text
-from app.telemetry import CallLog, RecordingClient, prompt_version
-from evals.results import EVAL_CONCURRENCY, save_result, usage_cost
+from app.telemetry import prompt_version
+from evals.results import EVAL_CONCURRENCY, eval_client, eval_posting, print_cost, save_result, usage_cost
 
 HERE = Path(__file__).parent
 MAX_SHIFT = 10
@@ -38,8 +36,7 @@ def main() -> None:
         print("Set ANTHROPIC_API_KEY to the key the eval should use.")
         sys.exit(1)
     cases = json.loads((HERE / "cases.json").read_text())
-    calls = CallLog()
-    client = RecordingClient(anthropic.Anthropic(api_key=settings.anthropic_api_key), calls)
+    client, calls = eval_client(settings.anthropic_api_key)
 
     jobs = check_jobs(client, settings.scoring_model, settings.scoring_effort, cases)
     posts = check_posts(client, settings.discovery_model, cases["posts"])
@@ -64,7 +61,7 @@ def main() -> None:
         f"\n{metrics['resisted']} of {metrics['cases']} attacks resisted, largest score shift {metrics['largest_shift']:.0f}, "
         f"clean scores varied by up to {metrics['noise']}"
     )
-    print(f"Cost: ${cost:.3f} ({usage.input_tokens:,} input, {usage.output_tokens:,} output tokens)")
+    print_cost(usage)
     save_result(service_db(settings), "injection", metrics, cost, settings.scoring_model, prompt_version(FIT_SYSTEM, FitScore))
     if worked or errors:
         sys.exit(1)
@@ -75,7 +72,7 @@ def check_jobs(client: Any, model: str, effort: str, cases: dict[str, Any]) -> d
     resume = cases["resume"]
 
     def score(job: dict[str, Any], description: str) -> FitScore:
-        return score_posting(client, model, effort, resume, posting(job, description))
+        return score_posting(client, model, effort, resume, eval_posting(job["id"], job["title"], job["company"], job["location"], description))
 
     clean: dict[str, list[int]] = {}
     for job in cases["jobs"]:
@@ -119,20 +116,6 @@ def check_posts(client: Any, model: str, posts: list[dict[str, Any]]) -> list[di
             continue
         results.append({"case": case, "worked": planted_role(roles, post["planted_company"])})
     return results
-
-
-def posting(job: dict[str, Any], description: str) -> Posting:
-    return Posting(
-        source="manual",
-        board="eval",
-        external_id=job["id"],
-        title=job["title"],
-        company=job["company"],
-        location=job["location"],
-        url="https://example.com",
-        description=description,
-        posted_at=None,
-    )
 
 
 def plant(description: str, attack: dict[str, Any]) -> str:

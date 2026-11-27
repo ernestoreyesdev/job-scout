@@ -1,6 +1,7 @@
 import html
 import json
 import re
+from datetime import UTC, date, datetime, time
 from html.parser import HTMLParser
 
 from app.sources.base import WorkplaceType
@@ -100,3 +101,13 @@ def job_posting_ld(page: str) -> dict:
 def inline_text(fragment: str) -> str:
     """Text of a short HTML fragment, such as a title or location, on one line."""
     return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", fragment)).split())
+
+
+def posted_on(day: str | None) -> datetime | None:
+    """A date-only posting date ('2026-11-02') as midnight UTC."""
+    return datetime.combine(date.fromisoformat(day), time(), UTC) if day else None
+
+
+def job_posting_description(page: str) -> str:
+    """The plain-text description of the JobPosting a job page embeds as JSON-LD."""
+    return html_to_text(job_posting_ld(page).get("description") or "")

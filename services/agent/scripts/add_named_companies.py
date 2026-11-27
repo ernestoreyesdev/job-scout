@@ -16,7 +16,7 @@ from app.agents.orchestrator import ImportResult, add_companies_by_name, add_hir
 from app.config import get_settings
 from app.db import service_db
 from app.sources import board_from_url
-from app.telemetry import CallLog, RecordingClient
+from app.telemetry import recorded_claude
 
 
 def main() -> None:
@@ -24,15 +24,11 @@ def main() -> None:
     if not settings.anthropic_api_key:
         sys.exit("Set ANTHROPIC_API_KEY: the companies found are named and labeled with Claude.")
     service = service_db(settings)
-    calls = CallLog()
-    client = RecordingClient(anthropic.Anthropic(api_key=settings.anthropic_api_key), calls)
-    try:
+    with recorded_claude(service, anthropic.Anthropic(api_key=settings.anthropic_api_key)) as (client, _):
         report("Hacker News", add_hiring_thread_companies(service, client, settings, None))
         added = service.select("applications", {"select": "posting:postings(company,url)", "added_by": "eq.user"})
         names = [row["posting"]["company"] for row in added if not board_from_url(row["posting"]["url"])]
         report("Added by hand", add_companies_by_name(service, client, settings, names, "link"))
-    finally:
-        calls.save(service)
 
 
 def report(label: str, result: ImportResult | None) -> None:

@@ -10,7 +10,7 @@ project. Safe to stop and rerun.
 
 import time
 
-from app.agents.orchestrator import SKIPPED_KINDS, Board, embed_missing, fetch_boards
+from app.agents.orchestrator import embed_missing, fetch_boards, fetched_descriptions, searchable_boards
 from app.config import get_settings
 from app.db import service_db
 from app.embeddings import embed_jobs
@@ -22,12 +22,9 @@ BATCH = 500
 def main() -> None:
     service = service_db(get_settings())
     started = time.monotonic()
-    directory = service.select("companies", {"select": "source,board,name,found_by,kind"})
-    boards = [
-        Board(c["source"], c["board"], c["name"], c["found_by"]) for c in directory if c["kind"] not in SKIPPED_KINDS
-    ]
+    boards = searchable_boards(service.select("companies", {"select": "source,board,name,found_by,kind"}))
     fetched, _, unreachable, _ = fetch_boards(boards, fetch_live, lambda _: None)
-    descriptions = {(p.source, p.external_id): p.description for postings in fetched.values() for p in postings}
+    descriptions = fetched_descriptions(fetched)
     print(f"Fetched {len(fetched):,} boards, {len(unreachable):,} unreachable, {time.monotonic() - started:.0f} s")
     total = 0
     while count := embed_missing(service, embed_jobs, BATCH, descriptions):

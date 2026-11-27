@@ -36,7 +36,7 @@ class RecruiteeSource(JobSource):
         data = self._get_json(board, f"https://{board}.{HOST}/api/offers/")
         return [
             Posting(
-                source="recruitee",
+                source=self.name,
                 board=board,
                 external_id=str(job["id"]),
                 title=job["title"],
@@ -52,6 +52,3 @@ class RecruiteeSource(JobSource):
             for job in data["offers"]
             if job.get("status", "published") == "published"
         ]
-
-    def careers_url(self, board: str) -> str:
-        return f"https://{board}.{HOST}/"

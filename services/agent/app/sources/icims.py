@@ -1,10 +1,9 @@
 import html
 import re
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
-from app.sources.base import JobSource, Posting
-from app.sources.text import country_name, html_to_text, inline_text, job_posting_ld, workplace_from_location
+from app.sources.base import JobSource, Posting, distinct
+from app.sources.text import country_name, inline_text, job_posting_description, workplace_from_location
 
 HOST = "icims.com"
 # Search pages read, and the jobs a page lists.
@@ -64,22 +63,18 @@ class ICIMSSource(JobSource):
         first = page(0)
         total = PAGES.search(first)
         count = min(int(total[1].replace(",", "")), MAX_PAGES) if total else 1
-        with ThreadPoolExecutor(max_workers=PAGE_CONCURRENCY) as pool:
-            pages = [first, *pool.map(page, range(1, count))]
+        pages = [first, *self._pages(page, range(1, count), PAGE_CONCURRENCY)]
 
-        seen: set[str] = set()
+        cards = ((card, LINK.search(card)) for text in pages for card in CARD.findall(text))
         postings = []
-        for card in (card for text in pages for card in CARD.findall(text)):
-            link = LINK.search(card)
-            if not link or link[2] in seen:
-                continue
-            seen.add(link[2])
+        for card, link in distinct(cards, lambda pair: pair[1][2] if pair[1] else None):
+            assert link is not None
             location = LOCATION.search(card)
             posted = POSTED.search(card)
             place = _place(inline_text(location[1])) if location else None
             postings.append(
                 Posting(
-                    source="icims",
+                    source=self.name,
                     board=board,
                     external_id=link[2],
                     title=inline_text(link[3]),
@@ -95,7 +90,7 @@ class ICIMSSource(JobSource):
 
     def describe(self, posting: Posting) -> str:
         page = self._get_text(posting.board, posting.url, {"in_iframe": "1"})
-        return html_to_text(job_posting_ld(page).get("description") or "")
+        return job_posting_description(page)
 
     def board_candidates(self, company: str) -> list[str]:
         return [f"careers-{candidate}" for candidate in super().board_candidates(company)]

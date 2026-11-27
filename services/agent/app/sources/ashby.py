@@ -20,7 +20,7 @@ class AshbySource(JobSource):
         data = self._get_json(board, f"{API}/{board}")
         return [
             Posting(
-                source="ashby",
+                source=self.name,
                 board=board,
                 external_id=job["id"],
                 title=job["title"],

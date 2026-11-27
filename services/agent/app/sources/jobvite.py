@@ -1,7 +1,7 @@
 import re
 
-from app.sources.base import JobSource, Posting
-from app.sources.text import html_to_text, inline_text, job_posting_ld, workplace_from_location
+from app.sources.base import JobSource, Posting, distinct
+from app.sources.text import inline_text, job_posting_description, workplace_from_location
 
 HOST = "jobs.jobvite.com"
 ROW = re.compile(
@@ -27,16 +27,12 @@ class JobviteSource(JobSource):
 
     def fetch(self, board: str, company: str) -> list[Posting]:
         page = self._get_text(board, f"https://{HOST}/{board}/jobs")
-        seen: set[str] = set()
         postings = []
-        for job_id, title, location in ROW.findall(page):
-            if job_id in seen:
-                continue
-            seen.add(job_id)
+        for job_id, title, location in distinct(ROW.findall(page), lambda row: row[0]):
             place = inline_text(location) or None
             postings.append(
                 Posting(
-                    source="jobvite",
+                    source=self.name,
                     board=board,
                     external_id=job_id,
                     title=inline_text(title),
@@ -52,7 +48,7 @@ class JobviteSource(JobSource):
 
     def describe(self, posting: Posting) -> str:
         page = self._get_text(posting.board, posting.url)
-        return html_to_text(job_posting_ld(page).get("description") or "")
+        return job_posting_description(page)
 
     def careers_url(self, board: str) -> str:
         return f"https://{HOST}/{board}/jobs"
