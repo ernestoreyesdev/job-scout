@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 
-from app.agents.orchestrator import SearchResult, run_search
+from app.agents.orchestrator import JobCache, SearchResult, run_search
 from app.agents.schemas import SearchRule
 from app.config import Settings
 from app.constants import STRONG_FIT_SCORE
@@ -51,8 +51,9 @@ def run_alerts(
     Runs every marked search for its user and emails ADMIN_EMAIL each user's new
     strong matches; without ADMIN_EMAIL no email goes out. A user with daily
     emails off or without a primary resume, or with a run already going, is
-    skipped, and a user whose searches fail doesn't stop the others. Returns how
-    many searches ran and how many emails went out.
+    skipped, and a user whose searches fail doesn't stop the others. All searches
+    share one JobCache, so saved jobs are read once. Returns how many searches
+    ran and how many emails went out.
     """
     alerts = service.select("search_alerts", {"select": "user_id,rule", "order": "created_at"})
     switched_on = {row["user_id"] for row in service.select("profiles", {"select": "user_id", "daily_emails": "eq.true"})}
@@ -61,6 +62,7 @@ def run_alerts(
         rules.setdefault(alert["user_id"], []).append(alert["rule"])
 
     searches = emails = 0
+    cache = JobCache()
     for user_id, user_rules in rules.items():
         resumes = service.select("resumes", {"select": "id,text", "user_id": f"eq.{user_id}", "is_primary": "eq.true"})
         if not resumes or not resumes[0]["text"]:
@@ -75,7 +77,7 @@ def run_alerts(
             user = as_user(settings, session.access_token)
             started = datetime.now(UTC).isoformat()
             for rule in user_rules:
-                if run_alert(user, service, settings, client, user_id, resumes[0], rule, search):
+                if run_alert(user, service, settings, client, user_id, resumes[0], rule, search, cache):
                     searches += 1
             jobs = keep_top(user, new_matches(user, started))
             key = f"matches/{user_id}/{started[:10]}"
@@ -97,6 +99,7 @@ def run_alert(
     resume: dict[str, Any],
     rule: dict[str, Any],
     search: Callable[..., SearchResult],
+    cache: JobCache,
 ) -> bool:
     """
     Runs one marked search as a scored search keeping jobs at MIN_ALERT_SCORE or
@@ -125,6 +128,7 @@ def run_alert(
             user=user,
             service=service,
             report=lambda _: None,
+            cache=cache,
         )
         jobs = "job" if result.kept == 1 else "jobs"
         outcome = {

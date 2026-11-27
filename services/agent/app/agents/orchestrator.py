@@ -111,6 +111,14 @@ class SearchResult:
     board_fetches: list[dict[str, Any]] = field(default_factory=list)
 
 
+@dataclass
+class JobCache:
+    """Jobs read once and reused by searches run one after another, such as a day's daily searches."""
+
+    boards: dict[BoardKey, list[Posting]] = field(default_factory=dict)
+    hacker_news: list[Posting] | None = None
+
+
 def run_search(
     *,
     rule: SearchRule,
@@ -133,6 +141,7 @@ def run_search(
     expander: Callable[..., list[str]] = related_titles,
     embed: Callable[[list[str]], list[list[float]]] = embed_jobs,
     timings: dict[str, int] | None = None,
+    cache: JobCache | None = None,
 ) -> SearchResult:
     """
     One search run: gathers open jobs from one company, or from the whole
@@ -162,14 +171,22 @@ def run_search(
             return SearchResult(0, 0, company=found.name)
         everything = found.postings
     else:
+        cached_posts = cache.hacker_news if cache else None
         with ContextThreadPool(max_workers=2) as pool:
-            hacker_news = pool.submit(
-                timed_call, timings, "hacker_news", hiring_thread_postings, client, settings, service, report, read_posts, extractor
+            hacker_news = (
+                pool.submit(
+                    timed_call, timings, "hacker_news", hiring_thread_postings, client, settings, service, report, read_posts, extractor
+                )
+                if cached_posts is None
+                else None
             )
             everything, unreachable, fetches = timed_call(
-                timings, "companies", directory_postings, rule, client, settings, user, service, report, fetcher, discover, namer
+                timings, "companies", directory_postings, rule, client, settings, user, service, report, fetcher, discover, namer, cache
             )
-            everything = everything + hacker_news.result()
+            posts = hacker_news.result() if hacker_news else cached_posts or []
+        if cache:
+            cache.hacker_news = posts
+        everything = everything + posts
 
     with timed(timings, "titles"):
         titles = expander(client, settings.discovery_model, rule.keywords) if everything else []
@@ -273,11 +290,13 @@ def directory_postings(
     fetcher: Callable[[str, str, str], list[Posting]],
     discover: Callable[..., list[FoundBoard]],
     namer: Callable[..., dict[tuple[str, str], CompanyName]],
+    cache: JobCache | None = None,
 ) -> tuple[list[Posting], list[str], list[dict[str, Any]]]:
     """
     Open jobs at every directory company the user hasn't hidden, topping the
     directory up from the web while it's small or once a week. Staffing
-    agencies are left out, and none of their jobs are saved. Returns the jobs,
+    agencies are left out, and none of their jobs are saved. Boards in `cache`
+    are taken from it, and the ones read here are added to it. Returns the jobs,
     the unreachable boards and each board fetch's timing.
     """
     directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,kind,open_jobs,checked_at"})
@@ -305,8 +324,14 @@ def directory_postings(
         if c.get("checked_at") and datetime.fromisoformat(c["checked_at"]) >= since
     }
     report("Gathering open jobs…")
-    stored = stored_jobs(service, [entry for entry in boards if entry.key in fresh])
-    fetched, gone, unreachable, fetches = fetch_boards([entry for entry in boards if entry.key not in fresh], fetcher, report)
+    known_jobs = cache.boards if cache else {}
+    stored = stored_jobs(service, [entry for entry in boards if entry.key in fresh and entry.key not in known_jobs])
+    stored |= {entry.key: known_jobs[entry.key] for entry in boards if entry.key in known_jobs}
+    fetched, gone, unreachable, fetches = fetch_boards(
+        [entry for entry in boards if entry.key not in fresh and entry.key not in known_jobs], fetcher, report
+    )
+    if cache:
+        cache.boards |= stored | fetched
     fetches += [
         {"board": board_label(key), "source": key[0], "ms": 0, "jobs": len(jobs), "outcome": "cached"}
         for key, jobs in stored.items()

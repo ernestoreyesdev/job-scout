@@ -1477,3 +1477,47 @@ def test_ranking_splits_the_jobs_into_batches_and_merges_them_best_first(monkeyp
 
     assert sorted(args["job_ids"] for _, args in service.rpcs) == [["a", "b"], ["c", "d"], ["e"]]
     assert [posting_id for posting_id, _ in ranked] == ["b", "d", "c", "a", "e"]
+
+
+def test_searches_sharing_a_job_cache_read_saved_jobs_hacker_news_and_live_boards_once():
+    checked = datetime.now(UTC).isoformat()
+    stale = (datetime.now(UTC) - timedelta(hours=orchestrator.FRESH_BOARD_HOURS + 1)).isoformat()
+    saved = {k: v for k, v in REMOTE_JOB.model_dump(mode="json").items() if k != "description"}
+    service = FakeRest(
+        companies=[
+            *full_directory(),
+            {**workday_company("acme"), "checked_at": checked},
+            {**company("beta"), "checked_at": stale},
+        ],
+        discoveries=[{"id": "recent", "keywords": ["software engineer"]}],
+    )
+    service.stored = [{**saved, "id": "p-1", "board": "acme", "source": "workday"}]
+    fetched: list[str] = []
+    posts_read: list[bool] = []
+
+    def fetcher(source: str, board: str, name: str) -> list[Posting]:
+        fetched.append(board)
+        return [REMOTE_JOB] if board == "beta" else []
+
+    def read_posts() -> list[HiringPost]:
+        posts_read.append(True)
+        return []
+
+    cache = orchestrator.JobCache()
+    results = [
+        run(
+            rule=SearchRule(keywords=["software engineer"], workplace_types=["remote"]),
+            service=service,
+            user=FakeRest(),
+            fetcher=fetcher,
+            read_posts=read_posts,
+            cache=cache,
+        )[0]
+        for _ in range(2)
+    ]
+
+    assert fetched.count("beta") == 1 and len(fetched) == len(set(fetched))
+    assert len([params for table, params in service.selects if table == "postings" and "board" in params]) == 1
+    assert len(posts_read) == 1
+    assert results[0].found == results[1].found == 2
+
