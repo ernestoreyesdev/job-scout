@@ -4,6 +4,7 @@ locals {
       ADMIN_EMAIL               = var.admin_email
       ANTHROPIC_API_KEY         = var.anthropic_api_key
       SUPABASE_ACCESS_TOKEN     = var.supabase_access_token
+      SUPABASE_ANON_KEY         = data.supabase_apikeys.production.publishable_key
       SUPABASE_DB_PASSWORD      = var.supabase_db_password
       SUPABASE_PROJECT_ID       = supabase_project.production.id
       SUPABASE_SERVICE_ROLE_KEY = local.supabase_secret_key

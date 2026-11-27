@@ -27,8 +27,8 @@ jobs:
       SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
       HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_REFRESH_URL }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
       # Required by the agent's settings, unused by the refresh.
-      SUPABASE_ANON_KEY: unused
       AGENT_ENCRYPTION_KEY: unused
     steps:
       - uses: actions/checkout@v7

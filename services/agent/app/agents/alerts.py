@@ -78,6 +78,8 @@ def run_alerts(
             key = f"matches/{user_id}/{started[:10]}"
             if jobs and send(settings, session.email, matches_subject(jobs), matches_body(settings, jobs), key):
                 emails += 1
+        except Exception:
+            logger.exception("daily searches failed for the user", extra={"user_id": user_id})
         finally:
             (close_session or sign_out)(settings, session)
     return {"searches": searches, "emails": emails}

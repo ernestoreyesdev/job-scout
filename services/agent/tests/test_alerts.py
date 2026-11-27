@@ -175,3 +175,29 @@ def test_a_user_with_daily_emails_off_gets_no_searches_or_email():
     summary, searches, sent = daily(service, {"token-u1": FakeDb({"applications": [MATCH]})})
 
     assert summary == {"searches": 0, "emails": 0} and searches == [] and sent == []
+
+
+def test_a_user_whose_run_fails_to_save_doesnt_stop_the_next_user(monkeypatch):
+    service = FakeDb(
+        {
+            "search_alerts": [{"user_id": "u1", "rule": {"keywords": ["a"]}}, {"user_id": "u2", "rule": {"keywords": ["b"]}}],
+            "resumes": [
+                {"user_id": "u1", "id": "resume-1", "text": "Engineer."},
+                {"user_id": "u2", "id": "resume-2", "text": "Engineer."},
+            ],
+            "profiles": [{"user_id": "u1"}, {"user_id": "u2"}],
+        }
+    )
+    broken = FakeDb({"applications": [MATCH]})
+
+    def refuse(*_: Any, **__: Any) -> list[dict[str, Any]]:
+        raise RuntimeError("401 Invalid API key")
+
+    monkeypatch.setattr(broken, "insert", refuse)
+    monkeypatch.setattr(alerts.logger, "exception", lambda *a, **k: None)
+
+    summary, _, sent = daily(service, {"token-u1": broken, "token-u2": FakeDb({"applications": [MATCH]})})
+
+    assert summary == {"searches": 1, "emails": 1}
+    [(_, to, *_)] = sent
+    assert to == "u2@example.com"
