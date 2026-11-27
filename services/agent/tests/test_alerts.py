@@ -17,7 +17,7 @@ class FakeDb:
     def __init__(self, tables: dict[str, list[dict[str, Any]]]):
         self.tables = tables
         self.inserts: list[tuple[str, Any]] = []
-        self.updates: list[tuple[str, dict[str, Any]]] = []
+        self.updates: list[tuple[str, dict[str, str], dict[str, Any]]] = []
 
     def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
         if table == "resumes":
@@ -29,7 +29,7 @@ class FakeDb:
         return [{"id": f"run-{len(self.inserts)}"}]
 
     def update(self, table: str, filters: dict[str, str], patch: dict[str, Any]) -> list[dict[str, Any]]:
-        self.updates.append((table, patch))
+        self.updates.append((table, filters, patch))
         return []
 
 
@@ -71,7 +71,7 @@ def test_marked_searches_run_as_their_user_with_a_minimum_of_70_and_email_the_ne
     assert (search["rule"].score, search["rule"].min_score, search["rule"].web_lookup) == (True, 70, False)
     [(table, run)] = user.inserts
     assert table == "agent_runs" and run["kind"] == "search" and run["input"]["min_score"] == 70
-    assert user.updates[0][1]["status"] == "done"
+    assert user.updates[0][2]["status"] == "done"
     [(_, to, subject, _, key)] = sent
     assert to == "u1@example.com" and subject == "1 new job scoring 70+ on Job Scout" and key.startswith("matches/u1/")
 
@@ -133,4 +133,23 @@ def test_a_failed_search_is_recorded_and_the_email_still_covers_the_rest(monkeyp
     )
 
     assert summary == {"searches": 1, "emails": 1}
-    assert [patch["status"] for _, patch in user.updates] == ["failed", "done"]
+    assert [patch["status"] for _, _, patch in user.updates] == ["failed", "done"]
+
+
+def test_only_the_best_10_matches_across_searches_stay_on_the_tracker_and_get_emailed():
+    service = FakeDb(
+        {
+            "search_alerts": [{"user_id": "u1", "rule": {"keywords": ["a"]}}, {"user_id": "u1", "rule": {"keywords": ["b"]}}],
+            "resumes": [{"user_id": "u1", "id": "resume-1", "text": "Engineer."}],
+        }
+    )
+    matches = [{**MATCH, "id": f"app-{n}", "fit_score": 95 - n} for n in range(12)]
+    user = FakeDb({"applications": matches})
+
+    summary, _, sent = daily(service, {"token-u1": user})
+
+    assert summary == {"searches": 2, "emails": 1}
+    [(_, _, subject, body, _)] = sent
+    assert subject == "10 new jobs scoring 70+ on Job Scout" and ": 86</li>" in body and ": 85</li>" not in body
+    [(_, filters, patch)] = [update for update in user.updates if update[0] == "applications"]
+    assert filters == {"id": "in.(app-10,app-11)"} and patch == {"in_tracker": False}

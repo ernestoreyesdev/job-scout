@@ -1,7 +1,7 @@
 """
 Daily searches: each search a user marked runs again after the board refresh,
-scoring its new matches, and the user gets one email listing the new jobs that
-scored MIN_ALERT_SCORE or more. Each user's searches run in a short session
+scoring its new matches, and the user gets one email listing the best
+MAX_ALERT_JOBS new jobs across them that scored MIN_ALERT_SCORE or more. Each user's searches run in a short session
 signed in as that user, so row-level security applies as in their own searches.
 """
 
@@ -24,6 +24,7 @@ from app.telemetry import CallLog, RecordingClient
 logger = logging.getLogger("agent")
 
 MIN_ALERT_SCORE = 70
+MAX_ALERT_JOBS = 10
 
 
 @dataclass
@@ -72,7 +73,7 @@ def run_alerts(
             for rule in user_rules:
                 if run_alert(user, service, settings, client, user_id, resumes[0], rule, search):
                     searches += 1
-            jobs = new_matches(user, started)
+            jobs = keep_top(user, new_matches(user, started))
             key = f"matches/{user_id}/{started[:10]}"
             if jobs and send(settings, session.email, matches_subject(jobs), matches_body(settings, jobs), key):
                 emails += 1
@@ -142,7 +143,7 @@ def new_matches(user: Rest, since: str) -> list[dict[str, Any]]:
     return user.select(
         "applications",
         {
-            "select": "fit_score,posting:postings(title,company,location,url)",
+            "select": "id,fit_score,posting:postings(title,company,location,url)",
             "added_by": "eq.search",
             "in_tracker": "eq.true",
             "fit_score": f"gte.{MIN_ALERT_SCORE}",
@@ -208,3 +209,11 @@ def matches_body(settings: Settings, jobs: list[dict[str, Any]]) -> str:
         f'<p><a href="{tracker}">Open the Tracker</a> to rate them.</p>'
         "<p>Turn a daily search off under Recent searches on the Tracker.</p>"
     )
+
+
+def keep_top(user: Rest, jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keeps the first MAX_ALERT_JOBS of the day's matches on the Tracker and takes the rest off it, keeping their scores."""
+    rest = [job["id"] for job in jobs[MAX_ALERT_JOBS:]]
+    if rest:
+        user.update("applications", {"id": f"in.({','.join(rest)})"}, {"in_tracker": False})
+    return jobs[:MAX_ALERT_JOBS]
