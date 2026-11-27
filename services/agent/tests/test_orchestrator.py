@@ -1458,3 +1458,21 @@ def test_a_name_lookup_that_finds_only_an_empty_board_finds_nothing(monkeypatch:
     assert orchestrator.find_company_with_jobs("Hiring Co").board == "hiringco"
     with pytest.raises(CompanyNotFound):
         orchestrator.find_company_with_jobs("Empty Co")
+
+
+def test_ranking_splits_the_jobs_into_batches_and_merges_them_best_first(monkeypatch):
+    service = FakeRest()
+    similarity = {"a": 0.2, "b": 0.9, "c": 0.5, "d": 0.7, "e": 0.1}
+
+    def rank(function: str, args: dict[str, Any]) -> Any:
+        service.rpcs.append((function, args))
+        return sorted(({"id": i, "similarity": similarity[i]} for i in args["job_ids"]), key=lambda row: -row["similarity"])
+
+    monkeypatch.setattr(orchestrator, "RANK_BATCH", 2)
+    monkeypatch.setattr(service, "rpc", rank)
+    fresh = [(posting_id, posting(posting_id, "Engineer")) for posting_id in similarity]
+
+    ranked = orchestrator.by_resume_fit(fresh, "Python developer.", service, fake_embed)
+
+    assert sorted(args["job_ids"] for _, args in service.rpcs) == [["a", "b"], ["c", "d"], ["e"]]
+    assert [posting_id for posting_id, _ in ranked] == ["b", "d", "c", "a", "e"]

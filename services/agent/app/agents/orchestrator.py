@@ -69,6 +69,9 @@ STALE_JOB_DAYS = 30
 # Jobs without an embedding that a refresh loads and embeds at a time, newest first, and how many are saved per request.
 EMBED_BATCH = 1000
 EMBED_CHUNK = 200
+# Jobs ranked against the resume per database call, and how many calls run at once.
+RANK_BATCH = 5000
+RANK_CONCURRENCY = 4
 # The refresh workflow's timeout; a refresh still unfinished after it was cut off.
 REFRESH_TIME_LIMIT = timedelta(hours=5)
 # The jobs each page lists, as a filter on applications.
@@ -988,10 +991,15 @@ def by_resume_fit(
 ) -> list[tuple[str, Posting]]:
     """
     Reorders matches by how close each job is to the nearest section of the
-    resume, best first; jobs without an embedding yet follow in their order.
+    resume, best first, ranking RANK_BATCH jobs per database call; jobs without
+    an embedding yet follow in their order.
     """
     sections = embed(resume_chunks(resume_text))
-    rows = service.rpc("rank_postings", {"job_ids": [posting_id for posting_id, _ in fresh], "sections": sections})
+    ids = [posting_id for posting_id, _ in fresh]
+    batches = [ids[i : i + RANK_BATCH] for i in range(0, len(ids), RANK_BATCH)]
+    with ContextThreadPool(max_workers=RANK_CONCURRENCY) as pool:
+        ranked = pool.map(lambda batch: service.rpc("rank_postings", {"job_ids": batch, "sections": sections}), batches)
+        rows = sorted((row for batch in ranked for row in batch), key=lambda row: row["similarity"], reverse=True)
     order = {row["id"]: rank for rank, row in enumerate(rows)}
     return sorted(fresh, key=lambda job: order.get(job[0], len(order)))
 
