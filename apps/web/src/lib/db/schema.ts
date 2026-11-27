@@ -295,6 +295,9 @@ export type AgentRunRow = {
   finished_at: string | null;
 };
 
+/** A run as the pages show it, without its token usage and step timings. */
+export type RunSummary = Omit<AgentRunRow, "usage" | "timings">;
+
 /** A learned lesson no update has confirmed for this many days stops counting. */
 export const LESSON_FADE_DAYS = 60;
 

@@ -46,7 +46,7 @@ export function JobsTable({
             job={job}
             showNotes={showNotes}
             onLeftTracker={onTracker ? (to) => setMoved({ title: job.posting.title, to }) : undefined}
-            staleResume={currentResumeId !== null && job.resume_id !== null && job.resume_id !== currentResumeId}
+            staleResume={currentResumeId !== null && job.fit_score !== null && job.resume_id !== currentResumeId}
             closedOn={job.posting.closed_at ? ISO_DAY.format(new Date(job.posting.closed_at)) : null}
             timeline={job.events.map((event) => `${event.status === "new" ? "added" : event.status} ${ISO_DAY.format(new Date(event.changed_at))}`)}
           />

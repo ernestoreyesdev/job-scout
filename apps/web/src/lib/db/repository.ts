@@ -1,7 +1,7 @@
 import type { PostgrestError, SupabaseClient } from "@supabase/supabase-js";
 
 import type {
-  AgentRunRow,
+  RunSummary,
   ApplicationEventRow,
   ApplicationRow,
   ApplicationStatusRow,
@@ -23,6 +23,7 @@ import { jobKey } from "../job-key";
 
 /** Most rows an Insights query reads. */
 const MAX_INSIGHT_ROWS = 10_000;
+const RUN_COLUMNS = "id, user_id, kind, input, status, error, error_code, progress, jobs_added, created_at, updated_at, finished_at";
 
 export type JobFinderClient = SupabaseClient<Database>;
 
@@ -219,20 +220,16 @@ export class JobFinderRepository {
     }
   }
 
-  async listRuns(limit: number, kind?: string): Promise<AgentRunRow[]> {
-    let query = this.client
-      .from("agent_runs")
-      .select(
-        "id, user_id, kind, input, status, error, error_code, progress, usage, timings, jobs_added, created_at, updated_at, finished_at",
-      );
+  async listRuns(limit: number, kind?: string): Promise<RunSummary[]> {
+    let query = this.client.from("agent_runs").select(RUN_COLUMNS);
     if (kind) query = query.eq("kind", kind);
     const { data, error } = await query.order("created_at", { ascending: false }).limit(limit);
     if (error) throw error;
     return data;
   }
 
-  async getRun(id: string): Promise<AgentRunRow | null> {
-    const { data, error } = await this.client.from("agent_runs").select("*").eq("id", id).maybeSingle();
+  async getRun(id: string): Promise<RunSummary | null> {
+    const { data, error } = await this.client.from("agent_runs").select(RUN_COLUMNS).eq("id", id).maybeSingle();
     if (error) throw error;
     return data;
   }
@@ -375,15 +372,15 @@ export class JobFinderRepository {
 
   /** The user's tracked jobs whose posting is still listed GHOST_JOB_DAYS or more after it went up. */
   async countAgingJobs(): Promise<number> {
-    const { data, error } = await this.client
+    const cutoff = new Date(Date.now() - GHOST_JOB_DAYS * DAY_MS).toISOString();
+    const { count, error } = await this.client
       .from("applications")
-      .select("posting:postings!inner(posted_at, created_at, closed_at)")
+      .select("id, posting:postings!inner(posted_at, created_at, closed_at)", { count: "exact", head: true })
       .or("in_tracker.eq.true,status.neq.new")
       .is("posting.closed_at", null)
-      .range(0, MAX_INSIGHT_ROWS - 1);
+      .or(`posted_at.lte.${cutoff},and(posted_at.is.null,created_at.lte.${cutoff})`, { referencedTable: "posting" });
     if (error) throw error;
-    const cutoff = Date.now() - GHOST_JOB_DAYS * DAY_MS;
-    return data.filter((job) => new Date(job.posting.posted_at ?? job.posting.created_at).getTime() <= cutoff).length;
+    return count ?? 0;
   }
 
   /** Saves the user's color theme, creating their profile row if it doesn't exist yet. */

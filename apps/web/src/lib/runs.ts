@@ -1,7 +1,7 @@
-import { WORKPLACE_LABELS, type AgentRunRow, type RescoreScope, type SearchRuleInput, type WorkplaceTypeRow } from "@/lib/db";
+import { WORKPLACE_LABELS, type RunSummary, type RescoreScope, type SearchRuleInput, type WorkplaceTypeRow } from "@/lib/db";
 
 /** One-line description of what a run did: the search rule, the re-score or the import. */
-export function describeRun(run: AgentRunRow): { title: string; detail: string } {
+export function describeRun(run: RunSummary): { title: string; detail: string } {
   if (run.kind === "rescore") {
     return { title: `Score ${rescoreScope(run) === "jobs" ? "Jobs" : "Tracker jobs"} with current resume`, detail: "" };
   }
@@ -20,7 +20,7 @@ function workplaces(types: WorkplaceTypeRow[]): string {
 }
 
 /** The page a rescore run scores; runs from before rescores were per page count as the Tracker's. */
-export function rescoreScope(run: AgentRunRow): RescoreScope {
+export function rescoreScope(run: RunSummary): RescoreScope {
   return (run.input as { scope?: RescoreScope }).scope ?? "tracker";
 }
 

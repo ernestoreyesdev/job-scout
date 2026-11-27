@@ -2,11 +2,11 @@
 
 import { CircleAlert, CircleCheck, CircleStop, LoaderCircle, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
-import { rerunSearch, rescoreJobs, stopRun } from "@/app/actions";
+import { readRun, rerunSearch, rescoreJobs, stopRun } from "@/app/actions";
 import { Button } from "@/components/ui/button";
-import type { AgentRunRow, RunStatusRow, SearchRuleInput } from "@/lib/db";
+import type { RunSummary, RunStatusRow, SearchRuleInput } from "@/lib/db";
 import { describeRun, rescoreScope } from "@/lib/runs";
 import { useAction } from "@/lib/use-action";
 import { cn } from "@/lib/utils";
@@ -21,11 +21,13 @@ const STATUS_LOOK: Record<RunStatusRow, { Icon: LucideIcon; tone: string }> = {
 };
 
 /**
- * Latest search run; refreshes the page while the run is still working, offers to stop it meanwhile, and offers a
- * re-run once it failed or was stopped.
+ * Latest search run; while it works, reads just the run every REFRESH_MS and reloads the page once it ends. Offers to
+ * stop it meanwhile, and a re-run once it failed or was stopped.
  */
-export function RunStatus({ run }: { run: AgentRunRow }) {
+export function RunStatus({ run: loaded }: { run: RunSummary }) {
   const router = useRouter();
+  const [polled, setPolled] = useState<RunSummary | null>(null);
+  const run = polled?.id === loaded.id && polled.updated_at > loaded.updated_at ? polled : loaded;
   const active = run.status === "queued" || run.status === "running";
   const { run: act, pending, error: rerunError } = useAction();
 
@@ -40,9 +42,14 @@ export function RunStatus({ run }: { run: AgentRunRow }) {
   // Polls the agent's progress, which lives outside React, until the run finishes.
   useEffect(() => {
     if (!active) return;
-    const timer = setInterval(() => router.refresh(), REFRESH_MS);
+    const timer = setInterval(async () => {
+      const result = await readRun(loaded.id);
+      if (!result.run) return;
+      setPolled(result.run);
+      if (result.run.status !== "queued" && result.run.status !== "running") router.refresh();
+    }, REFRESH_MS);
     return () => clearInterval(timer);
-  }, [active, router]);
+  }, [active, loaded.id, router]);
 
   const input = run.input as Partial<SearchRuleInput>;
   const offerWebLookup = run.error_code === "company_not_found" && !!input.company && !input.web_lookup;

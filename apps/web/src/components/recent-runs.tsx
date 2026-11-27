@@ -1,13 +1,13 @@
 import { ChevronDown } from "lucide-react";
 
-import type { AgentRunRow } from "@/lib/db";
+import type { RunSummary } from "@/lib/db";
 import { describeRun } from "@/lib/runs";
 
 // Swedish formatting is ISO: "2026-11-13 21:37".
 const WHEN = new Intl.DateTimeFormat("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 /** Collapsible list of past searches with what each one did. */
-export function RecentRuns({ runs }: { runs: AgentRunRow[] }) {
+export function RecentRuns({ runs }: { runs: RunSummary[] }) {
   if (runs.length === 0) return null;
 
   return (

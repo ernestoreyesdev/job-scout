@@ -23,7 +23,7 @@ import {
   WORKPLACE_TYPES,
   type ApplicationStatusRow,
   type FitLabelRow,
-  type AgentRunRow,
+  type RunSummary,
   type RescoreScope,
   type SearchRuleInput,
   type ThemeRow,
@@ -388,7 +388,7 @@ export async function listDailySearches(): Promise<DailySearchesResult> {
   const result = await run([], async () => {
     const { repository } = await getSignedInSource();
     const [runs, alerts] = await Promise.all([repository.listRuns(DAILY_SEARCH_SCAN, "search"), repository.listSearchAlerts()]);
-    const recent: AgentRunRow[] = [];
+    const recent: RunSummary[] = [];
     for (const past of runs) {
       if (recent.length === DAILY_SEARCH_CHOICES) break;
       if (!recent.some((seen) => sameRule(seen.input, past.input))) recent.push(past);
@@ -403,4 +403,17 @@ export async function listDailySearches(): Promise<DailySearchesResult> {
     ];
   });
   return { ...result, searches };
+}
+
+export type RunResult = ActionResult & { run?: RunSummary };
+
+/** One of the user's runs as it stands now, for following its progress without reloading the page. */
+export async function readRun(runId: string): Promise<RunResult> {
+  let found: RunSummary | undefined;
+  const result = await run([], async () => {
+    const { repository } = await getSignedInSource();
+    found = (await repository.getRun(runId)) ?? undefined;
+    if (!found) throw new Error("Run not found.");
+  });
+  return { ...result, run: found };
 }
