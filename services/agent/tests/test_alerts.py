@@ -7,7 +7,7 @@ from app.config import Settings
 from app.db import Rest
 from tests.fakes import fake_settings
 
-SETTINGS = fake_settings(app_url="https://scout.example")
+SETTINGS = fake_settings(app_url="https://scout.example", admin_email="me@example.com")
 MATCH = {"fit_score": 82, "posting": {"title": "Backend <Engineer>", "company": "Acme", "location": "Remote", "url": "https://jobs.example/1"}}
 
 
@@ -54,7 +54,7 @@ def daily(service: FakeDb, users: dict[str, FakeDb], kept: int = 1) -> tuple[dic
     return summary, searches, sent
 
 
-def test_marked_searches_run_as_their_user_with_a_minimum_of_70_and_email_the_new_matches():
+def test_marked_searches_run_as_their_user_with_a_minimum_of_70_and_email_the_new_matches_to_the_admin():
     service = FakeDb(
         {
             "search_alerts": [{"user_id": "u1", "rule": {"keywords": ["backend engineer"], "limit": 5, "min_score": 50}}],
@@ -74,7 +74,7 @@ def test_marked_searches_run_as_their_user_with_a_minimum_of_70_and_email_the_ne
     assert table == "agent_runs" and run["kind"] == "search" and run["input"] == {"keywords": ["backend engineer"], "limit": 5, "min_score": 50}
     assert user.updates[0][2]["status"] == "done"
     [(_, to, subject, _, key)] = sent
-    assert to == "u1@example.com" and subject == "1 new job with a high matching score on Job Scout" and key.startswith("matches/u1/")
+    assert to == "me@example.com" and subject == "1 new job with a high matching score on Job Scout" and key.startswith("matches/u1/")
 
 
 def test_no_email_goes_out_when_nothing_new_scored_70():
@@ -199,5 +199,5 @@ def test_a_user_whose_run_fails_to_save_doesnt_stop_the_next_user(monkeypatch):
     summary, _, sent = daily(service, {"token-u1": broken, "token-u2": FakeDb({"applications": [MATCH]})})
 
     assert summary == {"searches": 1, "emails": 1}
-    [(_, to, *_)] = sent
-    assert to == "u2@example.com"
+    [(_, to, _, _, key)] = sent
+    assert to == "me@example.com" and key.startswith("matches/u2/")

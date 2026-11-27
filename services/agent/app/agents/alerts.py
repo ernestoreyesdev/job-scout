@@ -1,8 +1,9 @@
 """
 Daily searches: each search a user marked runs again after the board refresh,
-scoring its new matches, and the user gets one email listing the best
-MAX_ALERT_JOBS new jobs across them that scored MIN_ALERT_SCORE or more. Each user's searches run in a short session
-signed in as that user, so row-level security applies as in their own searches.
+scoring its new matches, and ADMIN_EMAIL gets one email per user listing the
+best MAX_ALERT_JOBS new jobs across them that scored MIN_ALERT_SCORE or more.
+Each user's searches run in a short session signed in as that user, so
+row-level security applies as in their own searches.
 """
 
 import html
@@ -46,8 +47,9 @@ def run_alerts(
     send: Callable[..., bool] = send_email,
 ) -> dict[str, int]:
     """
-    Runs every marked search for its user and emails each user their new strong
-    matches. A user with daily emails off or without a primary resume, or with a run already going, is
+    Runs every marked search for its user and emails ADMIN_EMAIL each user's new
+    strong matches; without ADMIN_EMAIL no email goes out. A user with daily
+    emails off or without a primary resume, or with a run already going, is
     skipped, and a user whose searches fail doesn't stop the others. Returns how
     many searches ran and how many emails went out.
     """
@@ -76,7 +78,7 @@ def run_alerts(
                     searches += 1
             jobs = keep_top(user, new_matches(user, started))
             key = f"matches/{user_id}/{started[:10]}"
-            if jobs and send(settings, session.email, matches_subject(jobs), matches_body(settings, jobs), key):
+            if jobs and settings.admin_email and send(settings, settings.admin_email, matches_subject(jobs), matches_body(settings, jobs), key):
                 emails += 1
         except Exception:
             logger.exception("daily searches failed for the user", extra={"user_id": user_id})
