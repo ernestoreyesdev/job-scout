@@ -27,7 +27,8 @@ jobs:
       SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
       HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_REFRESH_URL }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      # The production project's publishable key, which browsers also get.
+      SUPABASE_ANON_KEY: sb_publishable_ML1-WzivMGMVz3oWF1AVcA_kjB4oJgn # gitleaks:allow
       # Required by the agent's settings, unused by the refresh.
       AGENT_ENCRYPTION_KEY: unused
     steps:
