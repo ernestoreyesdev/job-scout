@@ -191,23 +191,31 @@ def sign_out(settings: Settings, session: UserSession) -> None:
 
 def matches_subject(jobs: list[dict[str, Any]]) -> str:
     count = len(jobs)
-    return f"{count} new {'job' if count == 1 else 'jobs'} scoring {MIN_ALERT_SCORE}+ on Job Scout"
+    return f"{count} new {'job' if count == 1 else 'jobs'} with a high matching score on Job Scout"
 
 
 def matches_body(settings: Settings, jobs: list[dict[str, Any]]) -> str:
-    """One line per job, linking to its posting, then a link to the Tracker."""
-    items = "".join(
-        f'<li><a href="{html.escape(job["posting"]["url"])}">{html.escape(job["posting"]["title"])}</a>'
-        f" at {html.escape(job['posting']['company'])}"
-        f"{f' ({html.escape(job["posting"]["location"])})' if job['posting'].get('location') else ''}"
-        f": {job['fit_score']}</li>"
-        for job in jobs
-    )
+    """A card per job with its score, linking to its posting, then a button to the Tracker, styled inline for email clients."""
+    cards = "".join(match_card(job) for job in jobs)
     tracker = html.escape(f"{settings.app_url}/tracker")
+    count = len(jobs)
+    added = f"{count} new {'job' if count == 1 else 'jobs'} with a high matching score {'was' if count == 1 else 'were'} added to your Tracker."
     return (
-        f"<p>Your daily searches found these new jobs:</p><ul>{items}</ul>"
-        f'<p><a href="{tracker}">Open the Tracker</a> to rate them.</p>'
-        "<p>Turn a daily search off under Recent searches on the Tracker.</p>"
+        '<div style="background:#f4f4f5;padding:24px 12px;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Arial,sans-serif;color:#18181b">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto">'
+        '<tr><td style="padding:0 4px 16px;font-size:13px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:#71717a">Job Scout</td></tr>'
+        '<tr><td style="background:#ffffff;border-radius:12px;padding:24px">'
+        '<h1 style="margin:0 0 8px;font-size:20px;line-height:1.3">Your daily searches found new matches</h1>'
+        f'<p style="margin:0 0 20px;font-size:15px;line-height:1.5;color:#52525b">{added}</p>'
+        f"{cards}"
+        '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0 0"><tr>'
+        f'<td style="background:#18181b;border-radius:8px"><a href="{tracker}" style="display:inline-block;padding:12px 20px;'
+        'font-size:15px;font-weight:600;color:#fafafa;text-decoration:none">Rate them on the Tracker</a></td>'
+        "</tr></table>"
+        "</td></tr>"
+        '<tr><td style="padding:16px 4px 0;font-size:12px;line-height:1.5;color:#71717a">'
+        "Turn a daily search off under Recent searches on the Tracker.</td></tr>"
+        "</table></div>"
     )
 
 
@@ -217,3 +225,22 @@ def keep_top(user: Rest, jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if rest:
         user.update("applications", {"id": f"in.({','.join(rest)})"}, {"in_tracker": False})
     return jobs[:MAX_ALERT_JOBS]
+
+
+def match_card(job: dict[str, Any]) -> str:
+    """One job as a row: its score in a green circle, then its linked title, company and location."""
+    posting = job["posting"]
+    place = f" · {html.escape(posting['location'])}" if posting.get("location") else ""
+    return (
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="margin:0 0 12px;border:1px solid #e4e4e7;border-left:4px solid #10b981;border-radius:8px"><tr>'
+        '<td width="64" style="padding:14px 0 14px 14px;vertical-align:middle;text-align:center">'
+        '<div style="width:44px;height:44px;line-height:44px;border-radius:22px;background:#d1fae5;color:#065f46;'
+        f'font-size:15px;font-weight:700;text-align:center">{job["fit_score"]}</div>'
+        '<div style="margin-top:4px;font-size:11px;color:#71717a">Strong fit</div></td>'
+        '<td style="padding:14px;vertical-align:middle">'
+        f'<a href="{html.escape(posting["url"])}" style="font-size:16px;font-weight:600;color:#18181b;text-decoration:none">'
+        f"{html.escape(posting['title'])}</a>"
+        f'<div style="margin-top:4px;font-size:14px;color:#52525b">{html.escape(posting["company"])}{place}</div>'
+        "</td></tr></table>"
+    )

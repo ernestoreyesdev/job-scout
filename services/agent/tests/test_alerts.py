@@ -73,7 +73,7 @@ def test_marked_searches_run_as_their_user_with_a_minimum_of_70_and_email_the_ne
     assert table == "agent_runs" and run["kind"] == "search" and run["input"]["min_score"] == 70
     assert user.updates[0][2]["status"] == "done"
     [(_, to, subject, _, key)] = sent
-    assert to == "u1@example.com" and subject == "1 new job scoring 70+ on Job Scout" and key.startswith("matches/u1/")
+    assert to == "u1@example.com" and subject == "1 new job with a high matching score on Job Scout" and key.startswith("matches/u1/")
 
 
 def test_no_email_goes_out_when_nothing_new_scored_70():
@@ -97,10 +97,12 @@ def test_a_user_without_a_resume_is_skipped():
     assert summary == {"searches": 0, "emails": 0} and searches == [] and sent == []
 
 
-def test_the_email_lists_each_job_escaped_and_links_to_the_tracker():
+def test_the_email_says_the_jobs_were_added_to_the_tracker_and_shows_each_one_escaped():
     body = matches_body(cast(Settings, SETTINGS), [MATCH])
 
-    assert '<a href="https://jobs.example/1">Backend &lt;Engineer&gt;</a> at Acme (Remote): 82' in body
+    assert "1 new job with a high matching score was added to your Tracker." in body
+    assert ">Backend &lt;Engineer&gt;</a>" in body and 'href="https://jobs.example/1"' in body
+    assert "Acme · Remote" in body and ">82</div>" in body
     assert 'href="https://scout.example/tracker"' in body
 
 
@@ -150,6 +152,6 @@ def test_only_the_best_10_matches_across_searches_stay_on_the_tracker_and_get_em
 
     assert summary == {"searches": 2, "emails": 1}
     [(_, _, subject, body, _)] = sent
-    assert subject == "10 new jobs scoring 70+ on Job Scout" and ": 86</li>" in body and ": 85</li>" not in body
+    assert subject == "10 new jobs with a high matching score on Job Scout" and ">86</div>" in body and ">85</div>" not in body
     [(_, filters, patch)] = [update for update in user.updates if update[0] == "applications"]
     assert filters == {"id": "in.(app-10,app-11)"} and patch == {"in_tracker": False}
