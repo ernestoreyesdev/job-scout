@@ -215,7 +215,8 @@ export async function setSearchAlert(search: { runId: string | null; alertId: st
   return run([], async () => {
     const { repository } = await getSignedInSource();
     if (!search.runId) {
-      if (!on && search.alertId) await repository.deleteSearchAlert(search.alertId);
+      if (on) throw new Error("Run this search again from the Tracker to pick it.");
+      if (search.alertId) await repository.deleteSearchAlert(search.alertId);
       return;
     }
     const [past, alerts] = await Promise.all([repository.getRun(search.runId), repository.listSearchAlerts()]);

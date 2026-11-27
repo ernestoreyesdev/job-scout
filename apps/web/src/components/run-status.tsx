@@ -44,9 +44,10 @@ export function RunStatus({ run: loaded }: { run: RunSummary }) {
     if (!active) return;
     const timer = setInterval(async () => {
       const result = await readRun(loaded.id);
-      if (!result.run) return;
-      setPolled(result.run);
-      if (result.run.status !== "queued" && result.run.status !== "running") router.refresh();
+      const next = result.run;
+      if (!next) return;
+      setPolled((previous) => (previous && previous.updated_at >= next.updated_at ? previous : next));
+      if (next.status !== "queued" && next.status !== "running") router.refresh();
     }, REFRESH_MS);
     return () => clearInterval(timer);
   }, [active, loaded.id, router]);

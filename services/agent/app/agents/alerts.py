@@ -76,10 +76,12 @@ def run_alerts(
         try:
             user = as_user(settings, session.access_token)
             started = datetime.now(UTC).isoformat()
+            run_starts: list[str] = []
             for rule in user_rules:
-                if run_alert(user, service, settings, client, user_id, resumes[0], rule, search, cache):
-                    searches += 1
-            jobs = keep_top(user, new_matches(user, started))
+                ran, run_started = run_alert(user, service, settings, client, user_id, resumes[0], rule, search, cache)
+                searches += ran
+                run_starts += [run_started] if run_started else []
+            jobs = keep_top(user, new_matches(user, min(run_starts, default=started)))
             key = f"matches/{user_id}/{started[:10]}"
             if jobs and settings.admin_email and send(settings, settings.admin_email, matches_subject(jobs), matches_body(settings, jobs), key):
                 emails += 1
@@ -100,20 +102,22 @@ def run_alert(
     rule: dict[str, Any],
     search: Callable[..., SearchResult],
     cache: JobCache,
-) -> bool:
+) -> tuple[bool, str | None]:
     """
     Runs one marked search as a scored search keeping jobs at MIN_ALERT_SCORE or
-    more, recorded in agent_runs under the rule as the user marked it. Returns whether it ran.
+    more, recorded in agent_runs under the rule as the user marked it. Returns
+    whether it ran, and when the database created its run row (None when it
+    didn't start), which the email's window of new jobs starts from.
     """
     body = SearchRule.model_validate({**rule, "score": True, "min_score": MIN_ALERT_SCORE, "web_lookup": False})
     try:
         [run] = user.insert(
-            "agent_runs", {"user_id": user_id, "kind": "search", "input": rule, "status": "running"}, select="id"
+            "agent_runs", {"user_id": user_id, "kind": "search", "input": rule, "status": "running"}, select="id,created_at"
         )
     except Conflict as error:
         if error.run_already_going:
             logger.info("daily search skipped: a run is already going", extra={"user_id": user_id})
-            return False
+            return False, None
         raise
     calls = CallLog(run["id"])
     outcome: dict[str, Any]
@@ -145,7 +149,7 @@ def run_alert(
         {**outcome, "usage": calls.usage().model_dump(), "finished_at": datetime.now(UTC).isoformat()},
     )
     calls.save(service)
-    return outcome["status"] == "done"
+    return outcome["status"] == "done", run.get("created_at")
 
 
 def new_matches(user: Rest, since: str) -> list[dict[str, Any]]:

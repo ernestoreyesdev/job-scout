@@ -79,42 +79,42 @@ export function JobRow({
   const posted = job.posting.posted_at && openDays !== null ? postedAgo(openDays) : null;
   const chips = [
     addedByUser && (
-      <span key="added" className={CHIP}>
+      <span key="chip:added" className={CHIP}>
         Added by you
       </span>
     ),
     closedOn && (
-      <span key="closed" className="inline-flex items-center rounded-full bg-destructive/10 px-2 py-0.5 text-xs text-destructive">
+      <span key="chip:closed" className="inline-flex items-center rounded-full bg-destructive/10 px-2 py-0.5 text-xs text-destructive">
         Closed since {closedOn}
       </span>
     ),
     ...facts.map((fact) => (
-      <span key={fact} className={CHIP}>
+      <span key={`fact:${fact}`} className={CHIP}>
         {fact}
       </span>
     )),
     ...stack.slice(0, STACK_CHIPS).map((tool) => (
-      <span key={tool} className={CHIP}>
+      <span key={`tool:${tool}`} className={CHIP}>
         {tool}
       </span>
     )),
     stack.length > STACK_CHIPS && (
-      <span key="more" className="px-1 py-0.5 text-xs text-muted-foreground" title={stack.slice(STACK_CHIPS).join(", ")}>
+      <span key="chip:more" className="px-1 py-0.5 text-xs text-muted-foreground" title={stack.slice(STACK_CHIPS).join(", ")}>
         +{stack.length - STACK_CHIPS}
       </span>
     ),
     ...ghost.map((label) => (
-      <span key={label} className={WARNING_CHIP} title="A common sign of a ghost job">
+      <span key={`ghost:${label}`} className={WARNING_CHIP} title="A common sign of a ghost job">
         {label}
       </span>
     )),
     staleResume && (
-      <span key="stale" className={WARNING_CHIP}>
+      <span key="chip:stale" className={WARNING_CHIP}>
         Scored with an older resume
       </span>
     ),
     duplicateOf && (
-      <span key="duplicate" className={WARNING_CHIP} title="You track another job with the same company and title">
+      <span key="chip:duplicate" className={WARNING_CHIP} title="You track another job with the same company and title">
         Possible duplicate, other copy {duplicateOf}
       </span>
     ),

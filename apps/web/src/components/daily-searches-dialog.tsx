@@ -15,7 +15,7 @@ import { useAction } from "@/lib/use-action";
 
 /**
  * Picks which searches run each morning: the latest DAILY_SEARCH_CHOICES from the Tracker, then older checked ones
- * under "Older". `searches` is null when they couldn't load, and `onChange` gets the list on each pick, then the
+ * under "Older", which can only be unchecked. `searches` is null when they couldn't load, and `onChange` gets the list on each pick, then the
  * earlier one back if saving fails. A note says when emails are paused, or on with nothing picked.
  */
 export function DailySearchesDialog({
@@ -74,7 +74,7 @@ export function DailySearchesDialog({
                     type="checkbox"
                     className="mt-0.5 size-4 shrink-0 accent-foreground"
                     checked={search.on}
-                    disabled={pending}
+                    disabled={pending || (!search.runId && !search.on)}
                     onChange={(event) => pick(index, event.target.checked)}
                   />
                   <span className="min-w-0">

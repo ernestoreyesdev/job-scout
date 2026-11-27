@@ -116,6 +116,7 @@ class JobCache:
     """Jobs read once and reused by searches run one after another, such as a day's daily searches."""
 
     boards: dict[BoardKey, list[Posting]] = field(default_factory=dict)
+    failed: set[BoardKey] = field(default_factory=set)
     hacker_news: list[Posting] | None = None
 
 
@@ -184,7 +185,7 @@ def run_search(
                 timings, "companies", directory_postings, rule, client, settings, user, service, report, fetcher, discover, namer, cache
             )
             posts = hacker_news.result() if hacker_news else cached_posts or []
-        if cache:
+        if cache and posts:
             cache.hacker_news = posts
         everything = everything + posts
 
@@ -296,7 +297,8 @@ def directory_postings(
     Open jobs at every directory company the user hasn't hidden, topping the
     directory up from the web while it's small or once a week. Staffing
     agencies are left out, and none of their jobs are saved. Boards in `cache`
-    are taken from it, and the ones read here are added to it. Returns the jobs,
+    are taken from it, boards that failed in an earlier search with it are
+    skipped, and the ones read or failed here are added to it. Returns the jobs,
     the unreachable boards and each board fetch's timing.
     """
     directory = service.select("companies", {"select": "id,source,board,name,found_by,missed_checks,kind,open_jobs,checked_at"})
@@ -325,13 +327,14 @@ def directory_postings(
     }
     report("Gathering open jobs…")
     known_jobs = cache.boards if cache else {}
+    failed = cache.failed if cache else set()
     stored = stored_jobs(service, [entry for entry in boards if entry.key in fresh and entry.key not in known_jobs])
     stored |= {entry.key: known_jobs[entry.key] for entry in boards if entry.key in known_jobs}
-    fetched, gone, unreachable, fetches = fetch_boards(
-        [entry for entry in boards if entry.key not in fresh and entry.key not in known_jobs], fetcher, report
-    )
+    to_fetch = [entry for entry in boards if entry.key not in fresh and entry.key not in known_jobs and entry.key not in failed]
+    fetched, gone, unreachable, fetches = fetch_boards(to_fetch, fetcher, report)
     if cache:
         cache.boards |= stored | fetched
+        cache.failed |= set(gone) | {entry.key for entry in to_fetch if board_label(entry.key) in unreachable}
     fetches += [
         {"board": board_label(key), "source": key[0], "ms": 0, "jobs": len(jobs), "outcome": "cached"}
         for key, jobs in stored.items()
@@ -1268,5 +1271,5 @@ def discover_new(
 
 
 def fetched_descriptions(fetched: dict[BoardKey, list[Posting]]) -> dict[tuple[str, str], str]:
-    """The descriptions boards listed, by (source, external id), for embedding without fetching them again."""
+    """The descriptions boards listed, by (source, external id), which embedding reads in place of fetching each job."""
     return {(p.source, p.external_id): p.description for postings in fetched.values() for p in postings}
