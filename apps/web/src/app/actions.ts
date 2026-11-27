@@ -5,6 +5,7 @@ import { unstable_rethrow } from "next/navigation";
 
 import {
   APPLICATION_STATUSES,
+  DAILY_SEARCH_CHOICES,
   FIT_LABELS,
   MAX_COMPANY_IMPORT,
   MAX_LESSON_LENGTH,
@@ -371,8 +372,6 @@ export interface DailySearch {
 }
 
 export type DailySearchesResult = ActionResult & { searches?: DailySearch[] };
-
-const DAILY_SEARCH_CHOICES = 5;
 
 /** The user's last DAILY_SEARCH_CHOICES different searches, then any marked search older than those. */
 export async function listDailySearches(): Promise<DailySearchesResult> {

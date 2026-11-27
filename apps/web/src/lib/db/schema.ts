@@ -70,6 +70,9 @@ export const MAX_JOBS_PER_SEARCH = 25;
 /** Upper bound the agent accepts for companies added in one import. */
 export const MAX_COMPANY_IMPORT = 100;
 
+/** How many of the user's latest different searches the daily email dialog offers. */
+export const DAILY_SEARCH_CHOICES = 5;
+
 export type ProfileRow = {
   user_id: string;
   anthropic_key_hint: string | null;

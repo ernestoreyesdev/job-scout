@@ -35,7 +35,8 @@ import { applyTheme } from "@/lib/theme";
 
 /**
  * The account menu behind a round button with the email's first letter: the email, a light or dark theme saved to
- * the account, the daily match emails switch and the dialog picking their searches, signing out and, for anyone but an admin, deleting the account once the email is typed to confirm.
+ * the account, the daily match emails switch and the dialog picking their searches, which load as the menu opens
+ * and show once loaded, signing out and, for anyone but an admin, deleting the account once the email is typed to confirm.
  * Signing out or deleting sends the browser to the sign-in page.
  */
 export function SignOut({
@@ -79,8 +80,8 @@ export function SignOut({
     });
   }
 
-  function chooseSearches() {
-    setChoosing(true);
+  function loadSearches(open: boolean) {
+    if (!open) return;
     setSearches(null);
     setSearchesError(null);
     startSaving(async () => {
@@ -119,7 +120,7 @@ export function SignOut({
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu onOpenChange={loadSearches}>
         <DropdownMenuTrigger
           aria-label="Account"
           title={email}
@@ -147,7 +148,7 @@ export function SignOut({
             <Mail />
             Daily match emails
           </DropdownMenuCheckboxItem>
-          <DropdownMenuItem onSelect={chooseSearches}>
+          <DropdownMenuItem onSelect={() => setChoosing(true)}>
             <ListChecks />
             Choose searches…
           </DropdownMenuItem>
@@ -165,7 +166,7 @@ export function SignOut({
         </DropdownMenuContent>
       </DropdownMenu>
       <DailySearchesDialog
-        open={choosing}
+        open={choosing && (searches !== null || searchesError !== null)}
         onOpenChange={setChoosing}
         emailsOn={emailsOn}
         searches={searches}

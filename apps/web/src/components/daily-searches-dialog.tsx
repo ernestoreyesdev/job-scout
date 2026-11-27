@@ -10,11 +10,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { DAILY_SEARCH_CHOICES } from "@/lib/db";
 import { useAction } from "@/lib/use-action";
 
 /**
- * Picks which searches run each morning: `searches` is null while they load, and `onChange` gets the list on each
- * pick, then the earlier one back if saving fails. A note says when emails are paused, or on with nothing picked.
+ * Picks which searches run each morning: the latest DAILY_SEARCH_CHOICES from the Tracker, then older checked ones
+ * under "Older". `searches` is null when they couldn't load, and `onChange` gets the list on each pick, then the
+ * earlier one back if saving fails. A note says when emails are paused, or on with nothing picked.
  */
 export function DailySearchesDialog({
   open,
@@ -52,11 +54,11 @@ export function DailySearchesDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>Choose daily searches</AlertDialogTitle>
           <AlertDialogDescription>
-            These run each morning after the boards refresh. You get one email with the 10 best new matches.
+            Your last {DAILY_SEARCH_CHOICES} searches from the Tracker. Checked ones run each morning after the boards
+            refresh, and you get one email with the 10 best new matches.
           </AlertDialogDescription>
         </AlertDialogHeader>
         {note && <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">{note}</p>}
-        {searches === null && !loadError && <p className="text-sm text-muted-foreground">Loading your searches…</p>}
         {searches?.length === 0 && (
           <p className="text-sm text-muted-foreground">Run a search from the Tracker first, then pick it here.</p>
         )}
@@ -64,6 +66,9 @@ export function DailySearchesDialog({
           <ul className="divide-y rounded-lg border text-sm">
             {searches.map((search, index) => (
               <li key={search.runId ?? search.alertId}>
+                {!search.runId && searches[index - 1]?.runId !== null && (
+                  <p className="border-b bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">Older</p>
+                )}
                 <label className="flex cursor-pointer items-start gap-3 px-3 py-2.5">
                   <input
                     type="checkbox"
