@@ -3,9 +3,14 @@ from typing import Any
 import httpx
 
 from app.config import Settings
+from app.constants import HTTP_TIMEOUT
 
 # One connection pool shared by every Rest client and auth check, safe across threads.
-HTTP = httpx.Client(timeout=30)
+HTTP = httpx.Client(timeout=HTTP_TIMEOUT)
+# Rows or files read per request when going through all of them.
+PAGE_SIZE = 1000
+# Characters of an error response body kept in the raised error.
+MAX_ERROR_BODY = 500
 
 
 class Rest:
@@ -67,7 +72,7 @@ class Rest:
         check(res)
         return res.json() if res.content else None
 
-    def delete_folder(self, bucket: str, folder: str, page: int = 1000) -> None:
+    def delete_folder(self, bucket: str, folder: str, page: int = PAGE_SIZE) -> None:
         """Deletes every file in `folder` of a Storage bucket, a page at a time."""
         while True:
             res = self._http.post(
@@ -84,7 +89,7 @@ class Rest:
             )
             check(res)
 
-    def select_all(self, table: str, params: dict[str, str], page: int = 1000) -> list[dict[str, Any]]:
+    def select_all(self, table: str, params: dict[str, str], page: int = PAGE_SIZE) -> list[dict[str, Any]]:
         """Every matching row in id order, a page at a time past the API's row limit; the select must include id."""
         params = {**params, "order": "id", "limit": str(page)}
         rows: list[dict[str, Any]] = []
@@ -109,4 +114,4 @@ def check(res: httpx.Response) -> None:
     try:
         res.raise_for_status()
     except httpx.HTTPStatusError as error:
-        raise httpx.HTTPStatusError(f"{error}\nResponse body: {res.text[:500]}", request=error.request, response=res) from None
+        raise httpx.HTTPStatusError(f"{error}\nResponse body: {res.text[:MAX_ERROR_BODY]}", request=error.request, response=res) from None

@@ -24,6 +24,8 @@ const VIEWS = [
   { rated: false, href: "/tracker", label: "New" },
   { rated: true, href: "/tracker?view=rated", label: "Rated" },
 ] as const;
+/** Past searches listed under Recent searches. */
+const RECENT_SEARCHES = 10;
 
 export default function TrackerPage({ searchParams }: PageProps<"/tracker">) {
   return (
@@ -52,7 +54,7 @@ async function TrackerData({ searchParams }: Pick<PageProps<"/tracker">, "search
   const [resume, [latest], searches, companies, trackerTotal] = await Promise.all([
     getPrimaryResume(),
     repository.listRuns(1),
-    repository.listRuns(10, "search"),
+    repository.listRuns(RECENT_SEARCHES, "search"),
     repository.listTrackedCompanies(view),
     repository.countTrackerJobs(),
   ]);

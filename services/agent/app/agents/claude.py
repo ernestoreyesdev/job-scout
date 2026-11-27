@@ -1,5 +1,7 @@
 from typing import Any
 
+DEFAULT_EFFORT = "low"
+
 
 def parse(
     client: Any,
@@ -11,7 +13,7 @@ def parse(
     output_format: type,
     error: type[Exception],
     failure: str,
-    effort: str = "low",
+    effort: str = DEFAULT_EFFORT,
 ) -> Any:
     """One structured Claude call; raises `error` with `failure` when Claude refuses or the reply doesn't parse."""
     response = client.beta.messages.parse(

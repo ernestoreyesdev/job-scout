@@ -53,7 +53,7 @@ class WorkdaySource(JobSource):
     """
     Workday career sites, through the JSON endpoint their own pages call (not a
     published API). A board is 'tenant.wdN/site', e.g. 'nvidia.wd5/nvidiaexternalcareersite',
-    since a company is identified by all three. Lists come 20 jobs per request
+    since a company is identified by all three. Lists come PAGE_SIZE jobs per request
     without descriptions or exact dates, so pages are read in parallel and
     describe() fetches one job's details. Boards can't be guessed from a
     company name; they come from discovery.

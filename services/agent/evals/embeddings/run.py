@@ -14,16 +14,18 @@ import numpy as np
 
 from app.config import get_settings
 from app.db import service_db
-from app.embeddings import FastEmbedEmbeddings, job_text
+from app.embeddings import MAX_TOKENS, MODEL, FastEmbedEmbeddings, job_text
 from evals.labels.run import auc
 
 # Model name, input limit in tokens, prefix the model expects on each text.
 MODELS = (
-    ("BAAI/bge-small-en-v1.5", 512, ""),
+    (MODEL, MAX_TOKENS, ""),
     ("nomic-ai/nomic-embed-text-v1.5-Q", 8192, "clustering: "),
 )
 NEIGHBORS = 5
 CHARS_PER_TOKEN = 4
+# Share of good neighbors above which a job is predicted good.
+MAJORITY = 0.5
 
 
 def evaluate(labels: list[str], vectors: np.ndarray) -> tuple[float, float]:
@@ -36,7 +38,7 @@ def evaluate(labels: list[str], vectors: np.ndarray) -> tuple[float, float]:
         nearest = np.argsort(similarity[i])[::-1][:NEIGHBORS]
         share = sum(labels[j] == "good" for j in nearest) / NEIGHBORS
         good_share.append((label, share))
-        correct += (share > 0.5) == (label == "good")
+        correct += (share > MAJORITY) == (label == "good")
     return correct / len(labels), auc(good_share)
 
 

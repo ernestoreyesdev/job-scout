@@ -9,6 +9,7 @@ from typing import Any
 from app.agents.claude import parse
 from app.agents.schemas import FitScore, JobDetails, RunStopped
 from app.agents.scoring.prompts import FIT_SYSTEM, LabeledJob, Lesson, fit_blocks
+from app.constants import POSSIBLE_FIT_SCORE, STRONG_FIT_SCORE
 from app.db import Rest
 from app.sources.base import Posting, description_hash
 from app.telemetry import ContextThreadPool, prompt_version
@@ -16,8 +17,9 @@ from app.telemetry import ContextThreadPool, prompt_version
 logger = logging.getLogger("agent")
 
 SCORE_CONCURRENCY = 8
+MAX_TOKENS = 16000
 # The Possible and Strong fit labels' lowest scores; a first score within NEAR_CUT of one is scored EXTRA_SCORES more times.
-SCORE_CUTS = (50, 70)
+SCORE_CUTS = (POSSIBLE_FIT_SCORE, STRONG_FIT_SCORE)
 NEAR_CUT = 10
 EXTRA_SCORES = 2
 
@@ -48,7 +50,7 @@ def score_posting(
     return parse(
         client,
         model=model,
-        max_tokens=16000,
+        max_tokens=MAX_TOKENS,
         effort=effort,
         system=FIT_SYSTEM,
         content=fit_blocks(resume_text, posting, examples, lessons),
@@ -146,8 +148,13 @@ def posting_details(details: JobDetails, posting: Posting) -> dict[str, Any]:
 
 
 def steady_score(first: int, again: Callable[[], int]) -> int:
-    """The first score, or when it is near a cut, the rounded average of it and EXTRA_SCORES more from `again`."""
+    """
+    The first score, or when it is near a cut, the rounded average of it and
+    EXTRA_SCORES more from `again`, which run at the same time.
+    """
     if all(abs(first - cut) > NEAR_CUT for cut in SCORE_CUTS):
         return first
-    scores = [first, *(again() for _ in range(EXTRA_SCORES))]
+    with ContextThreadPool(max_workers=EXTRA_SCORES) as pool:
+        extra = list(pool.map(lambda _: again(), range(EXTRA_SCORES)))
+    scores = [first, *extra]
     return round(sum(scores) / len(scores))

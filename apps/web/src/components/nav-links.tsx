@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
+import { HOME_PATH } from "@/lib/db";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -18,7 +19,7 @@ const NAV = [
 export function NavLinks({ extra }: { extra?: ReactNode }) {
   return (
     <nav className="-mx-2 flex min-w-0 items-center gap-1 overflow-x-auto text-sm">
-      <Link href="/tracker" className="shrink-0 px-2 font-semibold tracking-tight">
+      <Link href={HOME_PATH} className="shrink-0 px-2 font-semibold tracking-tight">
         Job Scout
       </Link>
       {NAV.map((item) => (

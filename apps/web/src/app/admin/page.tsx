@@ -7,16 +7,40 @@ import { SectionCard } from "@/components/section-card";
 import { StatTile } from "@/components/stat-tile";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { PageReady } from "@/components/web-vitals";
-import type { AgentRunRow, CompanyKindRow, FitLabelRow, RunUsage, WEB_VITALS } from "@/lib/db";
-import { MIN_LABELED, accuracyByCut, runCost, summarizeCosts } from "@/lib/insights";
+import { BYTES_PER_MB, DAY_MS, STRONG_FIT_SCORE, type AgentRunRow, type CompanyKindRow, type FitLabelRow, type RunUsage, type WEB_VITALS } from "@/lib/db";
+import { MIN_LABELED, PRICED_MODEL, accuracyByCut, runCost, summarizeCosts } from "@/lib/insights";
 import { ISO_DAY, PERCENT } from "@/lib/format";
 import { getAdminSource } from "@/lib/repository";
 import { cn } from "@/lib/utils";
 
 const DOLLARS = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const DAY_MS = 24 * 60 * 60 * 1000;
 const ACTIVE_DAYS = 7;
 const CHART_DAYS = 14;
+const RECENT_FAILURES = 8;
+const BYTES_PER_KB = 1024;
+/** Values the agent, the workflows and Supabase set, shown in the page's text. */
+const RUN_TIME_LIMIT_MINUTES = 10;
+const FRESH_BOARD_HOURS = 25;
+const REFRESH_TIME = "10:17 UTC";
+const EVAL_DAY = "Monday";
+const DB_QUOTA_MB = 500;
+/** Core Web Vitals thresholds: at or under the first is good, over the second is poor. READY borrows LCP's, since both mean the content is visible. */
+const VITAL_THRESHOLDS = {
+  TTFB: [800, 1800],
+  FCP: [1800, 3000],
+  LCP: [2500, 4000],
+  INP: [200, 500],
+  CLS: [0.1, 0.25],
+  READY: [2500, 4000],
+} as const;
+const VITAL_COLUMNS = [
+  { metric: "READY", label: "Data shown", stat: "median" },
+  { metric: "READY", label: "Data shown (75%)", stat: "p75" },
+  { metric: "TTFB", label: "First byte", stat: "p75" },
+  { metric: "LCP", label: "Main content", stat: "p75" },
+  { metric: "INP", label: "Response to input", stat: "p75" },
+  { metric: "CLS", label: "Layout shift", stat: "p75" },
+] as const;
 
 type StepCalls = RunUsage & {
   step: string;
@@ -143,7 +167,7 @@ async function AdminData() {
   return (
     <div className="mt-8 space-y-6">
       <PageReady />
-      <SectionCard collapsible title="Usage" description={`The last ${stats.days} days, estimated at Claude Haiku prices. Your Anthropic console has the exact bill.`}>
+      <SectionCard collapsible title="Usage" description={`The last ${stats.days} days, estimated at ${PRICED_MODEL} prices. Your Anthropic console has the exact bill.`}>
         <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatTile label="Users" value={stats.users.total} note={`${stats.users.active} active in the last ${ACTIVE_DAYS} days`} />
           <StatTile
@@ -310,8 +334,6 @@ function SpeedSection({ runs }: { runs: AdminStats["runs"] }) {
   );
 }
 
-const RECENT_FAILURES = 8;
-
 /** Failed and timed-out runs, and the boards searches couldn't reach or found gone. */
 function HealthSection({ stats, names }: { stats: AdminStats; names: Map<string, string> }) {
   const failed = stats.runs.filter((run) => run.status === "failed");
@@ -343,7 +365,7 @@ function HealthSection({ stats, names }: { stats: AdminStats; names: Map<string,
     <SectionCard collapsible title="Health" description={`Problems over the last ${stats.days} days.`}>
       <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile label="Failed runs" value={failed.length} note={`of ${stats.runs.length} runs`} />
-        <StatTile label="Timed out" value={timedOut} note="Stopped after 10 minutes" />
+        <StatTile label="Timed out" value={timedOut} note={`Stopped after ${RUN_TIME_LIMIT_MINUTES} minutes`} />
         <StatTile label="Boards unreachable" value={unreachable.size} />
         <StatTile label="Boards going missing" value={missing.length} />
       </dl>
@@ -381,24 +403,6 @@ function HealthSection({ stats, names }: { stats: AdminStats; names: Map<string,
     </SectionCard>
   );
 }
-
-/** Core Web Vitals thresholds: at or under the first is good, over the second is poor. READY borrows LCP's, since both mean the content is visible. */
-const VITAL_THRESHOLDS = {
-  TTFB: [800, 1800],
-  FCP: [1800, 3000],
-  LCP: [2500, 4000],
-  INP: [200, 500],
-  CLS: [0.1, 0.25],
-  READY: [2500, 4000],
-} as const;
-const VITAL_COLUMNS = [
-  { metric: "READY", label: "Data shown", stat: "median" },
-  { metric: "READY", label: "Data shown (75%)", stat: "p75" },
-  { metric: "TTFB", label: "First byte", stat: "p75" },
-  { metric: "LCP", label: "Main content", stat: "p75" },
-  { metric: "INP", label: "Response to input", stat: "p75" },
-  { metric: "CLS", label: "Layout shift", stat: "p75" },
-] as const;
 
 /** How fast each page loads for real users, from the measurements their browsers reported. */
 function PageSpeedSection({ vitals, days }: { vitals: AdminStats["vitals"]; days: number }) {
@@ -466,7 +470,7 @@ function BoardSection({ boards, days }: { boards: AdminStats["boards"]; days: nu
   return (
     <SectionCard collapsible
       title="Board fetches"
-      description={`Every board searches checked over the last ${days} days, timed from the first request to the last page, retry included. Boards refreshed within the last 25 hours are read from saved jobs and count as from cache; median and slowest leave those out.`}
+      description={`Every board searches checked over the last ${days} days, timed from the first request to the last page, retry included. Boards refreshed within the last ${FRESH_BOARD_HOURS} hours are read from saved jobs and count as from cache; median and slowest leave those out.`}
     >
       {boards.sources.length === 0 ? (
         <p className="text-sm text-muted-foreground">No board fetches recorded yet. Searches across all companies record them from now on.</p>
@@ -515,7 +519,7 @@ function utcTime(iso: string): string {
 
 /** "640 KB" or "12.3 MB". */
 function size(bytes: number): string {
-  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
+  return bytes >= BYTES_PER_MB ? `${(bytes / BYTES_PER_MB).toFixed(1)} MB` : `${Math.round(bytes / BYTES_PER_KB)} KB`;
 }
 
 /** The daily board refreshes: how long each took as a chart, oldest first, with every run in a table under it. */
@@ -541,7 +545,7 @@ function RefreshSection({
       description={`Every directory board is fetched once a day and its jobs saved, so searches read them from the database. Refreshes over the last ${days} days.`}
     >
       {ran.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No refreshes yet. The first one runs at 10:17 UTC.</p>
+        <p className="text-sm text-muted-foreground">No refreshes yet. The first one runs at {REFRESH_TIME}.</p>
       ) : (
         <>
           <p className="text-sm font-medium">Time per refresh</p>
@@ -603,7 +607,7 @@ function RefreshSection({
         <StorageNote boards={boards} />
       </Suspense>
       <p className="mt-3 text-xs text-muted-foreground">
-        Fetching boards costs nothing per call. What they use is database space, against Supabase&apos;s 500 MB free plan.
+        Fetching boards costs nothing per call. What they use is database space, against Supabase&apos;s {DB_QUOTA_MB} MB free plan.
       </p>
     </SectionCard>
   );
@@ -707,7 +711,7 @@ function ModelQualitySection({ stats }: { stats: AdminStats }) {
               <TableHead className="text-right">Average</TableHead>
               <TableHead className="text-right">Rated</TableHead>
               <TableHead className="text-right">Rated good</TableHead>
-              <TableHead className="text-right">70+ that were good</TableHead>
+              <TableHead className="text-right">{STRONG_FIT_SCORE}+ that were good</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -780,7 +784,7 @@ function ModelQualitySection({ stats }: { stats: AdminStats }) {
 
       <p className="mt-6 text-sm font-medium">Evaluation runs</p>
       {stats.evals.length === 0 ? (
-        <p className="mt-1 text-sm text-muted-foreground">No evaluation runs yet. They run every Monday, or by hand from the Evals workflow.</p>
+        <p className="mt-1 text-sm text-muted-foreground">No evaluation runs yet. They run every {EVAL_DAY}, or by hand from the Evals workflow.</p>
       ) : (
         <Table className="mt-1">
           <TableHeader>

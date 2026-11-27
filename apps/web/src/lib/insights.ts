@@ -1,11 +1,23 @@
-import { FUNNEL_STAGES, type AgentRunRow, type ApplicationRow, type ApplicationStatusRow, type FitLabelRow, type JobSourceRow, type RunUsage } from "@/lib/db";
+import {
+  FUNNEL_STAGES,
+  POSSIBLE_FIT_SCORE,
+  STRONG_FIT_SCORE,
+  type AgentRunRow,
+  type ApplicationRow,
+  type ApplicationStatusRow,
+  type FitLabelRow,
+  type JobSourceRow,
+  type RunUsage,
+} from "@/lib/db";
 
 /** Score cuts the accuracy table reports; DEFAULT_CUT is highlighted. */
-export const SCORE_CUTS = [50, 60, 70, 80] as const;
-export const DEFAULT_CUT = 70;
+export const SCORE_CUTS = [POSSIBLE_FIT_SCORE, 60, STRONG_FIT_SCORE, 80] as const;
+export const DEFAULT_CUT = STRONG_FIT_SCORE;
 /** Marked jobs needed before precision and recall mean much. */
 export const MIN_LABELED = 30;
-/** Claude Haiku 5.5 prices in dollars per million tokens, and per web search. */
+/** The model PRICES are for. */
+export const PRICED_MODEL = "Claude Haiku 5.5";
+/** PRICED_MODEL prices in dollars per million tokens, and per web search. */
 const PRICES = { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite: 0.125, webSearch: 0.01 };
 
 export type ScoredJob = Pick<ApplicationRow, "fit_score" | "fit_label" | "status"> & { source: JobSourceRow };

@@ -5,7 +5,7 @@ from langchain_core.embeddings import Embeddings
 
 MODEL = "BAAI/bge-small-en-v1.5"
 MAX_TOKENS = 512
-MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "bge-small-en-v1.5"
+MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / MODEL.split("/")[-1]
 
 
 class FastEmbedEmbeddings(Embeddings):

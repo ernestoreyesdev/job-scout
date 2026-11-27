@@ -17,9 +17,12 @@ import type {
   SearchAlertRow,
   ThemeRow,
 } from "./schema";
-import { GHOST_JOB_DAYS, LESSON_FADE_DAYS, REPOST_DAYS, SKIPPED_COMPANY_KINDS } from "./schema";
+import { DAY_MS, GHOST_JOB_DAYS, LESSON_FADE_DAYS, REPOST_DAYS, SKIPPED_COMPANY_KINDS } from "./schema";
 import type { FunnelJob, ScoredJob } from "../insights";
 import { jobKey } from "../job-key";
+
+/** Most rows an Insights query reads. */
+const MAX_INSIGHT_ROWS = 10_000;
 
 export type JobFinderClient = SupabaseClient<Database>;
 
@@ -39,8 +42,6 @@ export type JobSignals = {
 };
 
 export type TrackedJob = TrackedJobRow & { signals: JobSignals };
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Narrows the Tracker or Jobs list; every field is optional. */
 export type JobFilters = {
@@ -216,7 +217,7 @@ export class JobFinderRepository {
     }
   }
 
-  async listRuns(limit = 5, kind?: string): Promise<AgentRunRow[]> {
+  async listRuns(limit: number, kind?: string): Promise<AgentRunRow[]> {
     let query = this.client
       .from("agent_runs")
       .select(
@@ -352,7 +353,7 @@ export class JobFinderRepository {
       .from("applications")
       .select("fit_score, fit_label, status, posting:postings!inner(source)")
       .not("fit_score", "is", null)
-      .range(0, 9999);
+      .range(0, MAX_INSIGHT_ROWS - 1);
     if (error) throw error;
     return data.map(({ posting, ...job }) => ({ ...job, source: posting.source }));
   }
@@ -363,7 +364,7 @@ export class JobFinderRepository {
       .from("applications")
       .select("status, added_by, posting:postings!inner(source), resume:resumes(file_name), events:application_events(status)")
       .neq("status", "new")
-      .range(0, 9999);
+      .range(0, MAX_INSIGHT_ROWS - 1);
     if (error) throw error;
     return data.map((job) => ({
       statuses: [job.status, ...job.events.map((event) => event.status)],
@@ -380,7 +381,7 @@ export class JobFinderRepository {
       .select("posting:postings!inner(posted_at, created_at, closed_at)")
       .or("in_tracker.eq.true,status.neq.new")
       .is("posting.closed_at", null)
-      .range(0, 9999);
+      .range(0, MAX_INSIGHT_ROWS - 1);
     if (error) throw error;
     const cutoff = Date.now() - GHOST_JOB_DAYS * DAY_MS;
     return data.filter((job) => new Date(job.posting.posted_at ?? job.posting.created_at).getTime() <= cutoff).length;

@@ -556,7 +556,7 @@ def queue_run(
     """
     db = user_db(settings, user.access_token)
     cutoff = (datetime.now(UTC) - RUN_TIME_LIMIT).isoformat()
-    fail_runs(db, {"status": UNFINISHED, "created_at": f"lt.{cutoff}"}, "Stopped after running for more than 10 minutes.")
+    fail_runs(db, {"status": UNFINISHED, "created_at": f"lt.{cutoff}"}, f"Stopped after running for more than {RUN_TIME_LIMIT.total_seconds() // 60:.0f} minutes.")
     try:
         [run] = db.insert("agent_runs", {"user_id": user.id, "kind": kind, "input": body.model_dump()}, select="id")
     except httpx.HTTPStatusError as error:

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 from app.agents.schemas import FitScore, JobDetails
-from app.agents.scoring.agent import score_and_save
+from app.agents.scoring.agent import score_and_save, steady_score
 from app.agents.scoring.prompts import trim_description
 from app.db import Rest
 from app.sources.base import Posting
@@ -130,3 +130,13 @@ def test_the_minimum_score_is_checked_against_the_average():
     saved, _ = score_one([45, 55, 56], min_score=50)
 
     assert saved["fit_score"] == 52 and "in_tracker" not in saved
+
+
+def test_the_extra_scores_run_at_the_same_time():
+    both_running = threading.Barrier(2, timeout=5)
+
+    def again() -> int:
+        both_running.wait()
+        return 60
+
+    assert steady_score(54, again) == 58

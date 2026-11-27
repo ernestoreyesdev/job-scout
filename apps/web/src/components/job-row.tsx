@@ -11,6 +11,8 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   APPLICATION_STATUSES,
   GHOST_JOB_DAYS,
+  POSSIBLE_FIT_SCORE,
+  STRONG_FIT_SCORE,
   type FitLabelRow,
   type GapItem,
   type TrackedJob,
@@ -28,6 +30,15 @@ const GAP_SECTIONS = [
 
 /** Stack items shown as chips before the rest collapse into "+N". */
 const STACK_CHIPS = 4;
+/** A posting's age reads in weeks from WEEKS_FROM_DAYS days, and in months from MONTHS_FROM_DAYS. */
+const WEEKS_FROM_DAYS = 14;
+const MONTHS_FROM_DAYS = 60;
+const DAYS_PER_WEEK = 7;
+const DAYS_PER_MONTH = 30;
+/** Longest all-capitals word kept as a likely acronym. */
+const MAX_ACRONYM_LENGTH = 3;
+const LONG_CAPITALS = new RegExp(`[A-Z]{${MAX_ACRONYM_LENGTH + 1}}`);
+const SHORT_WORDS = new Set(["NEW", "THE", "AND", "FOR", "OF", "IN", "AT", "TO", "SAN", "LOS", "LAS", "ALL", "ANY"]);
 
 const CHIP = "inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs text-foreground/80";
 const WARNING_CHIP =
@@ -313,17 +324,17 @@ function ScoreBadge({ score }: { score: number | null }) {
   );
 }
 
-/** Colors and label for a fit score: green from 70, amber from 50, gray below and when unscored. */
+/** Colors and label for a fit score: green from STRONG_FIT_SCORE, amber from POSSIBLE_FIT_SCORE, gray below and when unscored. */
 function fitLook(score: number | null): { badge: string; accent: string; label: string } {
   if (score === null) return { badge: "bg-muted text-muted-foreground", accent: "border-l-border", label: "Not scored" };
-  if (score >= 70) {
+  if (score >= STRONG_FIT_SCORE) {
     return {
       badge: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
       accent: "border-l-emerald-500",
       label: "Strong fit",
     };
   }
-  if (score >= 50) {
+  if (score >= POSSIBLE_FIT_SCORE) {
     return {
       badge: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
       accent: "border-l-amber-400",
@@ -336,23 +347,21 @@ function fitLook(score: number | null): { badge: string; accent: string; label: 
 function postedAgo(days: number): string {
   if (days === 0) return "posted today";
   if (days === 1) return "posted yesterday";
-  if (days < 14) return `posted ${days} days ago`;
-  if (days < 60) return `posted ${Math.floor(days / 7)} weeks ago`;
-  return `posted ${Math.floor(days / 30)} months ago`;
+  if (days < WEEKS_FROM_DAYS) return `posted ${days} days ago`;
+  if (days < MONTHS_FROM_DAYS) return `posted ${Math.floor(days / DAYS_PER_WEEK)} weeks ago`;
+  return `posted ${Math.floor(days / DAYS_PER_MONTH)} months ago`;
 }
 
 /**
- * Text a source sent in all capitals, in title case. Words of up to three letters stay capitalized as likely
+ * Text a source sent in all capitals, in title case. Words of up to MAX_ACRONYM_LENGTH letters stay capitalized as likely
  * acronyms ("US", "NY", "AWS"), except the common words in SHORT_WORDS.
  */
 function tidyCase(text: string): string {
-  if (text !== text.toUpperCase() || !/[A-Z]{4}/.test(text)) return text;
+  if (text !== text.toUpperCase() || !LONG_CAPITALS.test(text)) return text;
   return text.replace(/[A-Z]+/g, (word) =>
-    word.length <= 3 && !SHORT_WORDS.has(word) ? word : word[0] + word.slice(1).toLowerCase(),
+    word.length <= MAX_ACRONYM_LENGTH && !SHORT_WORDS.has(word) ? word : word[0] + word.slice(1).toLowerCase(),
   );
 }
-
-const SHORT_WORDS = new Set(["NEW", "THE", "AND", "FOR", "OF", "IN", "AT", "TO", "SAN", "LOS", "LAS", "ALL", "ANY"]);
 
 /** A location without a trailing country name for the US, which every search is limited to. */
 function shortLocation(location: string): string {

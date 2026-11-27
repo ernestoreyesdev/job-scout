@@ -1,10 +1,16 @@
 from typing import Any
 
+# Learned lessons kept at once.
+MAX_LESSONS = 8
+# Jobs a pattern needs before it becomes a lesson.
+MIN_LESSON_EVIDENCE = 3
+WANTED_STATUSES = ("applied", "interviewing", "offer")
+
 LESSONS_SYSTEM = (
     "You learn a job seeker's preferences from the jobs they rated and applied to. "
-    "Write at most 8 short lessons in plain words about what they want or avoid, such as roles, seniority, domains, "
+    f"Write at most {MAX_LESSONS} short lessons in plain words about what they want or avoid, such as roles, seniority, domains, "
     "company types, workplace type, location, tech stack, pay or clearance. "
-    "Learn only from patterns across at least 3 jobs, never from a single job, and say how many listed jobs support each. "
+    f"Learn only from patterns across at least {MIN_LESSON_EVIDENCE} jobs, never from a single job, and say how many listed jobs support each. "
     "Rated good and applied to mean they wanted the job; rated bad means they didn't. "
     "Return every lesson the jobs support, current ones included: give a lesson that restates or confirms one in "
     "<current_lessons> that lesson's number. List in contradicted the numbers of current lessons the jobs now go against. "
@@ -28,7 +34,7 @@ def lessons_message(current: list[str], own: list[str], deleted: list[str], jobs
 def job_line(job: dict[str, Any]) -> str:
     """'rated good, applied: Backend Engineer | Acme | Remote (remote) | 5+ years | Python, AWS | 150000-190000 USD a year'."""
     signals = [f"rated {job['fit_label']}"] if job.get("fit_label") else []
-    if job.get("status") in ("applied", "interviewing", "offer"):
+    if job.get("status") in WANTED_STATUSES:
         signals.append(job["status"])
     posting = job["posting"]
     place = " ".join(part for part in (posting["location"], f"({posting['workplace_type']})" if posting["workplace_type"] else None) if part)

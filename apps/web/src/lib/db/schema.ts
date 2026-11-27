@@ -61,17 +61,45 @@ export const SKIPPED_COMPANY_KINDS: readonly CompanyKindRow[] = ["staffing"];
 
 export const POSTED_WITHIN_DAYS = [1, 3, 7, 14, 30] as const;
 
+/** The lowest scores of the Strong fit and Possible fit labels. */
+export const STRONG_FIT_SCORE = 70;
+export const POSSIBLE_FIT_SCORE = 50;
+
 /** Lowest fit score a scored search keeps, matching the Possible and Strong fit labels. */
-export const MIN_SCORES = [50, 70] as const;
+export const MIN_SCORES = [POSSIBLE_FIT_SCORE, STRONG_FIT_SCORE] as const;
 
-/** Upper bound the agent accepts for jobs scored in one search. */
+/** Upper bound the agent accepts for jobs scored in one search, and the form's starting value. */
 export const MAX_JOBS_PER_SEARCH = 25;
+export const DEFAULT_JOBS_PER_SEARCH = 10;
 
-/** Upper bound the agent accepts for companies added in one import. */
+/** Longest company name or location a search takes. */
+export const MAX_FIELD_LENGTH = 100;
+
+/** Upper bound the agent accepts for companies added in one import, and for one entry's length. */
 export const MAX_COMPANY_IMPORT = 100;
+export const MAX_IMPORT_ENTRY_LENGTH = 300;
+
+/** Most jobs a daily match email lists, as the agent caps it. */
+export const DAILY_EMAIL_MATCHES = 10;
+
+/** The page signing in and the logo lead to. */
+export const HOME_PATH = "/tracker";
+
+export const BYTES_PER_MB = 1024 * 1024;
+export const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Largest resume upload, and the file types a resume can be with their media types. */
+export const MAX_RESUME_MB = 1;
+export const RESUME_TYPES = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+} as const;
 
 /** How many of the user's latest different searches the daily email dialog offers. */
 export const DAILY_SEARCH_CHOICES = 5;
+
+/** Past search runs read to find the DAILY_SEARCH_CHOICES different searches. */
+export const DAILY_SEARCH_SCAN = 50;
 
 export type ProfileRow = {
   user_id: string;

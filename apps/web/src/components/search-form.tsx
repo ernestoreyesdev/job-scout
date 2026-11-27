@@ -7,7 +7,15 @@ import { startSearch } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { MAX_JOBS_PER_SEARCH, MIN_SCORES, POSTED_WITHIN_DAYS, WORKPLACE_LABELS, WORKPLACE_TYPES } from "@/lib/db";
+import {
+  DEFAULT_JOBS_PER_SEARCH,
+  MAX_JOBS_PER_SEARCH,
+  MIN_SCORES,
+  POSTED_WITHIN_DAYS,
+  STRONG_FIT_SCORE,
+  WORKPLACE_LABELS,
+  WORKPLACE_TYPES,
+} from "@/lib/db";
 import { useAction } from "@/lib/use-action";
 
 const CARD = "min-w-0 space-y-2 rounded-lg border bg-muted/40 p-3";
@@ -133,7 +141,7 @@ export function SearchForm({ hasResume }: { hasResume: boolean }) {
           </div>
           <div className={CARD}>
             <Label htmlFor="limit">Max jobs</Label>
-            <Input id="limit" name="limit" type="number" min={1} max={MAX_JOBS_PER_SEARCH} defaultValue={10} />
+            <Input id="limit" name="limit" type="number" min={1} max={MAX_JOBS_PER_SEARCH} defaultValue={DEFAULT_JOBS_PER_SEARCH} />
           </div>
           <div className={CARD} title={hasResume ? "Used when Score with my resume is on" : "Upload a resume to score jobs"}>
             <Label htmlFor="minScore">Min score</Label>
@@ -141,7 +149,7 @@ export function SearchForm({ hasResume }: { hasResume: boolean }) {
               <option value="">Any score</option>
               {MIN_SCORES.map((score) => (
                 <option key={score} value={score}>
-                  {score}+ ({score >= 70 ? "strong fit" : "possible fit or better"})
+                  {score}+ ({score >= STRONG_FIT_SCORE ? "strong fit" : "possible fit or better"})
                 </option>
               ))}
             </select>

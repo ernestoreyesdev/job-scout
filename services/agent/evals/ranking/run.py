@@ -4,8 +4,8 @@ evals.ranking.run`. Takes the most recent scored search, matches its rule
 against the saved open jobs the way a search does, and builds the scoring pool
 twice: once with the Claude title shortlist and once by resume similarity.
 Every job in either pool is scored without labeled examples, and each method's
-pool is reported by how many reach the min score (70 when the search had none).
-A run costs about one shortlist call per 300 matches plus up to two scoring
+pool is reported by how many reach the min score (DEFAULT_CUT when the search had none).
+A run costs about one shortlist call per MAX_CANDIDATES matches plus up to two scoring
 calls per job in the pool. Point it at the hosted project by setting
 SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and ANTHROPIC_API_KEY.
 """
@@ -30,11 +30,12 @@ from app.agents.orchestrator import (
     with_descriptions,
 )
 from app.agents.schemas import FitScore, SearchRule
-from app.agents.scoring.agent import score_posting
+from app.agents.scoring.agent import SCORE_CONCURRENCY, score_posting
 from app.agents.scoring.prompts import FIT_SYSTEM
 from app.agents.titles.agent import related_titles
 from app.agents.triage.agent import MAX_CANDIDATES, shortlist
 from app.config import Settings, get_settings
+from app.constants import STRONG_FIT_SCORE
 from app.db import service_db
 from app.embeddings import embed_jobs
 from app.sources import describe
@@ -43,7 +44,11 @@ from app.sources.filters import matches_rule
 from app.telemetry import CallLog, ContextThreadPool, RecordingClient, prompt_version
 from evals.results import save_result, usage_cost
 
-DEFAULT_CUT = 70
+DEFAULT_CUT = STRONG_FIT_SCORE
+# Recent runs read to find the latest scored search.
+RECENT_RUNS = 50
+# Matches asked of the shortlist per pool slot, so the per-company cap can still fill the pool.
+SHORTLIST_FACTOR = 2
 # Title shortlisting calls at most; beyond them the newest matches are shortlisted.
 MAX_TRIAGE_BATCHES = 10
 
@@ -62,7 +67,7 @@ def main() -> None:
             "status": "eq.done",
             "user_id": "not.is.null",
             "order": "created_at.desc",
-            "limit": "50",
+            "limit": str(RECENT_RUNS),
         },
     )
     run = next((r for r in runs if r["input"].get("score", True) and not r["input"].get("company")), None)
@@ -116,7 +121,7 @@ def main() -> None:
         return item[0], score_posting(client, settings.scoring_model, settings.scoring_effort, resume, item[1]).score
 
     first = score(next(iter(described.items())))
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=SCORE_CONCURRENCY) as pool:
         results = [first, *pool.map(score, list(described.items())[1:])]
     scores = dict(results)
 
@@ -156,7 +161,7 @@ def by_title_fit(
     parallel, then one more call ranks the batches' picks together. Each call
     asks for twice `count` so the per-company cap still leaves a full pool.
     """
-    want = count * 2
+    want = count * SHORTLIST_FACTOR
 
     def rank(candidates: list[tuple[str, Posting]]) -> list[tuple[str, Posting]]:
         picked = triage(client, settings.scoring_model, resume_text, [p for _, p in candidates], want)

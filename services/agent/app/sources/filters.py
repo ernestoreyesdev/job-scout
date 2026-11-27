@@ -10,6 +10,8 @@ if TYPE_CHECKING:
     from app.agents.schemas import SearchRule
 
 WORKPLACE_LABELS: dict[str, str] = {"onsite": "on-site", "hybrid": "hybrid", "remote": "remote"}
+# Keyword patterns kept compiled.
+PATTERN_CACHE_SIZE = 256
 
 US_STATES = {
     "al": "alabama", "ak": "alaska", "az": "arizona", "ar": "arkansas", "ca": "california", "co": "colorado",
@@ -121,7 +123,7 @@ def remote_in_us(location: str | None) -> bool:
     return any(code.lower() in US_STATES for code in re.findall(r"\b[A-Z]{2}\b", location or ""))
 
 
-@lru_cache(maxsize=256)
+@lru_cache(maxsize=PATTERN_CACHE_SIZE)
 def keyword_pattern(keyword: str) -> re.Pattern[str]:
     """A keyword as whole words, each allowing an 's' or 'es' plural, separated by spaces, hyphens or slashes."""
     words = keyword.lower().split()

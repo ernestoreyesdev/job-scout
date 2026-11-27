@@ -18,13 +18,14 @@ import httpx
 from app.agents.orchestrator import SearchResult, run_search
 from app.agents.schemas import SearchRule
 from app.config import Settings
+from app.constants import HTTP_TIMEOUT, STRONG_FIT_SCORE
 from app.db import Rest, user_db
 from app.mail import send_email
 from app.telemetry import CallLog, RecordingClient
 
 logger = logging.getLogger("agent")
 
-MIN_ALERT_SCORE = 70
+MIN_ALERT_SCORE = STRONG_FIT_SCORE
 MAX_ALERT_JOBS = 10
 
 
@@ -165,17 +166,17 @@ def sign_in_as(settings: Settings, user_id: str) -> UserSession:
     """
     admin = {"apikey": settings.supabase_service_role_key, "Authorization": f"Bearer {settings.supabase_service_role_key}"}
     auth = f"{settings.supabase_url}/auth/v1"
-    found = httpx.get(f"{auth}/admin/users/{user_id}", headers=admin, timeout=30)
+    found = httpx.get(f"{auth}/admin/users/{user_id}", headers=admin, timeout=HTTP_TIMEOUT)
     found.raise_for_status()
     email = found.json()["email"]
-    link = httpx.post(f"{auth}/admin/generate_link", headers=admin, json={"type": "magiclink", "email": email}, timeout=30)
+    link = httpx.post(f"{auth}/admin/generate_link", headers=admin, json={"type": "magiclink", "email": email}, timeout=HTTP_TIMEOUT)
     link.raise_for_status()
     token_hash = link.json().get("hashed_token") or link.json()["properties"]["hashed_token"]
     session = httpx.post(
         f"{auth}/verify",
         headers={"apikey": settings.supabase_anon_key},
         json={"type": "magiclink", "token_hash": token_hash},
-        timeout=30,
+        timeout=HTTP_TIMEOUT,
     )
     session.raise_for_status()
     return UserSession(session.json()["access_token"], email)
@@ -188,7 +189,7 @@ def sign_out(settings: Settings, session: UserSession) -> None:
             f"{settings.supabase_url}/auth/v1/logout",
             params={"scope": "local"},
             headers={"apikey": settings.supabase_anon_key, "Authorization": f"Bearer {session.access_token}"},
-            timeout=30,
+            timeout=HTTP_TIMEOUT,
         ).raise_for_status()
     except httpx.HTTPError as error:
         logger.warning("signing out of the daily search session failed: %s", error)

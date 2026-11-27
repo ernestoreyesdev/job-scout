@@ -3,7 +3,23 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.constants import POSSIBLE_FIT_SCORE, STRONG_FIT_SCORE
 from app.sources.base import WorkplaceType
+
+DEFAULT_JOBS_PER_SEARCH = 10
+MAX_JOBS_PER_SEARCH = 25
+# Longest company name or location a search takes.
+MAX_FIELD_LENGTH = 100
+MIN_SCORES = (POSSIBLE_FIT_SCORE, STRONG_FIT_SCORE)
+PostedWithinDays = Literal[1, 3, 7, 14, 30]
+MAX_COMPANY_IMPORT = 100
+MAX_TECH_STACK = 15
+MIN_API_KEY_LENGTH = 20
+MAX_URL_LENGTH = 2000
+MAX_TITLE_LENGTH = 300
+MAX_COMPANY_LENGTH = 200
+MAX_DESCRIPTION_LENGTH = 50_000
+MAX_LESSON_LENGTH = 200
 
 
 class JobDetails(BaseModel):
@@ -29,7 +45,7 @@ class JobDetails(BaseModel):
     tech_stack: list[str] = Field(
         description=(
             "Languages, frameworks, databases, clouds and major tools the team uses or the job requires, most important "
-            "first, at most 15. Leave out tools named only as examples, nice-to-haves or company background."
+            f"first, at most {MAX_TECH_STACK}. Leave out tools named only as examples, nice-to-haves or company background."
         )
     )
     workplace_type: WorkplaceType | None = Field(description="onsite, hybrid or remote when the posting says so.")
@@ -54,15 +70,15 @@ class SearchRule(BaseModel):
     """
 
     keywords: list[str] = Field(min_length=1)
-    company: str | None = Field(default=None, max_length=100)
+    company: str | None = Field(default=None, max_length=MAX_FIELD_LENGTH)
     workplace_types: list[WorkplaceType] = []
-    location: str | None = Field(default=None, max_length=100)
-    limit: int = Field(default=10, ge=1, le=25)
+    location: str | None = Field(default=None, max_length=MAX_FIELD_LENGTH)
+    limit: int = Field(default=DEFAULT_JOBS_PER_SEARCH, ge=1, le=MAX_JOBS_PER_SEARCH)
     web_lookup: bool = False
     exclude: list[str] = []
-    posted_within_days: Literal[1, 3, 7, 14, 30] | None = None
+    posted_within_days: PostedWithinDays | None = None
     score: bool = True
-    min_score: Literal[50, 70] | None = None
+    min_score: int | None = None
 
     @field_validator("keywords")
     @classmethod
@@ -82,9 +98,16 @@ class SearchRule(BaseModel):
     def blank_is_none(cls, value: str | None) -> str | None:
         return value.strip() or None if value else None
 
+    @field_validator("min_score")
+    @classmethod
+    def a_score_cut(cls, min_score: int | None) -> int | None:
+        if min_score is not None and min_score not in MIN_SCORES:
+            raise ValueError(f"min_score must be one of {MIN_SCORES}.")
+        return min_score
+
 
 class AnthropicKeyRequest(BaseModel):
-    api_key: str = Field(min_length=20)
+    api_key: str = Field(min_length=MIN_API_KEY_LENGTH)
 
 
 class Usage(BaseModel):
@@ -125,7 +148,7 @@ class Shortlist(BaseModel):
 class CompanyImport(BaseModel):
     """Companies to add to the directory, each a careers page URL or a company name."""
 
-    entries: list[str] = Field(min_length=1, max_length=100)
+    entries: list[str] = Field(min_length=1, max_length=MAX_COMPANY_IMPORT)
 
 
 class HiringJob(BaseModel):
@@ -176,12 +199,12 @@ class OutsideJob(BaseModel):
     when the app can't read the link.
     """
 
-    url: str = Field(min_length=8, max_length=2000, pattern=r"^https?://")
+    url: str = Field(min_length=8, max_length=MAX_URL_LENGTH, pattern=r"^https?://")
     status: Literal["applied", "interviewing", "offer", "rejected"] = "applied"
     applied_on: date | None = None
-    title: str | None = Field(default=None, max_length=300)
-    company: str | None = Field(default=None, max_length=200)
-    description: str | None = Field(default=None, max_length=50_000)
+    title: str | None = Field(default=None, max_length=MAX_TITLE_LENGTH)
+    company: str | None = Field(default=None, max_length=MAX_COMPANY_LENGTH)
+    description: str | None = Field(default=None, max_length=MAX_DESCRIPTION_LENGTH)
 
 
 RescoreScope = Literal["tracker", "jobs"]
@@ -194,7 +217,7 @@ class RescoreRequest(BaseModel):
 
 
 class LearnedLesson(BaseModel):
-    text: str = Field(max_length=200, description="One short preference in plain words, such as 'Prefers remote roles'.")
+    text: str = Field(max_length=MAX_LESSON_LENGTH, description="One short preference in plain words, such as 'Prefers remote roles'.")
     evidence: int = Field(ge=1, description="How many of the listed jobs support it.")
     restates: int | None = Field(description="Number of the current lesson this restates or confirms; null for a new one.")
 

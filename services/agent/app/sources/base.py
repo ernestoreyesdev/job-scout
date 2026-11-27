@@ -12,6 +12,8 @@ from urllib.parse import urlparse
 import httpx
 from pydantic import BaseModel, field_validator
 
+from app.constants import HTTP_TIMEOUT, USER_AGENT
+
 SourceName = Literal[
     "greenhouse",
     "lever",
@@ -119,7 +121,7 @@ class JobSource(ABC):
     max_requests: ClassVar[int | None] = None
 
     def __init__(self, http: httpx.Client | None = None):
-        self._http = http or httpx.Client(timeout=30, headers={"User-Agent": "job-finder"})
+        self._http = http or httpx.Client(timeout=HTTP_TIMEOUT, headers={"User-Agent": USER_AGENT})
         self._requests = threading.BoundedSemaphore(self.max_requests) if self.max_requests else None
 
     @abstractmethod

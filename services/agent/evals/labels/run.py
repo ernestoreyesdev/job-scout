@@ -1,8 +1,8 @@
 """
 Measures whether labeled examples improve fit scores: `uv run python -m
 evals.labels.run`. Takes the account with the most good/bad labels and a
-primary resume, holds out a third of each label, and scores the held-out jobs
-three times with the same call a search makes: without examples, with the most
+primary resume, holds out one in HOLD_OUT_EVERY of each label, and scores the held-out jobs
+four times with the same call a search makes: without examples, with the most
 recent examples, with the examples nearest the held-out batch by embedding, and
 with those examples plus lessons, all drawn only from the rest. The lessons are
 learned from the rest in one call, alongside the account's own lessons. A run
@@ -25,14 +25,15 @@ from app.agents.schemas import FitScore
 from app.agents.scoring.agent import score_posting
 from app.agents.scoring.prompts import FIT_SYSTEM, LabeledJob, Lesson
 from app.config import get_settings
+from app.constants import POSSIBLE_FIT_SCORE, STRONG_FIT_SCORE
 from app.crypto import decrypt
 from app.db import service_db
 from app.embeddings import embed_jobs, job_text
 from app.sources.base import Posting
 from app.telemetry import CallLog, RecordingClient, prompt_version
-from evals.results import save_result, usage_cost
+from evals.results import EVAL_CONCURRENCY, save_result, usage_cost
 
-CUTS = (50, 60, 70, 80)
+CUTS = (POSSIBLE_FIT_SCORE, 60, STRONG_FIT_SCORE, 80)
 HOLD_OUT_EVERY = 3
 MIN_HELD_OUT = 2
 
@@ -170,7 +171,7 @@ def main() -> None:
     for name, arm in arms:
         # The first call runs alone so the cached prefix exists before the rest.
         first = score(held[0], arm)
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        with ThreadPoolExecutor(max_workers=EVAL_CONCURRENCY) as pool:
             scored = [first, *pool.map(score, held[1:], [arm] * (len(held) - 1))]
         results[name] = report(name, scored)
     usage = log.usage()

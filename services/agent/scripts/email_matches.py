@@ -1,7 +1,7 @@
 """
 The daily searches, run by the refresh workflow after the board refresh:
 `uv run python -m scripts.email_matches`. Runs every search a user marked and
-emails them the new jobs scoring 70 or more. Uses ANTHROPIC_API_KEY for the
+emails them the new jobs scoring MIN_ALERT_SCORE or more. Uses ANTHROPIC_API_KEY for the
 scoring. Point it at the hosted project by setting SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.
 """
 

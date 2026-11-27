@@ -19,7 +19,7 @@ from app.crypto import decrypt
 from app.db import service_db
 from app.sources.base import Posting
 from app.telemetry import CallLog, RecordingClient
-from evals.results import usage_cost
+from evals.results import EVAL_CONCURRENCY, usage_cost
 
 HERE = Path(__file__).parent
 EXACT_FIELDS = ("salary_currency", "salary_period", "clearance", "visa_sponsorship", "years_experience", "workplace_type")
@@ -74,7 +74,7 @@ def main() -> None:
 
     # The first call runs alone so the cached resume prefix exists before the rest.
     first = extract(labels[0])
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=EVAL_CONCURRENCY) as pool:
         results = [first, *pool.map(extract, labels[1:])]
 
     usage = calls.usage()

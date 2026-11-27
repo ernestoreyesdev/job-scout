@@ -7,8 +7,9 @@ from app.sources.base import JobSource, Posting
 from app.sources.text import country_name, html_to_text, inline_text, job_posting_ld, workplace_from_location
 
 HOST = "icims.com"
-# Search pages read; boards list about 20 jobs per page.
+# Search pages read, and the jobs a page lists.
 MAX_PAGES = 100
+JOBS_PER_PAGE = 20
 PAGE_CONCURRENCY = 8
 CARD = re.compile(r'<li class="iCIMS_JobCardItem">(.*?)</li>', re.DOTALL)
 LINK = re.compile(r'<a href="(https://[^"]+/jobs/(\d+)/[^"]*)"[^>]*class="iCIMS_Anchor"[^>]*>.*?<h3[^>]*>(.*?)</h3>', re.DOTALL)
@@ -43,7 +44,7 @@ def _posted(title: str | None) -> datetime | None:
 class ICIMSSource(JobSource):
     """
     iCIMS career sites, read from their HTML search pages (no public API). Each
-    page lists about 20 job cards; pages after the first are read in parallel.
+    page lists about JOBS_PER_PAGE job cards; pages after the first are read in parallel.
     Cards differ by company: location and posting date appear only when the
     company shows them. describe() reads a job page's JSON-LD. Each company's
     board is its subdomain, e.g. careers-gdms.icims.com.
@@ -54,7 +55,7 @@ class ICIMSSource(JobSource):
     board_hosts = (HOST,)
     subdomain_boards = True
     reserved_paths = frozenset({"www", "careers", "community", "developer", "help", "info", "status"})
-    max_jobs = MAX_PAGES * 20
+    max_jobs = MAX_PAGES * JOBS_PER_PAGE
 
     def fetch(self, board: str, company: str) -> list[Posting]:
         def page(number: int) -> str:

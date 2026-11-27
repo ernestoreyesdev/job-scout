@@ -25,7 +25,7 @@ from app.agents.scoring.prompts import FIT_SYSTEM
 from app.config import get_settings
 from app.db import service_db
 from app.telemetry import CallLog, RecordingClient, prompt_version
-from evals.results import save_result, usage_cost
+from evals.results import EVAL_CONCURRENCY, save_result, usage_cost
 
 JOBS = 10
 REPEATS = 5
@@ -72,7 +72,7 @@ def main() -> None:
     def steadied(row: dict[str, Any]) -> int:
         return steady_score(score(row), lambda: score(row))
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=EVAL_CONCURRENCY) as pool:
         runs = [list(pool.map(score, jobs)) for _ in range(REPEATS)]
         steady_runs = [list(pool.map(steadied, jobs)) for _ in range(REPEATS)]
     results = [

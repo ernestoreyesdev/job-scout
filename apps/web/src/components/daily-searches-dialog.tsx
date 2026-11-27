@@ -10,7 +10,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { DAILY_SEARCH_CHOICES } from "@/lib/db";
+import { DAILY_EMAIL_MATCHES, DAILY_SEARCH_CHOICES } from "@/lib/db";
 import { useAction } from "@/lib/use-action";
 
 /**
@@ -55,7 +55,7 @@ export function DailySearchesDialog({
           <AlertDialogTitle>Choose daily searches</AlertDialogTitle>
           <AlertDialogDescription>
             Your last {DAILY_SEARCH_CHOICES} searches from the Tracker. Checked ones run each morning after the boards
-            refresh, and you get one email with the 10 best new matches.
+            refresh, and you get one email with the {DAILY_EMAIL_MATCHES} best new matches.
           </AlertDialogDescription>
         </AlertDialogHeader>
         {note && <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">{note}</p>}

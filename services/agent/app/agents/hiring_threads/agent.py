@@ -8,8 +8,10 @@ from typing import Any
 
 import httpx
 
+from app.agents.claude import DEFAULT_EFFORT
 from app.agents.hiring_threads.prompts import EXTRACTION_SYSTEM, extraction_message
 from app.agents.schemas import HiringJobs
+from app.constants import HTTP_TIMEOUT, USER_AGENT
 from app.sources.base import Posting
 from app.sources.text import html_to_text
 from app.telemetry import ContextThreadPool
@@ -17,6 +19,10 @@ from app.telemetry import ContextThreadPool
 logger = logging.getLogger("agent")
 
 API = "https://hn.algolia.com/api/v1"
+POST_URL = "https://news.ycombinator.com/item?id={}"
+# Recent whoishiring stories searched for the THREADS hiring threads.
+THREAD_SEARCH_HITS = 10
+MAX_TOKENS = 8000
 THREAD_TITLE = "Ask HN: Who is hiring?"
 # Monthly threads read, newest first; the latest one is thin early in the month.
 THREADS = 2
@@ -38,8 +44,8 @@ class HiringPost:
 
 def recent_posts(http: httpx.Client | None = None) -> list[HiringPost]:
     """Top-level posts of the latest 'Ask HN: Who is hiring?' threads, read through HN's public Algolia API."""
-    http = http or httpx.Client(timeout=30, headers={"User-Agent": "job-finder"})
-    res = http.get(f"{API}/search_by_date", params={"tags": "story,author_whoishiring", "hitsPerPage": "10"})
+    http = http or httpx.Client(timeout=HTTP_TIMEOUT, headers={"User-Agent": USER_AGENT})
+    res = http.get(f"{API}/search_by_date", params={"tags": "story,author_whoishiring", "hitsPerPage": str(THREAD_SEARCH_HITS)})
     res.raise_for_status()
     threads = [hit["objectID"] for hit in res.json()["hits"] if hit["title"].startswith(THREAD_TITLE)][:THREADS]
 
@@ -71,8 +77,8 @@ def _extract(client: Any, model: str, posts: list[HiringPost]) -> list[Posting]:
     try:
         response = client.beta.messages.parse(
             model=model,
-            max_tokens=8000,
-            output_config={"effort": "low"},
+            max_tokens=MAX_TOKENS,
+            output_config={"effort": DEFAULT_EFFORT},
             system=EXTRACTION_SYSTEM,
             messages=[{"role": "user", "content": extraction_message([post.text for post in posts])}],
             output_format=HiringJobs,
@@ -98,7 +104,7 @@ def _extract(client: Any, model: str, posts: list[HiringPost]) -> list[Posting]:
                 title=job.title.strip(),
                 company=job.company.strip(),
                 location=job.location,
-                url=f"https://news.ycombinator.com/item?id={post.id}",
+                url=POST_URL.format(post.id),
                 description=post.text,
                 posted_at=post.posted_at,
                 workplace_type=job.workplace_type,

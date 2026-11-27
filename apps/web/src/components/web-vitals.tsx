@@ -4,6 +4,8 @@ import { useReportWebVitals } from "next/web-vitals";
 
 import { TITLE_SUFFIX } from "@/lib/titles";
 
+const VITALS_ENDPOINT = "/api/vitals";
+
 type Report = Parameters<typeof useReportWebVitals>[0];
 
 /** When the last move to another page of this site began (link click or back/forward); null once it reported ready. */
@@ -32,8 +34,8 @@ function pageTitle(): string {
 
 function send(page: string, metric: string, value: number, rating?: string, navigationType?: string): void {
   const body = JSON.stringify({ page, metric, value, rating, navigationType });
-  if (navigator.sendBeacon) navigator.sendBeacon("/api/vitals", new Blob([body], { type: "application/json" }));
-  else fetch("/api/vitals", { method: "POST", body, keepalive: true, headers: { "Content-Type": "application/json" } });
+  if (navigator.sendBeacon) navigator.sendBeacon(VITALS_ENDPOINT, new Blob([body], { type: "application/json" }));
+  else fetch(VITALS_ENDPOINT, { method: "POST", body, keepalive: true, headers: { "Content-Type": "application/json" } });
 }
 
 /** Sends each Core Web Vital under the title of the page it measured, without delaying the page. */

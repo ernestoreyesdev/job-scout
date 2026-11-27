@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.agents.claude import DEFAULT_EFFORT
 from app.agents.discovery.prompts import (
     DISCOVERY_SYSTEM,
     NAMING_SYSTEM,
@@ -11,6 +12,12 @@ from app.agents.discovery.prompts import (
 from app.agents.schemas import CompanyName, CompanyNames
 from app.sources import board_from_url, board_hosts
 from app.sources.base import SourceName
+
+WEB_SEARCH_TOOL = "web_search_20250305"
+# Web searches a board discovery and a lookup of one company's board make.
+DISCOVERY_SEARCHES = 3
+LOOKUP_SEARCHES = 2
+MAX_TOKENS = 4000
 
 
 @dataclass
@@ -28,7 +35,7 @@ def discover_boards(
     keywords: list[str],
     workplace_types: list[str],
     location: str | None,
-    searches: int = 3,
+    searches: int = DISCOVERY_SEARCHES,
 ) -> list[FoundBoard]:
     """
     Web searches restricted to the job boards' own sites. Each result URL names
@@ -41,12 +48,12 @@ def search_boards(client: Any, model: str, message: str, searches: int) -> list[
     """Runs a web search limited to job board sites and returns the boards its result URLs belong to, in order."""
     response = client.messages.create(
         model=model,
-        max_tokens=4000,
-        output_config={"effort": "low"},
+        max_tokens=MAX_TOKENS,
+        output_config={"effort": DEFAULT_EFFORT},
         system=DISCOVERY_SYSTEM,
         tools=[
             {
-                "type": "web_search_20250305",
+                "type": WEB_SEARCH_TOOL,
                 "name": "web_search",
                 "max_uses": searches,
                 "allowed_domains": board_hosts(),
@@ -70,7 +77,7 @@ def search_boards(client: Any, model: str, message: str, searches: int) -> list[
     return list(found.values())
 
 
-def find_company_boards(client: Any, model: str, company: str, searches: int = 2) -> list[FoundBoard]:
+def find_company_boards(client: Any, model: str, company: str, searches: int = LOOKUP_SEARCHES) -> list[FoundBoard]:
     """Web searches for one company's job board on any of the job systems."""
     return search_boards(client, model, company_search_message(company, searches), searches)
 
@@ -85,8 +92,8 @@ def name_companies(client: Any, model: str, boards: list[FoundBoard]) -> dict[tu
         return {}
     response = client.beta.messages.parse(
         model=model,
-        max_tokens=4000,
-        output_config={"effort": "low"},
+        max_tokens=MAX_TOKENS,
+        output_config={"effort": DEFAULT_EFFORT},
         system=NAMING_SYSTEM,
         messages=[{"role": "user", "content": naming_message(boards)}],
         output_format=CompanyNames,

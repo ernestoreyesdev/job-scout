@@ -20,6 +20,9 @@ INPUTS = HERE / "postings.local.json"
 # Postings per source, then every posting that mentions a clearance or visa sponsorship on top.
 PER_SOURCE = {"greenhouse": 10, "lever": 8, "ashby": 5, "workable": 3, "hackernews": 8}
 TOPICS = {"clearance": 6, "sponsor": 6}
+# Rows read per source before picking, and how many times a topic's count is read before picking.
+SAMPLE_ROWS = 500
+TOPIC_OVERSAMPLE = 3
 
 
 def pick(db) -> list[dict[str, str]]:
@@ -27,7 +30,7 @@ def pick(db) -> list[dict[str, str]]:
     for source, count in PER_SOURCE.items():
         rows = db.select(
             "postings",
-            {"select": "source,external_id", "source": f"eq.{source}", "description": "neq.", "order": "external_id", "limit": "500"},
+            {"select": "source,external_id", "source": f"eq.{source}", "description": "neq.", "order": "external_id", "limit": str(SAMPLE_ROWS)},
         )
         step = max(1, len(rows) // count)
         for row in rows[::step][:count]:
@@ -35,7 +38,7 @@ def pick(db) -> list[dict[str, str]]:
     for word, count in TOPICS.items():
         rows = db.select(
             "postings",
-            {"select": "source,external_id", "description": f"ilike.*{word}*", "order": "external_id", "limit": str(count * 3)},
+            {"select": "source,external_id", "description": f"ilike.*{word}*", "order": "external_id", "limit": str(count * TOPIC_OVERSAMPLE)},
         )
         for row in rows[:count]:
             chosen[(row["source"], row["external_id"])] = None

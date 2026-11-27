@@ -5,8 +5,11 @@ import { useRef, useState } from "react";
 
 import { uploadResume } from "@/app/actions";
 import { Button } from "@/components/ui/button";
+import { MAX_RESUME_MB, RESUME_TYPES } from "@/lib/db";
 import { useAction } from "@/lib/use-action";
 import { cn } from "@/lib/utils";
+
+const ACCEPT = Object.entries(RESUME_TYPES).flatMap(([extension, type]) => [`.${extension}`, type]).join(",");
 
 /**
  * Uploads a PDF or .docx as the new primary resume, then asks the agent to extract its text. A file can be dropped
@@ -53,14 +56,14 @@ export function ResumeUpload() {
       >
         <FileUp className="size-6 text-muted-foreground" />
         <span className="font-medium">{fileName ?? "Drop your resume here, or choose a file"}</span>
-        <span className="text-sm text-muted-foreground">PDF or Word (.docx), up to 1 MB</span>
+        <span className="text-sm text-muted-foreground">PDF or Word (.docx), up to {MAX_RESUME_MB} MB</span>
         <input
           ref={inputRef}
           name="file"
           type="file"
           required
           className="sr-only"
-          accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          accept={ACCEPT}
           onChange={(event) => setFileName(event.target.files?.[0]?.name ?? null)}
         />
       </label>

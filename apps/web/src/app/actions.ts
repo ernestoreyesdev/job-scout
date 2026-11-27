@@ -5,14 +5,20 @@ import { unstable_rethrow } from "next/navigation";
 
 import {
   APPLICATION_STATUSES,
+  BYTES_PER_MB,
   DAILY_SEARCH_CHOICES,
+  DAILY_SEARCH_SCAN,
   FIT_LABELS,
   MAX_COMPANY_IMPORT,
+  MAX_FIELD_LENGTH,
+  MAX_IMPORT_ENTRY_LENGTH,
   MAX_LESSON_LENGTH,
   MAX_JOBS_PER_SEARCH,
+  MAX_RESUME_MB,
   MIN_SCORES,
   OUTSIDE_STATUSES,
   POSTED_WITHIN_DAYS,
+  RESUME_TYPES,
   THEMES,
   WORKPLACE_TYPES,
   type ApplicationStatusRow,
@@ -32,7 +38,8 @@ export interface ActionResult {
   error?: string;
 }
 
-const MAX_RESUME_BYTES = 1024 * 1024;
+const MAX_RESUME_BYTES = MAX_RESUME_MB * BYTES_PER_MB;
+const RESUME_FILE = new RegExp(`\\.(${Object.keys(RESUME_TYPES).join("|")})$`, "i");
 
 /** Runs an action, turning thrown validation, database or agent errors into a result. */
 async function run(paths: string | string[], work: () => Promise<void>): Promise<ActionResult> {
@@ -71,8 +78,8 @@ export async function uploadResume(formData: FormData): Promise<ActionResult> {
   return run("/resume", async () => {
     const file = formData.get("file");
     if (!(file instanceof File) || file.size === 0) throw new Error("Choose a PDF or .docx file.");
-    if (!/\.(pdf|docx)$/i.test(file.name)) throw new Error("Only PDF and .docx resumes are supported.");
-    if (file.size > MAX_RESUME_BYTES) throw new Error("Resumes must be under 1 MB.");
+    if (!RESUME_FILE.test(file.name)) throw new Error("Only PDF and .docx resumes are supported.");
+    if (file.size > MAX_RESUME_BYTES) throw new Error(`Resumes must be under ${MAX_RESUME_MB} MB.`);
 
     const { repository } = await getSignedInSource();
     const resume = await repository.uploadResume(file);
@@ -89,7 +96,7 @@ export async function startSearch(formData: FormData): Promise<ActionResult> {
     if (keywords.length === 0) throw new Error("Enter at least one keyword.");
 
     const company = text(formData.get("company")) || null;
-    if (company && company.length > 100) throw new Error("Company names must be under 100 characters.");
+    if (company && company.length > MAX_FIELD_LENGTH) throw new Error(`Company names must be under ${MAX_FIELD_LENGTH} characters.`);
 
     const workplaceTypes = formData.getAll("workplace").map(String);
     if (!workplaceTypes.every((type) => WORKPLACE_TYPES.includes(type as WorkplaceTypeRow))) {
@@ -97,7 +104,7 @@ export async function startSearch(formData: FormData): Promise<ActionResult> {
     }
 
     const location = text(formData.get("location")) || null;
-    if (location && location.length > 100) throw new Error("Locations must be under 100 characters.");
+    if (location && location.length > MAX_FIELD_LENGTH) throw new Error(`Locations must be under ${MAX_FIELD_LENGTH} characters.`);
 
     const limit = Number(text(formData.get("limit")));
     if (!Number.isInteger(limit) || limit < 1 || limit > MAX_JOBS_PER_SEARCH) {
@@ -233,7 +240,9 @@ export async function importCompanies(formData: FormData): Promise<ActionResult>
     const entries = [...new Set(text(formData.get("entries")).split(/[\n,]/).map((entry) => entry.trim()).filter(Boolean))];
     if (entries.length === 0) throw new Error("Enter at least one company or careers page URL.");
     if (entries.length > MAX_COMPANY_IMPORT) throw new Error(`Import up to ${MAX_COMPANY_IMPORT} companies at a time.`);
-    if (entries.some((entry) => entry.length > 300)) throw new Error("Each entry must be under 300 characters.");
+    if (entries.some((entry) => entry.length > MAX_IMPORT_ENTRY_LENGTH)) {
+      throw new Error(`Each entry must be under ${MAX_IMPORT_ENTRY_LENGTH} characters.`);
+    }
     await callAgent("/runs/import", { method: "POST", body: { entries } });
   });
 }
@@ -378,7 +387,7 @@ export async function listDailySearches(): Promise<DailySearchesResult> {
   let searches: DailySearch[] = [];
   const result = await run([], async () => {
     const { repository } = await getSignedInSource();
-    const [runs, alerts] = await Promise.all([repository.listRuns(50, "search"), repository.listSearchAlerts()]);
+    const [runs, alerts] = await Promise.all([repository.listRuns(DAILY_SEARCH_SCAN, "search"), repository.listSearchAlerts()]);
     const recent: AgentRunRow[] = [];
     for (const past of runs) {
       if (recent.length === DAILY_SEARCH_CHOICES) break;

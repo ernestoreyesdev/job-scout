@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { HOME_PATH } from "@/lib/db";
 import { createClient } from "@/lib/supabase/server";
 
 /** Turns the magic-link code into a session cookie, then lands on the tracker. */
@@ -10,7 +11,7 @@ export async function GET(request: NextRequest) {
   const code = searchParams.get("code");
   const requested = searchParams.get("next") ?? "";
   // Only a path on this site, so a sign-in link can't send the user to another one.
-  const next = /^\/(?![\/\\])/.test(requested) ? requested : "/tracker";
+  const next = /^\/(?![\/\\])/.test(requested) ? requested : HOME_PATH;
 
   if (code) {
     const supabase = await createClient();

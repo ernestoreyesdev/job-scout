@@ -4,23 +4,22 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from app.agents.claude import parse
-from app.agents.lessons.prompts import LESSONS_SYSTEM, lessons_message
+from app.agents.lessons.prompts import LESSONS_SYSTEM, MAX_LESSONS, WANTED_STATUSES, lessons_message
 from app.agents.schemas import LessonUpdate
 from app.agents.scoring.prompts import Lesson
 from app.db import Rest
 
-# Learned lessons kept at once, jobs needed before any are learned, and the most recent jobs they're learned from.
-MAX_LESSONS = 8
+# Jobs needed before any lessons are learned, and the most recent jobs they're learned from.
 MIN_JOBS = 5
 MAX_JOBS = 100
 # A learned lesson no update has confirmed for this long is dropped.
 FADE_AFTER = timedelta(days=60)
-WANTED_STATUSES = ("applied", "interviewing", "offer")
 JOB_FACTS = (
     "title,company,location,workplace_type,years_experience,tech_stack,"
     "salary_min,salary_max,salary_currency,salary_period,clearance,visa_sponsorship"
 )
 LESSON_COLUMNS = "id,text,source,evidence,confirmed_at,deleted_at"
+MAX_TOKENS = 4000
 
 
 class LessonsError(Exception):
@@ -60,7 +59,7 @@ def learn(client: Any, model: str, current: list[str], own: list[str], deleted: 
     return parse(
         client,
         model=model,
-        max_tokens=4000,
+        max_tokens=MAX_TOKENS,
         system=LESSONS_SYSTEM,
         content=lessons_message(current, own, deleted, jobs),
         output_format=LessonUpdate,

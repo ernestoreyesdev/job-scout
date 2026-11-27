@@ -6,6 +6,7 @@ from app.agents.titles.prompts import TITLES_SYSTEM, titles_message
 
 MAX_TITLES = 40
 MAX_TITLE_LENGTH = 80
+MAX_TOKENS = 2000
 
 
 class TitlesError(Exception):
@@ -17,7 +18,7 @@ def related_titles(client: Any, model: str, keywords: list[str]) -> list[str]:
     related = parse(
         client,
         model=model,
-        max_tokens=2000,
+        max_tokens=MAX_TOKENS,
         system=TITLES_SYSTEM,
         content=titles_message(keywords, MAX_TITLES),
         output_format=RelatedTitles,

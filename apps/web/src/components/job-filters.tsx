@@ -14,6 +14,8 @@ const SORT_LABELS: Record<JobSort, string> = {
   added: "Recently added",
 };
 
+/** Dollars the minimum salary field moves by. */
+const SALARY_STEP = 5000;
 const PILL = "h-8 rounded-full border border-input bg-transparent px-3 text-sm shadow-xs hover:border-foreground/30";
 
 /**
@@ -77,7 +79,7 @@ export function JobListFilters({
             type="number"
             name="salary"
             min={0}
-            step={5000}
+            step={SALARY_STEP}
             defaultValue={query.filters.minSalary ?? ""}
             onBlur={(event) => {
               const changed = event.currentTarget.value !== String(query.filters.minSalary ?? "");

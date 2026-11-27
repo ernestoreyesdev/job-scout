@@ -49,12 +49,15 @@ LINK = re.compile(r"https?://[^\s)\]\"'<>]+")
 SKIPPED_KINDS = frozenset({"staffing"})
 # Jobs scored per company in a search across the directory.
 MAX_PER_COMPANY = 3
+# Job titles from a board found by name that the naming call reads besides the name.
+NAMING_SAMPLE_TITLES = 3
 # A search scores this many times its job limit and keeps the best-scoring ones.
 POOL_FACTOR = 2
 # With a min score, a search scores another pool while fewer jobs than its limit pass, up to this many pools.
 MAX_SCORING_ROUNDS = 3
 FETCH_CONCURRENCY = 16
 FETCH_RETRY_SECONDS = 2.0
+FETCH_ATTEMPTS = 2
 # Consecutive searches that find a board gone before it leaves the directory.
 MAX_MISSED_CHECKS = 3
 # Most recent jobs per label shown to scoring, and how many of each label it takes before any are shown.
@@ -76,6 +79,9 @@ RANK_CONCURRENCY = 4
 REFRESH_TIME_LIMIT = timedelta(hours=5)
 # The jobs each page lists, as a filter on applications.
 RESCORE_SCOPES: dict[RescoreScope, str] = {"tracker": "in_tracker.eq.true", "jobs": "status.neq.new"}
+# Short forms written out before titles are compared across sources.
+TITLE_ABBREVIATIONS = {"sr": "senior", "jr": "junior", "eng": "engineer", "engr": "engineer"}
+EDITED_FIELDS = "edited_title,edited_company,edited_description"
 
 BoardKey = tuple[str, str]
 
@@ -635,7 +641,7 @@ def import_companies(
     existing = {key for key in [*by_name, *by_url] if key in known}
     new_names = {key: value for key, value in by_name.items() if key not in known}
     new_urls = {key: url for key, url in by_url.items() if key not in known and key not in by_name}
-    candidates = [FoundBoard(r.source, r.board, [entry, *(p.title for p in r.postings[:3])]) for entry, r in new_names.values()]
+    candidates = [FoundBoard(r.source, r.board, [entry, *(p.title for p in r.postings[:NAMING_SAMPLE_TITLES])]) for entry, r in new_names.values()]
     candidates += [FoundBoard(source, board, [url]) for (source, board), url in new_urls.items()]
     named = namer(client, settings.discovery_model, candidates) if candidates else {}
 
@@ -724,10 +730,6 @@ def remove_duplicate_names(service: Rest) -> set[tuple[str, str]]:
         service.delete("companies", {"id": f"in.({','.join(row['id'] for row in rest)})"})
         removed |= {(row["source"], row["board"]) for row in rest}
     return removed
-
-
-# Short forms written out before titles are compared across sources.
-TITLE_ABBREVIATIONS = {"sr": "senior", "jr": "junior", "eng": "engineer", "engr": "engineer"}
 
 
 def one_per_job(postings: list[Posting]) -> list[Posting]:
@@ -835,7 +837,7 @@ def fetch_boards(
     boards: list[Board], fetcher: Callable[[str, str, str], list[Posting]], report: Callable[[str], None]
 ) -> tuple[dict[BoardKey, list[Posting]], list[BoardKey], list[str], list[dict[str, Any]]]:
     """
-    Fetches boards FETCH_CONCURRENCY at a time, retrying a failed fetch once.
+    Fetches boards FETCH_CONCURRENCY at a time, trying each up to FETCH_ATTEMPTS times.
     Returns the jobs by board, the boards that are gone, the "source/board" of
     the ones that couldn't be reached, and how long each fetch took and how it ended.
     """
@@ -854,7 +856,7 @@ def fetch_boards(
             ms = round((time.monotonic() - started) * 1000)
             fetches.append({"board": key, "source": source, "ms": ms, "jobs": jobs, "outcome": outcome})
 
-        for attempt in range(2):
+        for attempt in range(FETCH_ATTEMPTS):
             try:
                 postings = fetcher(source, board, name)
                 break
@@ -865,7 +867,7 @@ def fetch_boards(
                 return
             except Exception as error:
                 logger.warning("fetching %s failed (attempt %d): %s", key, attempt + 1, error, extra={"board": key})
-                if attempt == 0:
+                if attempt < FETCH_ATTEMPTS - 1:
                     time.sleep(FETCH_RETRY_SECONDS)
         else:
             with lock:
@@ -1106,9 +1108,6 @@ def current_lessons(client: Any, settings: Settings, user: Rest, user_id: str) -
     except Exception as error:
         logger.warning("learning preferences failed: %s", error)
     return saved_lessons(user, now)
-
-
-EDITED_FIELDS = "edited_title,edited_company,edited_description"
 
 
 def with_edits(row: dict[str, Any]) -> Posting:

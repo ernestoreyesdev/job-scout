@@ -6,6 +6,9 @@ from fastapi import Depends, Header, HTTPException
 from app.config import Settings, get_settings
 from app.db import HTTP
 
+# Seconds a session check with Supabase Auth may take.
+AUTH_TIMEOUT = 10
+
 
 @dataclass(frozen=True)
 class CurrentUser:
@@ -28,7 +31,7 @@ def current_user(
     res = HTTP.get(
         f"{settings.supabase_url.rstrip('/')}/auth/v1/user",
         headers={"apikey": settings.supabase_anon_key, "Authorization": f"Bearer {token}"},
-        timeout=10,
+        timeout=AUTH_TIMEOUT,
     )
     if res.status_code != 200:
         raise HTTPException(401, "Invalid or expired session.")

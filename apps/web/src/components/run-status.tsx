@@ -11,6 +11,13 @@ import { describeRun, rescoreScope } from "@/lib/runs";
 import { cn } from "@/lib/utils";
 
 const REFRESH_MS = 3000;
+const STATUS_LOOK: Record<RunStatusRow, { Icon: LucideIcon; tone: string }> = {
+  queued: { Icon: LoaderCircle, tone: "bg-sky-50 text-sky-900 dark:bg-sky-950 dark:text-sky-100" },
+  running: { Icon: LoaderCircle, tone: "bg-sky-50 text-sky-900 dark:bg-sky-950 dark:text-sky-100" },
+  done: { Icon: CircleCheck, tone: "bg-emerald-50 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100" },
+  failed: { Icon: CircleAlert, tone: "border border-destructive/30 bg-destructive/5" },
+  stopped: { Icon: CircleStop, tone: "bg-muted text-foreground" },
+};
 
 /**
  * Latest search run; refreshes the page while the run is still working, offers to stop it meanwhile, and offers a
@@ -84,11 +91,3 @@ export function RunStatus({ run }: { run: AgentRunRow }) {
     </div>
   );
 }
-
-const STATUS_LOOK: Record<RunStatusRow, { Icon: LucideIcon; tone: string }> = {
-  queued: { Icon: LoaderCircle, tone: "bg-sky-50 text-sky-900 dark:bg-sky-950 dark:text-sky-100" },
-  running: { Icon: LoaderCircle, tone: "bg-sky-50 text-sky-900 dark:bg-sky-950 dark:text-sky-100" },
-  done: { Icon: CircleCheck, tone: "bg-emerald-50 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100" },
-  failed: { Icon: CircleAlert, tone: "border border-destructive/30 bg-destructive/5" },
-  stopped: { Icon: CircleStop, tone: "bg-muted text-foreground" },
-};

@@ -7,6 +7,8 @@ from app.db import Rest
 
 # Haiku 5.5 prices per million tokens: input, output, cache read, cache write.
 PRICES = (0.10, 0.50, 0.01, 0.125)
+# Claude calls an eval makes at once.
+EVAL_CONCURRENCY = 4
 
 
 def save_result(

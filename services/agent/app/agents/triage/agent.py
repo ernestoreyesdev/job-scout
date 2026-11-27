@@ -7,6 +7,7 @@ from app.sources.base import Posting
 
 # Postings sent to triage at most, newest first; titles are short, so this stays a few thousand tokens.
 MAX_CANDIDATES = 300
+MAX_TOKENS = 4000
 
 
 class TriageError(Exception):
@@ -22,7 +23,7 @@ def shortlist(client: Any, model: str, resume_text: str, postings: list[Posting]
     chosen = parse(
         client,
         model=model,
-        max_tokens=4000,
+        max_tokens=MAX_TOKENS,
         system=TRIAGE_SYSTEM,
         content=triage_blocks(resume_text, candidates, count),
         output_format=Shortlist,

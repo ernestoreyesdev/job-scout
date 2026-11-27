@@ -19,7 +19,7 @@ def _location(location: dict) -> str | None:
 
 class SmartRecruitersSource(JobSource):
     """
-    SmartRecruiters posting API. Lists come in pages of 100 without descriptions,
+    SmartRecruiters posting API. Lists come in pages of PAGE_SIZE without descriptions,
     so describe() fetches one posting's details. An unknown company returns an
     empty list with a 200, so no postings counts as no board.
     """

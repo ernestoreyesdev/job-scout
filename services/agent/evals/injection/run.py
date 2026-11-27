@@ -26,7 +26,7 @@ from app.db import service_db
 from app.sources.base import Posting
 from app.sources.text import html_to_text
 from app.telemetry import CallLog, RecordingClient, prompt_version
-from evals.results import save_result, usage_cost
+from evals.results import EVAL_CONCURRENCY, save_result, usage_cost
 
 HERE = Path(__file__).parent
 MAX_SHIFT = 10
@@ -80,7 +80,7 @@ def check_jobs(client: Any, model: str, effort: str, cases: dict[str, Any]) -> d
     clean: dict[str, list[int]] = {}
     for job in cases["jobs"]:
         clean[job["id"]] = [score(job, job["description"]).score]
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=EVAL_CONCURRENCY) as pool:
         again = dict(zip(clean, pool.map(lambda job: score(job, job["description"]).score, cases["jobs"])))
     for job_id, value in again.items():
         clean[job_id].append(value)
@@ -102,7 +102,7 @@ def check_jobs(client: Any, model: str, effort: str, cases: dict[str, Any]) -> d
         return {"case": case, "worked": worked, "shift": shift, "leak": leak}
 
     pairs = [(job, attack) for attack in cases["attacks"] for job in cases["jobs"]]
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=EVAL_CONCURRENCY) as pool:
         results = list(pool.map(check, pairs))
     noise = max(abs(scores[0] - scores[1]) for scores in clean.values())
     return {"results": results, "noise": noise}

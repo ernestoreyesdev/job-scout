@@ -18,6 +18,9 @@ import { getSignedInSource } from "@/lib/repository";
 
 export const metadata: Metadata = { title: "Companies" };
 
+/** Longest company search the page reads from its URL. */
+const MAX_SEARCH_LENGTH = 100;
+
 export default function CompaniesPage({ searchParams }: PageProps<"/companies">) {
   return (
     <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8 sm:px-6 sm:py-10">
@@ -36,7 +39,7 @@ export default function CompaniesPage({ searchParams }: PageProps<"/companies">)
 async function CompaniesData({ searchParams }: Pick<PageProps<"/companies">, "searchParams">) {
   const params = await searchParams;
   const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value)?.trim() ?? "";
-  const search = first(params.q).slice(0, 100);
+  const search = first(params.q).slice(0, MAX_SEARCH_LENGTH);
   const sortValue = first(params.sort);
   const sort: CompanySort = sortValue in COMPANY_SORTS ? (sortValue as CompanySort) : "jobs";
   const order = first(params.order) === "asc" || first(params.order) === "desc" ? first(params.order) : COMPANY_SORTS[sort];

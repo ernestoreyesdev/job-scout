@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { cache } from "react";
 
-import { JobFinderRepository, type ProfileRow, type ResumeRow, type ThemeRow } from "@/lib/db";
+import { HOME_PATH, JobFinderRepository, type ProfileRow, type ResumeRow, type ThemeRow } from "@/lib/db";
 
 import { createClient } from "./supabase/server";
 
@@ -31,7 +31,7 @@ export const getSignedInSource = cache(async (): Promise<SignedInSource> => {
 /** The signed-in admin's source; anyone else is sent to the Tracker. */
 export async function getAdminSource(): Promise<SignedInSource> {
   const source = await getSignedInSource();
-  if (!source.admin) redirect("/tracker");
+  if (!source.admin) redirect(HOME_PATH);
   return source;
 }
 

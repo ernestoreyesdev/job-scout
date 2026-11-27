@@ -5,6 +5,25 @@ from html.parser import HTMLParser
 
 from app.sources.base import WorkplaceType
 
+# Country codes job systems send, named so they can't be read as US state codes (CA, IN, DE, GA...).
+COUNTRY_NAMES = {
+    "us": "United States", "ca": "Canada", "mx": "Mexico", "br": "Brazil", "ar": "Argentina", "cl": "Chile",
+    "co": "Colombia", "pe": "Peru", "uy": "Uruguay", "cr": "Costa Rica", "pa": "Panama", "gb": "United Kingdom",
+    "uk": "United Kingdom", "ie": "Ireland", "fr": "France", "de": "Germany", "es": "Spain", "pt": "Portugal",
+    "it": "Italy", "nl": "Netherlands", "be": "Belgium", "ch": "Switzerland", "at": "Austria", "pl": "Poland",
+    "cz": "Czechia", "sk": "Slovakia", "si": "Slovenia", "ro": "Romania", "hu": "Hungary", "bg": "Bulgaria",
+    "gr": "Greece", "hr": "Croatia", "rs": "Serbia", "se": "Sweden", "no": "Norway", "dk": "Denmark",
+    "fi": "Finland", "ee": "Estonia", "lt": "Lithuania", "lv": "Latvia", "ua": "Ukraine", "tr": "Turkey",
+    "il": "Israel", "ae": "United Arab Emirates", "sa": "Saudi Arabia", "eg": "Egypt", "ma": "Morocco",
+    "za": "South Africa", "ng": "Nigeria", "ke": "Kenya", "in": "India", "pk": "Pakistan", "bd": "Bangladesh",
+    "lk": "Sri Lanka", "cn": "China", "hk": "Hong Kong", "tw": "Taiwan", "jp": "Japan", "kr": "South Korea",
+    "sg": "Singapore", "my": "Malaysia", "id": "Indonesia", "ph": "Philippines", "vn": "Vietnam",
+    "th": "Thailand", "au": "Australia", "nz": "New Zealand", "lu": "Luxembourg", "is": "Iceland",
+    "al": "Albania", "me": "Montenegro", "ga": "Gabon", "ge": "Georgia (country)", "am": "Armenia",
+    "az": "Azerbaijan", "kz": "Kazakhstan", "md": "Moldova", "mt": "Malta", "cy": "Cyprus",
+}
+JSON_LD = re.compile(r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>', re.DOTALL)
+
 
 class _TextExtractor(HTMLParser):
     BLOCKS = frozenset({"p", "div", "br", "li", "h1", "h2", "h3", "h4", "tr"})
@@ -50,25 +69,6 @@ def workplace_from_location(location: str | None) -> WorkplaceType | None:
     return None
 
 
-# Country codes job systems send, named so they can't be read as US state codes (CA, IN, DE, GA...).
-COUNTRY_NAMES = {
-    "us": "United States", "ca": "Canada", "mx": "Mexico", "br": "Brazil", "ar": "Argentina", "cl": "Chile",
-    "co": "Colombia", "pe": "Peru", "uy": "Uruguay", "cr": "Costa Rica", "pa": "Panama", "gb": "United Kingdom",
-    "uk": "United Kingdom", "ie": "Ireland", "fr": "France", "de": "Germany", "es": "Spain", "pt": "Portugal",
-    "it": "Italy", "nl": "Netherlands", "be": "Belgium", "ch": "Switzerland", "at": "Austria", "pl": "Poland",
-    "cz": "Czechia", "sk": "Slovakia", "si": "Slovenia", "ro": "Romania", "hu": "Hungary", "bg": "Bulgaria",
-    "gr": "Greece", "hr": "Croatia", "rs": "Serbia", "se": "Sweden", "no": "Norway", "dk": "Denmark",
-    "fi": "Finland", "ee": "Estonia", "lt": "Lithuania", "lv": "Latvia", "ua": "Ukraine", "tr": "Turkey",
-    "il": "Israel", "ae": "United Arab Emirates", "sa": "Saudi Arabia", "eg": "Egypt", "ma": "Morocco",
-    "za": "South Africa", "ng": "Nigeria", "ke": "Kenya", "in": "India", "pk": "Pakistan", "bd": "Bangladesh",
-    "lk": "Sri Lanka", "cn": "China", "hk": "Hong Kong", "tw": "Taiwan", "jp": "Japan", "kr": "South Korea",
-    "sg": "Singapore", "my": "Malaysia", "id": "Indonesia", "ph": "Philippines", "vn": "Vietnam",
-    "th": "Thailand", "au": "Australia", "nz": "New Zealand", "lu": "Luxembourg", "is": "Iceland",
-    "al": "Albania", "me": "Montenegro", "ga": "Gabon", "ge": "Georgia (country)", "am": "Armenia",
-    "az": "Azerbaijan", "kz": "Kazakhstan", "md": "Moldova", "mt": "Malta", "cy": "Cyprus",
-}
-
-
 def country_name(code: str | None) -> str | None:
     """'IN' -> 'India'; unknown codes are returned as given."""
     if not code or not code.strip():
@@ -83,9 +83,6 @@ def with_country(location: str | None, country: str | None) -> str | None:
     if not country or country.lower() in location.lower():
         return location
     return f"{location.strip()}, {country}"
-
-
-JSON_LD = re.compile(r'<script[^>]*type="application/ld\+json"[^>]*>(.*?)</script>', re.DOTALL)
 
 
 def job_posting_ld(page: str) -> dict:
