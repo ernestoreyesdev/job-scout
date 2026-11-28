@@ -13,6 +13,7 @@ from app.agents.hiring_threads.prompts import EXTRACTION_SYSTEM, extraction_mess
 from app.agents.schemas import HiringJobs
 from app.constants import HTTP_TIMEOUT, USER_AGENT
 from app.sources.base import Posting
+from app.sources.http import send
 from app.sources.text import html_to_text
 from app.telemetry import ContextThreadPool
 
@@ -44,14 +45,14 @@ class HiringPost:
 
 
 def recent_posts(http: httpx.Client | None = None) -> list[HiringPost]:
-    """Top-level posts of the latest 'Ask HN: Who is hiring?' threads, read through HN's public Algolia API."""
+    """Top-level posts of the latest 'Ask HN: Who is hiring?' threads, read through HN's public Algolia API with the shared retries."""
     http = http or _http
-    res = http.get(f"{API}/search_by_date", params={"tags": "story,author_whoishiring", "hitsPerPage": str(THREAD_SEARCH_HITS)})
+    res = send(lambda: http.get(f"{API}/search_by_date", params={"tags": "story,author_whoishiring", "hitsPerPage": str(THREAD_SEARCH_HITS)}))
     res.raise_for_status()
     threads = [hit["objectID"] for hit in res.json()["hits"] if hit["title"].startswith(THREAD_TITLE)][:THREADS]
 
     def thread_posts(thread: str) -> list[HiringPost]:
-        item = http.get(f"{API}/items/{thread}")
+        item = send(lambda: http.get(f"{API}/items/{thread}"))
         item.raise_for_status()
         return [
             HiringPost(str(child["id"]), html_to_text(child["text"]), datetime.fromisoformat(child["created_at"]))

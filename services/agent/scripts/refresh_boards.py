@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 
 import anthropic
 
-from app.agents.orchestrator import FETCH_ATTEMPTS, refresh_boards
+from app.agents.orchestrator import refresh_boards
 from app.config import Settings, get_settings
 from app.db import service_db
 from app.mail import alert_admin
@@ -51,7 +51,7 @@ def run_refresh(settings: Settings) -> bool:
             settings,
             f"Board refresh couldn't reach {len(unreachable)} {'board' if len(unreachable) == 1 else 'boards'}",
             [
-                f"The refresh saved {summary['jobs']:,} jobs from {summary['boards']} boards, but these failed {FETCH_ATTEMPTS} times in a row:",
+                f"The refresh saved {summary['jobs']:,} jobs from {summary['boards']} boards, but couldn't reach these after retrying:",
                 *unreachable,
                 "Searches fetch these boards live; if they keep failing, check them on the admin page.",
             ],

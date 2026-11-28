@@ -58,8 +58,6 @@ MAX_SCORING_ROUNDS = 3
 FETCH_CONCURRENCY = 16
 # Job descriptions fetched at once for jobs about to be scored.
 DESCRIBE_CONCURRENCY = 8
-FETCH_RETRY_SECONDS = 2.0
-FETCH_ATTEMPTS = 2
 # Consecutive searches that find a board gone before it leaves the directory.
 MAX_MISSED_CHECKS = 3
 # Most recent jobs per label shown to scoring, and how many of each label it takes before any are shown.
@@ -864,7 +862,7 @@ def fetch_boards(
     boards: list[Board], fetcher: Callable[[str, str, str], list[Posting]], report: Callable[[str], None]
 ) -> tuple[dict[BoardKey, list[Posting]], list[BoardKey], list[str], list[dict[str, Any]]]:
     """
-    Fetches boards FETCH_CONCURRENCY at a time, trying each up to FETCH_ATTEMPTS times.
+    Fetches boards FETCH_CONCURRENCY at a time, once each; their requests retry on their own.
     Returns the jobs by board, the boards that are gone, the "source/board" of
     the ones that couldn't be reached, and how long each fetch took and how it ended.
     """
@@ -883,20 +881,15 @@ def fetch_boards(
             ms = round((time.monotonic() - started) * 1000)
             fetches.append({"board": key, "source": source, "ms": ms, "jobs": jobs, "outcome": outcome})
 
-        for attempt in range(FETCH_ATTEMPTS):
-            try:
-                postings = fetcher(source, board, name)
-                break
-            except BoardNotFound:
-                with lock:
-                    gone.append(entry.key)
-                    record("gone")
-                return
-            except Exception as error:
-                logger.warning("fetching %s failed (attempt %d): %s", key, attempt + 1, error, extra={"board": key})
-                if attempt < FETCH_ATTEMPTS - 1:
-                    time.sleep(FETCH_RETRY_SECONDS)
-        else:
+        try:
+            postings = fetcher(source, board, name)
+        except BoardNotFound:
+            with lock:
+                gone.append(entry.key)
+                record("gone")
+            return
+        except Exception as error:
+            logger.warning("fetching %s failed: %s", key, error, extra={"board": key})
             with lock:
                 unreachable.append(key)
                 record("unreachable")

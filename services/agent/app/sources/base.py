@@ -1,7 +1,6 @@
 import hashlib
 import re
 import threading
-import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Hashable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -15,6 +14,7 @@ import httpx
 from pydantic import BaseModel, field_validator
 
 from app.constants import HTTP_TIMEOUT, USER_AGENT
+from app.sources.http import send
 
 SourceName = Literal[
     "greenhouse",
@@ -40,9 +40,6 @@ SourceName = Literal[
 WorkplaceType = Literal["onsite", "hybrid", "remote"]
 
 BOARD_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-# Waits before retrying a request a rate-limited system answered 429.
-RETRY_WAITS = (2.0, 4.0, 8.0)
-MAX_RETRY_WAIT = 30.0
 
 
 class Posting(BaseModel):
@@ -110,7 +107,7 @@ class JobSource(ABC):
     host instead, and reserved_paths are subdomains. not_found_statuses are the response codes meaning a board
     doesn't exist. max_jobs is the most one fetch returns, so a board at that
     size may have more. With max_requests, at most that many requests to the
-    system are out at once and a 429 is retried after a wait.
+    system are out at once. Every request gets the retries in app.sources.http.
     """
 
     name: ClassVar[SourceName]
@@ -186,18 +183,17 @@ class JobSource(ABC):
             return f"https://{board}.{self.board_hosts[0]}/"
         return f"https://{self.board_hosts[0]}/{board}"
 
-    def _send(self, send: Callable[[], httpx.Response]) -> httpx.Response:
-        """Sends a request, within max_requests and retrying 429s after a wait when the system sets it."""
-        if self._requests is None:
-            return send()
-        for wait in RETRY_WAITS:
-            with self._requests:
-                res = send()
-            if res.status_code != 429:
-                return res
-            time.sleep(min(_retry_after(res) or wait, MAX_RETRY_WAIT))
-        with self._requests:
-            return send()
+    def _send(self, request: Callable[[], httpx.Response]) -> httpx.Response:
+        """Sends a request with the shared retries, each attempt within max_requests when the system sets it."""
+        requests = self._requests
+        if requests is None:
+            return send(request)
+
+        def limited() -> httpx.Response:
+            with requests:
+                return request()
+
+        return send(limited)
 
     def _pages[T](self, page: Callable[[int], T], starts: range, concurrency: int) -> list[T]:
         """The pages starting at each of `starts`, `concurrency` at a time, in order, keeping the caller's logging context."""
@@ -208,12 +204,6 @@ class JobSource(ABC):
 def description_hash(description: str) -> str:
     """The MD5 of a description, matching Postgres's md5() of the same text."""
     return hashlib.md5(description.encode()).hexdigest()
-
-
-def _retry_after(res: httpx.Response) -> float | None:
-    """The seconds a 429 asks to wait, when it says in seconds."""
-    value = res.headers.get("Retry-After", "")
-    return float(value) if value.isdigit() else None
 
 
 def distinct[T](items: Iterable[T], key: Callable[[T], Hashable | None]) -> Iterator[T]:

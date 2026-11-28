@@ -1,8 +1,10 @@
 from datetime import UTC, datetime
 
+import httpx
 import pytest
+import respx
 
-from app.sources import board_from_url, board_hosts, display_name, find_company
+from app.sources import board_from_url, board_hosts, display_name, find_company, http
 from app.sources.base import BoardNotFound, CompanyNotFound, JobSource, Posting, SourceName
 from app.sources.filters import matches_exclusions, matches_location, matches_workplace, posted_within
 from app.sources.greenhouse import GreenhouseSource
@@ -275,3 +277,43 @@ def test_board_fetches_are_reused_until_they_expire(monkeypatch: pytest.MonkeyPa
     with pytest.raises(BoardNotFound):
         sources.cached_fetch(source, "nope", "Nope")
     assert ("ashby", "nope") not in sources._board_cache
+
+
+class JsonSource(JobSource):
+    name = "greenhouse"
+    label = "Json"
+    board_hosts = ()
+
+    def fetch(self, board: str, company: str) -> list[Posting]:
+        return [posting(self.name, board)] * self._get_json(board, f"https://jobs.example/{board}")["jobs"]
+
+
+def flaky_board(monkeypatch: pytest.MonkeyPatch, *failures: httpx.Response | Exception) -> tuple[list[float], respx.Route]:
+    waits: list[float] = []
+    monkeypatch.setattr(http.time, "sleep", waits.append)
+    route = respx.get("https://jobs.example/acme").mock(side_effect=[*failures, httpx.Response(200, json={"jobs": 2})])
+    return waits, route
+
+
+@respx.mock
+def test_a_rate_limited_request_waits_as_asked_and_is_retried(monkeypatch: pytest.MonkeyPatch):
+    waits, route = flaky_board(monkeypatch, httpx.Response(429, headers={"Retry-After": "5"}))
+
+    assert len(JsonSource().fetch("acme", "Acme")) == 2
+    assert route.call_count == 2 and waits == [5.0]
+
+
+@respx.mock
+def test_a_server_error_is_retried_after_growing_waits(monkeypatch: pytest.MonkeyPatch):
+    waits, route = flaky_board(monkeypatch, httpx.Response(503), httpx.Response(502))
+
+    assert len(JsonSource().fetch("acme", "Acme")) == 2
+    assert route.call_count == 3 and waits == list(http.RETRY_WAITS[:2])
+
+
+@respx.mock
+def test_a_dropped_connection_is_retried(monkeypatch: pytest.MonkeyPatch):
+    waits, route = flaky_board(monkeypatch, httpx.ConnectError("connection reset"))
+
+    assert len(JsonSource().fetch("acme", "Acme")) == 2
+    assert route.call_count == 2 and waits == [http.RETRY_WAITS[0]]

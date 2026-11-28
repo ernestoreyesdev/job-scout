@@ -503,31 +503,17 @@ def test_hidden_companies_are_skipped_and_not_rediscovered():
     assert saved_ids(user) == ["posting-1"]
 
 
-@pytest.fixture(autouse=True)
-def no_retry_wait(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(orchestrator, "FETCH_RETRY_SECONDS", 0)
-
-
 def full_directory(*boards: str, missed: dict[str, int] | None = None) -> list[dict[str, Any]]:
     filler = [company(f"co{i}") for i in range(MIN_DIRECTORY)]
     return filler + [{**company(board), "missed_checks": (missed or {}).get(board, 0)} for board in boards]
 
 
-def test_a_board_that_fails_once_is_retried():
-    (result, _, user, _, _, _), fetched, _ = directory_run(
+def test_a_board_that_fails_is_counted_and_kept():
+    (result, _, _, service, _progress, _), fetched, _ = directory_run(
         full_directory("acme"), [], {"acme": [REMOTE_JOB]}, flaky={"acme": 1}
     )
 
-    assert fetched.count(("ashby", "acme", "Acme")) == 2
-    assert result.unreachable_boards == [] and saved_ids(user) == ["posting-1"]
-
-
-def test_a_board_that_keeps_failing_is_counted_and_kept():
-    (result, _, _, service, _progress, _), fetched, _ = directory_run(
-        full_directory("acme"), [], {"acme": [REMOTE_JOB]}, flaky={"acme": 2}
-    )
-
-    assert fetched.count(("ashby", "acme", "Acme")) == 2
+    assert fetched.count(("ashby", "acme", "Acme")) == 1
     assert len(result.unreachable_boards) == 1
     assert result.unreachable_boards == ["ashby/acme"]
     [fetch] = [f for f in result.board_fetches if f["board"] == "ashby/acme"]
