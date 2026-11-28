@@ -32,7 +32,15 @@ from app.sources import (
     find_company,
     is_complete,
 )
-from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, Posting, SourceName
+from app.sources.base import (
+    FEED_SOURCES,
+    HACKER_NEWS,
+    BoardNotFound,
+    CompanyBoard,
+    CompanyNotFound,
+    Posting,
+    SourceName,
+)
 from app.sources.filters import matches_rule
 from app.telemetry import ContextThreadPool, timed
 
@@ -721,7 +729,7 @@ def hiring_thread_postings(
         return []
     since = min(post.posted_at for post in posts).isoformat()
     columns = ",".join(field for field in Posting.model_fields if field != "description")
-    rows = service.select("postings", {"select": columns, "source": "eq.hackernews", "posted_at": f"gte.{since}"})
+    rows = service.select("postings", {"select": columns, "source": f"eq.{HACKER_NEWS}", "posted_at": f"gte.{since}"})
     saved = [Posting.model_validate({**row, "description": ""}) for row in rows]
     read = {post_id(posting) for posting in saved}
     new = [post for post in posts if post.id not in read]
@@ -759,12 +767,12 @@ def one_per_job(postings: list[Posting]) -> list[Posting]:
     """
     One posting per job across sources: the same company name and title
     ('Sr Software Engineer, Full-Stack' and 'Senior Software Engineer, Full Stack')
-    count as one job. A company board's posting is kept over a Hacker News one.
+    count as one job. A company board's posting is kept over a feed's one.
     """
     chosen: dict[tuple[str, str], Posting] = {}
     for p in postings:
         key = job_key(p.company, p.title)
-        if key not in chosen or (chosen[key].source == "hackernews" and p.source != "hackernews"):
+        if key not in chosen or (chosen[key].source in FEED_SOURCES and p.source not in FEED_SOURCES):
             chosen[key] = p
     return list(chosen.values())
 
@@ -1157,7 +1165,7 @@ def add_hiring_thread_companies(
     Adds the companies of Hacker News jobs saved since `since`, or all of them
     without it: from the job board a company's post links to, else by name.
     """
-    params = {"select": "id,company,description", "source": "eq.hackernews", **({"created_at": f"gte.{since}"} if since else {})}
+    params = {"select": "id,company,description", "source": f"eq.{HACKER_NEWS}", **({"created_at": f"gte.{since}"} if since else {})}
     rows = service.select_all("postings", params)
     links: dict[str, str] = {}
     for row in rows:

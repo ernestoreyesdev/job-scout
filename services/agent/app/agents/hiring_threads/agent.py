@@ -12,7 +12,7 @@ from app.agents.claude import parse
 from app.agents.hiring_threads.prompts import EXTRACTION_STEP, EXTRACTION_SYSTEM, extraction_message
 from app.agents.schemas import HiringJobs
 from app.constants import HTTP_TIMEOUT, USER_AGENT
-from app.sources.base import Posting
+from app.sources.base import HACKER_NEWS, Posting
 from app.sources.http import send
 from app.sources.text import html_to_text
 from app.telemetry import ContextThreadPool
@@ -101,7 +101,7 @@ def _extract(client: Any, model: str, posts: list[HiringPost]) -> list[Posting]:
         roles[job.post] = roles.get(job.post, 0) + 1
         postings.append(
             Posting(
-                source="hackernews",
+                source=HACKER_NEWS,
                 board=re.sub(r"[^a-z0-9]+", "-", job.company.lower()).strip("-") or "unknown",
                 external_id=f"{post.id}-{roles[job.post]}",
                 title=job.title.strip(),

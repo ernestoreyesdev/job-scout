@@ -38,7 +38,7 @@ from app.constants import STRONG_FIT_SCORE
 from app.db import service_db
 from app.embeddings import embed_jobs
 from app.sources import describe
-from app.sources.base import Posting
+from app.sources.base import FEED_SOURCES, Posting
 from app.sources.filters import matches_rule
 from app.telemetry import ContextThreadPool, prompt_version
 from evals.results import eval_client, print_cost, save_result, skip, usage_cost
@@ -90,7 +90,7 @@ def main() -> None:
         {
             "select": "id,source,board,external_id,title,company,location,url,posted_at,workplace_type",
             "closed_at": "is.null",
-            "source": "neq.hackernews",
+            "source": f"not.in.({','.join(sorted(FEED_SOURCES))})",
         },
     )
     tracked_rows = db.select_all(

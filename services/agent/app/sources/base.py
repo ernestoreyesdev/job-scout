@@ -38,6 +38,9 @@ SourceName = Literal[
     "manual",
 ]
 WorkplaceType = Literal["onsite", "hybrid", "remote"]
+HACKER_NEWS: SourceName = "hackernews"
+# Sources whose jobs come from people's posts rather than a company's own board.
+FEED_SOURCES: frozenset[SourceName] = frozenset({HACKER_NEWS})
 
 BOARD_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
