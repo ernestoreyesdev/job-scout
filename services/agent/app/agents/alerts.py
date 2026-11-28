@@ -21,7 +21,7 @@ from app.config import Settings
 from app.constants import STRONG_FIT_SCORE
 from app.db import HTTP, Conflict, Rest, check, user_db
 from app.mail import send_email
-from app.telemetry import CallLog, RecordingClient
+from app.runs import record_run
 
 logger = logging.getLogger("agent")
 
@@ -105,51 +105,43 @@ def run_alert(
 ) -> tuple[bool, str | None]:
     """
     Runs one marked search as a scored search keeping jobs at MIN_ALERT_SCORE or
-    more, recorded in agent_runs under the rule as the user marked it. Returns
-    whether it ran, and when the database created its run row (None when it
-    didn't start), which the email's window of new jobs starts from.
+    more, recorded in agent_runs under the rule as the user marked it, like a
+    search the user starts. Returns whether it finished, and when the database
+    created its run row (None when it didn't start), which the email's window of
+    new jobs starts from.
     """
     body = SearchRule.model_validate({**rule, "score": True, "min_score": MIN_ALERT_SCORE, "web_lookup": False})
     try:
-        [run] = user.insert(
-            "agent_runs", {"user_id": user_id, "kind": "search", "input": rule, "status": "running"}, select="id,created_at"
-        )
+        [run] = user.insert("agent_runs", {"user_id": user_id, "kind": "search", "input": rule}, select="id,created_at")
     except Conflict as error:
         if error.run_already_going:
             logger.info("daily search skipped: a run is already going", extra={"user_id": user_id})
             return False, None
         raise
-    calls = CallLog(run["id"])
-    outcome: dict[str, Any]
-    try:
+
+    def work(client: Any, db: Rest, service: Rest, report: Callable[[str], None], timings: dict[str, int]) -> dict[str, Any]:
         result = search(
             rule=body,
-            client=RecordingClient(client, calls),
+            client=client,
             settings=settings,
             resume_id=resume["id"],
             resume_text=resume["text"],
             user_id=user_id,
-            user=user,
+            user=db,
             service=service,
-            report=lambda _: None,
+            report=report,
+            timings=timings,
             cache=cache,
         )
         jobs = "job" if result.kept == 1 else "jobs"
-        outcome = {
+        return {
             "status": "done",
             "progress": f"Daily search: added {result.kept} {jobs} scoring {MIN_ALERT_SCORE} or higher.",
             "jobs_added": result.kept,
         }
-    except Exception as error:
-        logger.exception("daily search failed", extra={"user_id": user_id})
-        outcome = {"status": "failed", "error": f"The daily search failed: {error}"}
-    user.update(
-        "agent_runs",
-        {"id": f"eq.{run['id']}"},
-        {**outcome, "usage": calls.usage().model_dump(), "finished_at": datetime.now(UTC).isoformat()},
-    )
-    calls.save(service)
-    return outcome["status"] == "done", run.get("created_at")
+
+    outcome = record_run(run["id"], "search", user, service, lambda: client, work)
+    return outcome.get("status") == "done", run.get("created_at")
 
 
 def new_matches(user: Rest, since: str) -> list[dict[str, Any]]:

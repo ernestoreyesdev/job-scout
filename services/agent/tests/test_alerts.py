@@ -5,6 +5,7 @@ from app.agents.alerts import UserSession, matches_body, run_alerts
 from app.agents.orchestrator import SearchResult
 from app.config import Settings
 from app.db import Rest
+from app.runs import RUN_FAILED
 from tests.fakes import fake_settings
 
 SETTINGS = fake_settings(app_url="https://scout.example", admin_email="me@example.com")
@@ -12,7 +13,7 @@ MATCH = {"fit_score": 82, "posting": {"title": "Backend <Engineer>", "company": 
 
 
 class FakeDb:
-    """Rows a table returns, plus the writes made."""
+    """Rows a table returns, plus the writes made; every update matches a row."""
 
     def __init__(self, tables: dict[str, list[dict[str, Any]]]):
         self.tables = tables
@@ -30,7 +31,7 @@ class FakeDb:
 
     def update(self, table: str, filters: dict[str, str], patch: dict[str, Any]) -> list[dict[str, Any]]:
         self.updates.append((table, filters, patch))
-        return []
+        return [{"id": filters.get("id")}]
 
 
 def daily(service: FakeDb, users: dict[str, FakeDb], kept: int = 1) -> tuple[dict[str, int], list[dict[str, Any]], list[tuple]]:
@@ -72,7 +73,8 @@ def test_marked_searches_run_as_their_user_with_a_minimum_of_70_and_email_the_ne
     assert (search["rule"].score, search["rule"].min_score, search["rule"].web_lookup) == (True, 70, False)
     [(table, run)] = user.inserts
     assert table == "agent_runs" and run["kind"] == "search" and run["input"] == {"keywords": ["backend engineer"], "limit": 5, "min_score": 50}
-    assert user.updates[0][2]["status"] == "done"
+    assert [patch.get("status") for table, _, patch in user.updates if table == "agent_runs"] == ["running", "done"]
+    assert search["report"] is not None and search["timings"] == {}
     [(_, to, subject, _, key)] = sent
     assert to == "me@example.com" and subject == "1 new job with a high matching score on Job Scout" and key.startswith("matches/u1/")
 
@@ -140,7 +142,10 @@ def test_a_failed_search_is_recorded_and_the_email_still_covers_the_rest(monkeyp
     )
 
     assert summary == {"searches": 1, "emails": 1}
-    assert [patch["status"] for _, _, patch in user.updates] == ["failed", "done"]
+    runs = [patch for table, _, patch in user.updates if table == "agent_runs"]
+    assert [patch["status"] for patch in runs] == ["running", "failed", "running", "done"]
+    assert runs[1]["error"] == RUN_FAILED["search"]
+    assert [rows["detail"] for table, rows in service.inserts if table == "run_errors"] == ["RuntimeError: boards down"]
 
 
 def test_only_the_best_10_matches_across_searches_stay_on_the_tracker_and_get_emailed():

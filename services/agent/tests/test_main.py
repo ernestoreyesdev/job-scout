@@ -11,6 +11,7 @@ from app.agents.orchestrator import ImportResult, SearchResult
 from app.agents.schemas import GapAnalysis, GapItem, SearchRule
 from app.auth import CurrentUser
 from app.db import Rest, check
+from app.runs import RUN_FAILED
 from app.sources.base import CompanyNotFound, Posting
 from tests.fakes import fake_settings
 
@@ -298,7 +299,7 @@ def test_an_unexpected_failure_shows_a_plain_message_and_keeps_the_error_for_the
 
     main.run_search("run-1", SearchRule(keywords=["engineer"]), fake_user(id="u", access_token="t"), settings)
 
-    assert db.updates[-1][2]["error"] == main.RUN_FAILED["search"]
+    assert db.updates[-1][2]["error"] == RUN_FAILED["search"]
     assert ("run_errors", {"run_id": "run-1", "detail": "ValueError: Could not load model BAAI/bge-small-en-v1.5 from any source."}) in db.inserts
 
 

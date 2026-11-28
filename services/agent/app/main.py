@@ -27,37 +27,22 @@ from app.agents.orchestrator import (
     run_search as orchestrate_search,
     with_edits,
 )
-from app.agents.schemas import (
-    AnthropicKeyRequest,
-    CompanyImport,
-    OutsideJob,
-    RescoreRequest,
-    RunError,
-    RunStopped,
-    SearchRule,
-    Usage,
-)
+from app.agents.schemas import AnthropicKeyRequest, CompanyImport, OutsideJob, RescoreRequest, RunError, SearchRule
 from app.auth import CurrentUser, admin_user, current_user
 from app.config import Settings, get_settings
 from app.crypto import decrypt, encrypt, key_hint
 from app.db import Conflict, Rest, service_db, user_db
 from app.mail import alert_admin
+from app.runs import UNFINISHED, record_run
 from app.sources import board_from_url, default_name, fetch_live
 from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, Posting
-from app.telemetry import CallLog, RecordingClient, configure_logging, configure_sentry, current_run, recorded_claude
+from app.telemetry import CallLog, RecordingClient, configure_logging, configure_sentry, recorded_claude
 
 logger = logging.getLogger("agent")
 configure_logging()
 configure_sentry()
 
 RUN_TIME_LIMIT = timedelta(minutes=10)
-UNFINISHED = "in.(queued,running)"
-# What users see when a run of each kind fails unexpectedly; the original error goes to run_errors.
-RUN_FAILED = {
-    "search": "Something went wrong with this search. Try running it again.",
-    "rescore": "Something went wrong while rescoring. Try again.",
-    "import": "Something went wrong while adding these companies. Try again.",
-}
 NO_KEY = "Scoring isn't available right now. We've let the admin know. Try again later."
 
 
@@ -340,39 +325,6 @@ def anthropic_key(service: Rest, user_id: str, settings: Settings) -> str | None
     return settings.anthropic_api_key
 
 
-def start_run(db: Rest, run_id: str) -> Callable[[str], None]:
-    """
-    Marks a queued run running and returns its progress reporter. Progress is
-    written only while the run is still running; once the user has stopped it,
-    the next report raises RunStopped. Logs from here on carry the run's id.
-    """
-    current_run.set(run_id)
-    logger.info("run started")
-    db.update("agent_runs", {"id": f"eq.{run_id}", "status": "eq.queued"}, {"status": "running", "progress": "Starting…"})
-
-    def report(message: str) -> None:
-        if not db.update("agent_runs", {"id": f"eq.{run_id}", "status": "eq.running", "select": "id"}, {"progress": message}):
-            raise RunStopped()
-
-    return report
-
-
-def finish_run(db: Rest, run_id: str, outcome: dict[str, Any], usage: Usage, timings: dict[str, int]) -> None:
-    """
-    Saves a run's outcome while it's still running; a run the user stopped keeps
-    its status and gets only its usage and step timings.
-    """
-    measured = {"usage": usage.model_dump(), "timings": timings or None}
-    logger.info(
-        "run finished",
-        extra={"status": outcome.get("status", "stopped"), "timings": timings, "input_tokens": usage.input_tokens},
-    )
-    finished = {**measured, "finished_at": datetime.now(UTC).isoformat()}
-    if outcome and db.update("agent_runs", {"id": f"eq.{run_id}", "status": "eq.running", "select": "id"}, {**outcome, **finished}):
-        return
-    db.update("agent_runs", {"id": f"eq.{run_id}"}, measured)
-
-
 @app.post("/runs/{run_id}/stop")
 def stop_run(run_id: str, user: User, settings: Config) -> dict[str, str]:
     """Stops a queued or running run; its background task halts at its next progress update."""
@@ -417,12 +369,6 @@ def put_shared_key(body: AnthropicKeyRequest, admin: Admin, settings: Config) ->
 @app.delete("/admin/anthropic-key", status_code=204)
 def delete_shared_key(admin: Admin, settings: Config) -> None:
     service_db(settings).delete("shared_credentials", {"provider": "eq.anthropic"})
-
-
-def save_run_error(service: Rest, run_id: str, detail: str | None) -> None:
-    """Keeps the original error of a run that failed unexpectedly, for the admin page."""
-    if detail:
-        service.insert("run_errors", {"run_id": run_id, "detail": detail})
 
 
 @app.post("/applications/outside", status_code=201)
@@ -576,35 +522,17 @@ def execute_run(
     settings: Settings,
     work: Callable[[Any, Rest, Rest, Callable[[str], None], dict[str, int]], dict[str, Any]],
 ) -> None:
-    """
-    Runs `work` with the user's recording Claude client, their database, the
-    service database, the progress reporter and the step timings, then saves its
-    outcome, the run's usage and its Claude calls. A RunError fails the run with
-    its message; any other error fails it with RUN_FAILED and is kept in run_errors.
-    """
+    """Records `work` as the run, with a Claude client on the user's Anthropic key; a missing key fails the run."""
     db = user_db(settings, user.access_token)
     service = service_db(settings)
-    report = start_run(db, run_id)
-    calls, timings = CallLog(run_id), {}
-    outcome: dict[str, Any] = {}
-    detail: str | None = None
-    try:
+
+    def connect() -> Any:
         api_key = anthropic_key(service, user.id, settings)
         if not api_key:
             raise RunError(missing_key(settings))
-        outcome = work(RecordingClient(make_client(api_key), calls), db, service, report, timings)
-    except RunStopped:
-        pass
-    except RunError as exc:
-        outcome = {"status": "failed", "error": str(exc), "error_code": None, "progress": None}
-    except Exception as exc:
-        logger.exception("%s run %s failed", kind, run_id)
-        detail = f"{exc.__class__.__name__}: {exc}"
-        outcome = {"status": "failed", "error": RUN_FAILED[kind], "error_code": None, "progress": None}
+        return make_client(api_key)
 
-    finish_run(db, run_id, outcome, calls.usage(), timings)
-    save_run_error(service, run_id, detail)
-    calls.save(service)
+    record_run(run_id, kind, db, service, connect, work)
 
 
 @app.post("/me/lessons/refresh")
