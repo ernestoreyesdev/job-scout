@@ -28,22 +28,40 @@ export async function callAgent<T>(path: string, init: { method: string; body?: 
   }
 
   if (!response.ok) {
-    const detail = await response
-      .json()
-      .then((body: { detail?: unknown }) => body.detail)
-      .catch(() => undefined);
-    throw new AgentError(typeof detail === "string" ? detail : `Agent request failed (${response.status}).`, response.status);
+    const body = await response.json().catch(() => undefined);
+    throw agentError(response.status, body);
   }
 
   return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
 }
 
-/** An error response from the agent, with its HTTP status. */
+/** The code the agent sends when it can't find a job from its link. */
+export const JOB_LINK_UNREADABLE = "job_link_unreadable";
+
+/** An error response from the agent, with its HTTP status and the code it sent, if any. */
 export class AgentError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly code: string | null = null,
   ) {
     super(message);
   }
+}
+
+/**
+ * The AgentError for an error response's status and body: its message, or the
+ * first field that failed the agent's checks, and its code when it sent one.
+ */
+export function agentError(status: number, body: unknown): AgentError {
+  const { detail, code } = (body ?? {}) as { detail?: unknown; code?: unknown };
+  const [problem] = Array.isArray(detail) ? (detail as { loc?: unknown[]; msg?: unknown }[]) : [];
+  const field = problem?.loc?.at(-1);
+  const message =
+    typeof detail === "string"
+      ? detail
+      : typeof problem?.msg === "string"
+        ? `${typeof field === "string" ? `${field}: ` : ""}${problem.msg}`
+        : `Agent request failed (${status}).`;
+  return new AgentError(message, status, typeof code === "string" ? code : null);
 }

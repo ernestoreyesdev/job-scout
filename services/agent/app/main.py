@@ -6,7 +6,8 @@ from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Annotated, Any
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.agents.discovery.agent import name_companies
@@ -44,6 +45,8 @@ configure_sentry()
 
 RUN_TIME_LIMIT = timedelta(minutes=10)
 NO_KEY = "Scoring isn't available right now. We've let the admin know. Try again later."
+# Error codes the web app acts on, sent beside the message.
+JOB_LINK_UNREADABLE = "job_link_unreadable"
 
 
 app = FastAPI(title="job-finder agent")
@@ -440,7 +443,9 @@ def outside_posting(service: Rest, body: OutsideJob) -> tuple[str, CompanyBoard 
         [row] = service.insert("postings", match.row(), on_conflict="source,external_id", select="id")
         return row["id"], added
     if not (body.title and body.company and body.description):
-        raise HTTPException(422, "Couldn't find this job from its link. Enter its title, company and description to add it.")
+        raise CodedError(
+            422, "Couldn't find this job from its link. Enter its title, company and description to add it.", JOB_LINK_UNREADABLE
+        )
     manual = Posting(
         source="manual",
         board="manual",
@@ -584,3 +589,17 @@ def add_linked_company(company: str, user: CurrentUser, settings: Settings) -> N
             add_companies_by_name(service, client, settings, [company], "link")
     except Exception as error:
         logger.warning("looking up a manually added company failed: %s", error)
+
+
+class CodedError(HTTPException):
+    """An HTTP error with a short code the web app can act on."""
+
+    def __init__(self, status_code: int, detail: str, code: str):
+        super().__init__(status_code, detail)
+        self.code = code
+
+
+@app.exception_handler(CodedError)
+async def coded_error(request: Request, error: CodedError) -> JSONResponse:
+    """Sends a coded error's message as `detail` and its code as `code`."""
+    return JSONResponse({"detail": error.detail, "code": error.code}, status_code=error.status_code)

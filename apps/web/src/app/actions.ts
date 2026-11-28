@@ -29,7 +29,7 @@ import {
   type ThemeRow,
   type WorkplaceTypeRow,
 } from "@/lib/db";
-import { AgentError, callAgent } from "@/lib/agent";
+import { AgentError, callAgent, JOB_LINK_UNREADABLE } from "@/lib/agent";
 import { getSignedInSource } from "@/lib/repository";
 import { describeSearch, sameRule } from "@/lib/runs";
 
@@ -296,7 +296,7 @@ export async function addOutsideJob(formData: FormData): Promise<AddJobResult> {
     try {
       await callAgent("/applications/outside", { method: "POST", body });
     } catch (error) {
-      needsDetails = error instanceof AgentError && error.status === 422;
+      needsDetails = error instanceof AgentError && error.code === JOB_LINK_UNREADABLE;
       throw error;
     }
     try {

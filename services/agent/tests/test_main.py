@@ -379,12 +379,12 @@ def test_an_outside_job_not_saved_is_read_from_its_board(monkeypatch: pytest.Mon
 def test_an_outside_job_with_an_unreadable_link_needs_a_title_company_and_description(monkeypatch: pytest.MonkeyPatch):
     db = OutsideRest()
 
-    with pytest.raises(HTTPException) as refused:
+    with pytest.raises(main.CodedError) as refused:
         add_outside(monkeypatch, db, url="https://careers.example.com/jobs/42")
-    assert refused.value.status_code == 422
-    with pytest.raises(HTTPException) as refused:
+    assert (refused.value.status_code, refused.value.code) == (422, main.JOB_LINK_UNREADABLE)
+    with pytest.raises(main.CodedError) as refused:
         add_outside(monkeypatch, db, url="https://careers.example.com/jobs/42", title="Engineer", company="Example")
-    assert refused.value.status_code == 422
+    assert (refused.value.status_code, refused.value.code) == (422, main.JOB_LINK_UNREADABLE)
 
     add_outside(
         monkeypatch, db, url="https://careers.example.com/jobs/42", title="Engineer", company="Example", description="Builds things."
