@@ -1,3 +1,4 @@
+TITLES_STEP = "titles"
 TITLES_SYSTEM = (
     "You list the job titles employers use for the roles a job seeker's search keywords describe. "
     "Titles are matched as whole words inside posting titles, so give core titles without seniority or level words: "

@@ -1,5 +1,6 @@
 from app.sources.base import Posting
 
+TRIAGE_STEP = "shortlist"
 TRIAGE_SYSTEM = (
     "You shortlist job postings for a candidate before each one is scored in full. "
     "From titles, companies and locations alone, rank the postings the candidate's resume fits best. "

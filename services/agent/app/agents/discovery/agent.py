@@ -3,7 +3,9 @@ from typing import Any
 
 from app.agents.claude import DEFAULT_EFFORT, parse
 from app.agents.discovery.prompts import (
+    DISCOVERY_STEP,
     DISCOVERY_SYSTEM,
+    NAMING_STEP,
     NAMING_SYSTEM,
     company_search_message,
     discovery_message,
@@ -12,6 +14,7 @@ from app.agents.discovery.prompts import (
 from app.agents.schemas import CompanyName, CompanyNames
 from app.sources import board_from_url, board_hosts
 from app.sources.base import SourceName
+from app.telemetry import claude_step
 
 WEB_SEARCH_TOOL = "web_search_20250305"
 # Web searches a board discovery and a lookup of one company's board make.
@@ -50,21 +53,22 @@ def discover_boards(
 
 def search_boards(client: Any, model: str, message: str, searches: int) -> list[FoundBoard]:
     """Runs a web search limited to job board sites and returns the boards its result URLs belong to, in order."""
-    response = client.messages.create(
-        model=model,
-        max_tokens=MAX_TOKENS,
-        output_config={"effort": DEFAULT_EFFORT},
-        system=DISCOVERY_SYSTEM,
-        tools=[
-            {
-                "type": WEB_SEARCH_TOOL,
-                "name": "web_search",
-                "max_uses": searches,
-                "allowed_domains": board_hosts(),
-            }
-        ],
-        messages=[{"role": "user", "content": message}],
-    )
+    with claude_step(DISCOVERY_STEP):
+        response = client.messages.create(
+            model=model,
+            max_tokens=MAX_TOKENS,
+            output_config={"effort": DEFAULT_EFFORT},
+            system=DISCOVERY_SYSTEM,
+            tools=[
+                {
+                    "type": WEB_SEARCH_TOOL,
+                    "name": "web_search",
+                    "max_uses": searches,
+                    "allowed_domains": board_hosts(),
+                }
+            ],
+            messages=[{"role": "user", "content": message}],
+        )
 
     found: dict[tuple[SourceName, str], FoundBoard] = {}
     for block in response.content:
@@ -99,6 +103,7 @@ def name_companies(client: Any, model: str, boards: list[FoundBoard]) -> dict[tu
             client,
             model=model,
             max_tokens=MAX_TOKENS,
+            step=NAMING_STEP,
             system=NAMING_SYSTEM,
             content=naming_message(boards),
             output_format=CompanyNames,

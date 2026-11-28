@@ -10,6 +10,7 @@ from app.sources.base import Posting
 MIN_CUT_SHARE = 0.25
 MAX_HEADING_LENGTH = 60
 
+FIT_STEP = "scoring"
 FIT_SYSTEM = (
     "You assess how well a candidate's resume fits a job posting. "
     "Judge only from what the resume states; never assume skills, employers or experience it does not show. "

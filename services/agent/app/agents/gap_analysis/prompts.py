@@ -1,6 +1,7 @@
 from app.agents.scoring.prompts import trim_description
 from app.sources.base import Posting
 
+GAP_STEP = "gap_analysis"
 GAP_SYSTEM = (
     "You compare a job posting's requirements with a candidate's resume. Sort each core requirement into covered, "
     "weak or missing, and for each say how the candidate could talk about it. "

@@ -1,3 +1,4 @@
+EXTRACTION_STEP = "hacker_news"
 EXTRACTION_SYSTEM = (
     "You turn Hacker News 'Who is hiring?' posts into job listings. "
     "List every distinct role each post advertises, one entry per role, with the company, title and location "

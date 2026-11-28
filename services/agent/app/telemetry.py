@@ -12,14 +12,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
-from app.agents.discovery.prompts import DISCOVERY_SYSTEM, NAMING_SYSTEM
-from app.agents.gap_analysis.prompts import GAP_SYSTEM
-from app.agents.hiring_threads.prompts import EXTRACTION_SYSTEM
-from app.agents.lessons.prompts import LESSONS_SYSTEM
 from app.agents.schemas import Usage
-from app.agents.scoring.prompts import FIT_SYSTEM
-from app.agents.titles.prompts import TITLES_SYSTEM
-from app.agents.triage.prompts import TRIAGE_SYSTEM
 from app.db import Rest
 
 logger = logging.getLogger("agent")
@@ -27,17 +20,8 @@ logger = logging.getLogger("agent")
 # The run the current code is working on; worker threads see it through ContextThreadPool.
 current_run: ContextVar[str | None] = ContextVar("current_run", default=None)
 
-# Each agent's fixed system prompt names the step that made the call, even from a worker thread.
-STEPS = {
-    FIT_SYSTEM: "scoring",
-    TRIAGE_SYSTEM: "shortlist",
-    TITLES_SYSTEM: "titles",
-    DISCOVERY_SYSTEM: "discovery",
-    NAMING_SYSTEM: "naming",
-    EXTRACTION_SYSTEM: "hacker_news",
-    GAP_SYSTEM: "gap_analysis",
-    LESSONS_SYSTEM: "lessons",
-}
+# The agent step making the current Claude call, set by claude_step.
+current_step: ContextVar[str] = ContextVar("current_step", default="other")
 MAX_ERROR_LENGTH = 500
 
 
@@ -54,7 +38,7 @@ class CallLog:
         server_tools = getattr(usage, "server_tool_use", None)
         row = {
             "run_id": self.run_id,
-            "step": STEPS.get(str(kwargs.get("system")), "other"),
+            "step": current_step.get(),
             "model": str(kwargs.get("model", "")),
             "prompt_version": prompt_version(kwargs.get("system"), kwargs.get("output_format")),
             "input_tokens": getattr(usage, "input_tokens", 0) or 0,
@@ -203,3 +187,13 @@ def recorded_claude(service: Rest, client: Any, run_id: str | None = None) -> It
         yield RecordingClient(client, calls), calls
     finally:
         calls.save(service)
+
+
+@contextmanager
+def claude_step(step: str) -> Iterator[None]:
+    """Records the Claude calls made in the block under `step`."""
+    token = current_step.set(step)
+    try:
+        yield
+    finally:
+        current_step.reset(token)

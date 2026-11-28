@@ -4,10 +4,12 @@ from typing import Any
 import pytest
 
 from app.agents.schemas import FitScore, RelatedTitles
-from app.agents.scoring.prompts import FIT_SYSTEM
-from app.agents.titles.prompts import TITLES_SYSTEM
+from app.agents.scoring.prompts import FIT_STEP, FIT_SYSTEM
+from app.agents.titles.agent import related_titles
+from app.agents.titles.prompts import TITLES_STEP, TITLES_SYSTEM
 from app.db import Rest
-from app.telemetry import CallLog, RecordingClient, prompt_version, timed
+from app.telemetry import CallLog, RecordingClient, claude_step, prompt_version, timed
+from tests.fakes import FakeParse, claude
 
 
 class Messages:
@@ -40,7 +42,8 @@ def test_calls_are_recorded_with_their_step_tokens_and_run():
     log = CallLog("run-1")
     recording = RecordingClient(client(), log)
 
-    recording.beta.messages.parse(model="claude-haiku-5-5", system=FIT_SYSTEM, messages=[])
+    with claude_step(FIT_STEP):
+        recording.beta.messages.parse(model="claude-haiku-5-5", system=FIT_SYSTEM, messages=[])
     recording.messages.create(model="claude-haiku-5-5", system="Something else", messages=[])
 
     scoring, other = log.rows
@@ -52,7 +55,7 @@ def test_calls_are_recorded_with_their_step_tokens_and_run():
 
 def test_a_failed_call_is_recorded_and_still_raises():
     log = CallLog()
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError), claude_step(TITLES_STEP):
         RecordingClient(client(fail=True), log).beta.messages.parse(model="m", system=TITLES_SYSTEM, messages=[])
 
     [row] = log.rows
@@ -144,3 +147,13 @@ def test_usage_adds_up_every_recorded_call_until_saved():
     assert (usage.input_tokens, usage.output_tokens, usage.cache_read_input_tokens) == (1800, 80, 1600)
     log.save(Insert())
     assert log.usage().input_tokens == 0
+
+
+def test_an_agents_call_is_saved_under_its_step_and_later_calls_are_not():
+    log = CallLog("run-1")
+    recording = RecordingClient(claude(FakeParse(RelatedTitles(titles=["Backend Engineer"]))), log)
+
+    related_titles(recording, "m", ["backend"])
+    recording.beta.messages.parse(model="m", system="Something else", messages=[])
+
+    assert [row["step"] for row in log.rows] == ["titles", "other"]

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from app.agents.claude import parse
-from app.agents.lessons.prompts import LESSONS_SYSTEM, MAX_LESSONS, WANTED_STATUSES, lessons_message
+from app.agents.lessons.prompts import LESSONS_STEP, LESSONS_SYSTEM, MAX_LESSONS, WANTED_STATUSES, lessons_message
 from app.agents.schemas import LessonUpdate
 from app.agents.scoring.prompts import Lesson
 from app.db import Rest
@@ -60,6 +60,7 @@ def learn(client: Any, model: str, current: list[str], own: list[str], deleted: 
         client,
         model=model,
         max_tokens=MAX_TOKENS,
+        step=LESSONS_STEP,
         system=LESSONS_SYSTEM,
         content=lessons_message(current, own, deleted, jobs),
         output_format=LessonUpdate,

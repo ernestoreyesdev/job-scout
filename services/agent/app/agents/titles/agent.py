@@ -2,7 +2,7 @@ from typing import Any
 
 from app.agents.claude import parse
 from app.agents.schemas import RelatedTitles
-from app.agents.titles.prompts import TITLES_SYSTEM, titles_message
+from app.agents.titles.prompts import TITLES_STEP, TITLES_SYSTEM, titles_message
 
 MAX_TITLES = 40
 MAX_TITLE_LENGTH = 80
@@ -19,6 +19,7 @@ def related_titles(client: Any, model: str, keywords: list[str]) -> list[str]:
         client,
         model=model,
         max_tokens=MAX_TOKENS,
+        step=TITLES_STEP,
         system=TITLES_SYSTEM,
         content=titles_message(keywords, MAX_TITLES),
         output_format=RelatedTitles,

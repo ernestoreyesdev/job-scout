@@ -8,7 +8,7 @@ from typing import Any
 
 from app.agents.claude import parse
 from app.agents.schemas import FitScore, JobDetails, RunStopped
-from app.agents.scoring.prompts import FIT_SYSTEM, LabeledJob, Lesson, fit_blocks
+from app.agents.scoring.prompts import FIT_STEP, FIT_SYSTEM, LabeledJob, Lesson, fit_blocks
 from app.constants import POSSIBLE_FIT_SCORE, STRONG_FIT_SCORE
 from app.db import Rest
 from app.sources.base import Posting, description_hash
@@ -52,6 +52,7 @@ def score_posting(
         model=model,
         max_tokens=MAX_TOKENS,
         effort=effort,
+        step=FIT_STEP,
         system=FIT_SYSTEM,
         content=fit_blocks(resume_text, posting, examples, lessons),
         output_format=FitScore,

@@ -6,6 +6,7 @@ MAX_LESSONS = 8
 MIN_LESSON_EVIDENCE = 3
 WANTED_STATUSES = ("applied", "interviewing", "offer")
 
+LESSONS_STEP = "lessons"
 LESSONS_SYSTEM = (
     "You learn a job seeker's preferences from the jobs they rated and applied to. "
     f"Write at most {MAX_LESSONS} short lessons in plain words about what they want or avoid, such as roles, seniority, domains, "

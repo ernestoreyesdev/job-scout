@@ -10,11 +10,14 @@ from typing import Any, NamedTuple
 
 from app.agents.discovery.agent import FoundBoard, discover_boards, find_company_boards, name_companies
 from app.agents.hiring_threads.agent import HiringPost, cached_recent_posts, extract_jobs, post_id
+from app.agents.hiring_threads.prompts import EXTRACTION_STEP
 from app.agents.lessons.agent import refresh_lessons, saved_lessons
 from app.agents.schemas import CompanyName, RescoreScope, SearchRule
 from app.agents.scoring.agent import score_and_save
-from app.agents.scoring.prompts import LabeledJob, Lesson
+from app.agents.scoring.prompts import FIT_STEP, LabeledJob, Lesson
 from app.agents.titles.agent import related_titles
+from app.agents.titles.prompts import TITLES_STEP
+from app.agents.triage.prompts import TRIAGE_STEP
 from app.config import Settings
 from app.db import Rest
 from app.embeddings import embed_jobs, job_text, resume_chunks
@@ -174,7 +177,7 @@ def run_search(
         with ContextThreadPool(max_workers=2) as pool:
             hacker_news = (
                 pool.submit(
-                    timed_call, timings, "hacker_news", hiring_thread_postings, client, settings, service, report, read_posts, extractor
+                    timed_call, timings, EXTRACTION_STEP, hiring_thread_postings, client, settings, service, report, read_posts, extractor
                 )
                 if cached_posts is None
                 else None
@@ -187,7 +190,7 @@ def run_search(
             cache.hacker_news = posts
         everything = everything + posts
 
-    with timed(timings, "titles"):
+    with timed(timings, TITLES_STEP):
         titles = expander(client, settings.discovery_model, rule.keywords) if everything else []
     if titles:
         logger.info("related titles", extra={"keywords": rule.keywords, "titles": titles})
@@ -225,7 +228,7 @@ def run_search(
     rounds = MAX_SCORING_ROUNDS if rule.min_score is not None else 1
     if len(fresh) > pool_size * rounds:
         report("Matching jobs to your search…")
-        with timed(timings, "shortlist"):
+        with timed(timings, TRIAGE_STEP):
             fresh = by_resume_fit(fresh, resume_text, service, embed)
     todo: list[tuple[str, Posting]] = []
     scores: dict[str, int] = {}
@@ -244,7 +247,7 @@ def run_search(
                 picking = pool.submit(timed_call, timings, "examples", labeled_examples, user, service, batch, embed, labels)
                 learning = pool.submit(timed_call, timings, "lessons", current_lessons, client, settings, user, user_id)
                 examples, lessons = picking.result(), learning.result()
-        with timed(timings, "scoring"):
+        with timed(timings, FIT_STEP):
             scoring = score_and_save(
                 client=client,
                 model=settings.scoring_model,
@@ -576,7 +579,7 @@ def rescore(
     with timed(timings, "examples"):
         examples = labeled_examples(user, service, todo, embed, label_counts(user))
     lessons = saved_lessons(user, datetime.now(UTC))
-    with timed(timings, "scoring"):
+    with timed(timings, FIT_STEP):
         scoring = score_and_save(
             client=client,
             model=settings.scoring_model,

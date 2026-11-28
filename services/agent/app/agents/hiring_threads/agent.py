@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 from app.agents.claude import parse
-from app.agents.hiring_threads.prompts import EXTRACTION_SYSTEM, extraction_message
+from app.agents.hiring_threads.prompts import EXTRACTION_STEP, EXTRACTION_SYSTEM, extraction_message
 from app.agents.schemas import HiringJobs
 from app.constants import HTTP_TIMEOUT, USER_AGENT
 from app.sources.base import Posting
@@ -81,6 +81,7 @@ def _extract(client: Any, model: str, posts: list[HiringPost]) -> list[Posting]:
             client,
             model=model,
             max_tokens=MAX_TOKENS,
+            step=EXTRACTION_STEP,
             system=EXTRACTION_SYSTEM,
             content=extraction_message([post.text for post in posts]),
             output_format=HiringJobs,
