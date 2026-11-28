@@ -169,3 +169,9 @@ def fetch_live(source: str, board: str, company: str) -> list[Posting]:
 def sources_by_name() -> dict[str, JobSource]:
     """The shared source instances by system name."""
     return {source.name: source for source in all_sources()}
+
+
+def job_at_link(source: str, postings: list[Posting], link: str) -> Posting | None:
+    """The first of a board's postings that a job page link, without its query or fragment, points to."""
+    system = source_named(source)
+    return next((posting for posting in postings if system.is_job_link(posting, link)), None)

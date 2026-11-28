@@ -317,3 +317,14 @@ def test_a_dropped_connection_is_retried(monkeypatch: pytest.MonkeyPatch):
 
     assert len(JsonSource().fetch("acme", "Acme")) == 2
     assert route.call_count == 2 and waits == [http.RETRY_WAITS[0]]
+
+
+def test_a_job_link_points_to_its_posting_by_link_id_or_the_last_piece_of_a_path_id():
+    listed = posting("greenhouse", "acme").model_copy(update={"external_id": "4012", "url": "https://boards.greenhouse.io/acme/jobs/4012?gh_src=x"})
+    pathed = posting("workday", "ge.wd5/site").model_copy(update={"external_id": "/job/Evendale/Engineer_R1-2"})
+    source = GreenhouseSource()
+
+    assert source.is_job_link(listed, "https://boards.greenhouse.io/acme/jobs/4012")
+    assert source.is_job_link(listed, "https://job-boards.greenhouse.io/acme/jobs/4012")
+    assert source.is_job_link(pathed, "https://ge.wd5.myworkdayjobs.com/en-US/site/details/Engineer_R1-2")
+    assert not source.is_job_link(listed, "https://boards.greenhouse.io/acme/jobs/40123")

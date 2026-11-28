@@ -203,6 +203,19 @@ class JobSource(ABC):
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             return list(pool.map(lambda start: copy_context().run(page, start), starts))
 
+    def is_job_link(self, posting: Posting, link: str) -> bool:
+        """
+        Whether a job page link, without its query or fragment, points to
+        `posting`: the posting's own link, or a link with its id, or with the
+        last piece of an id that is itself a path, as one piece of the path.
+        """
+        pieces = set(link.split("/"))
+        return (
+            posting.url.split("?")[0].rstrip("/") == link
+            or posting.external_id in pieces
+            or posting.external_id.rsplit("/", 1)[-1] in pieces
+        )
+
 
 def description_hash(description: str) -> str:
     """The MD5 of a description, matching Postgres's md5() of the same text."""

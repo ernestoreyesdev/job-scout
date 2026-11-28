@@ -34,7 +34,7 @@ from app.crypto import decrypt, encrypt, key_hint
 from app.db import Conflict, Rest, service_db, user_db
 from app.mail import alert_admin
 from app.runs import UNFINISHED, record_run
-from app.sources import board_from_url, default_name, fetch_live
+from app.sources import board_from_url, default_name, fetch_live, job_at_link
 from app.sources.base import BoardNotFound, CompanyBoard, CompanyNotFound, Posting
 from app.telemetry import CallLog, RecordingClient, configure_logging, configure_sentry, recorded_claude
 
@@ -435,15 +435,7 @@ def outside_posting(service: Rest, body: OutsideJob) -> tuple[str, CompanyBoard 
             added = CompanyBoard(source=source, board=slug, name=name, postings=listed)
     if saved:
         return saved[0]["id"], added
-    segments = set(link.split("/"))
-    match = next(
-        (
-            p
-            for p in listed
-            if p.url.split("?")[0].rstrip("/") == link or p.external_id in segments or p.external_id.rsplit("/", 1)[-1] in segments
-        ),
-        None,
-    )
+    match = job_at_link(board[0], listed, link) if board else None
     if match:
         [row] = service.insert("postings", match.row(), on_conflict="source,external_id", select="id")
         return row["id"], added
